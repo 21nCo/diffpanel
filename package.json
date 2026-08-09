@@ -1,0 +1,27 @@
+{
+  "name": "conductor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local-first, agent-generated code review chapters across editor surfaces.",
+  "packageManager": "pnpm@11.16.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "clean": "turbo run clean",
+    "conductor": "pnpm --filter @conductor/cli dev",
+    "dev:vscode": "pnpm --filter conductor-vscode dev",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "validate": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsup": "^8.5.0",
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

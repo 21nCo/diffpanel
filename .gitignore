@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.turbo/
+coverage/
+*.vsix
+*.log
+.DS_Store
+

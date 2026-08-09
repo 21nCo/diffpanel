@@ -1,0 +1,139 @@
+{
+  "name": "conductor-vscode",
+  "displayName": "Conductor",
+  "description": "Browse persistent, agent-generated repository review chapters.",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "conductor-local",
+  "license": "UNLICENSED",
+  "files": [
+    "dist/**",
+    "media/**"
+  ],
+  "engines": {
+    "vscode": "^1.105.0"
+  },
+  "categories": ["SCM Providers", "Other"],
+  "keywords": ["review", "diff", "chapters", "cursor", "codex", "claude"],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onView:conductor.reviews",
+    "onView:conductor.details",
+    "onCommand:conductor.refresh",
+    "onUri"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "conductor.refresh",
+        "title": "Refresh Reviews",
+        "category": "Conductor",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "conductor.openRun",
+        "title": "Open Review",
+        "category": "Conductor"
+      },
+      {
+        "command": "conductor.openItem",
+        "title": "Open Review Item",
+        "category": "Conductor"
+      },
+      {
+        "command": "conductor.copySkillPrompt",
+        "title": "Copy Generation Prompt",
+        "category": "Conductor",
+        "icon": "$(copy)"
+      }
+    ],
+    "configuration": {
+      "title": "Conductor",
+      "properties": {
+        "conductor.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the Conductor CLI executable or built index.js. Empty uses the bundled development CLI when present, then conductor on PATH."
+        },
+        "conductor.nodePath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Node.js executable used when conductor.cliPath points to a JavaScript file. Empty checks common installation paths."
+        },
+        "conductor.home": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Conductor data directory. Equivalent to CONDUCTOR_HOME."
+        },
+        "conductor.refreshIntervalSeconds": {
+          "type": "number",
+          "default": 4,
+          "minimum": 2,
+          "maximum": 60,
+          "description": "How often the review library checks for skill-generated runs."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "conductor",
+          "title": "Conductor",
+          "icon": "media/conductor.svg"
+        }
+      ]
+    },
+    "views": {
+      "conductor": [
+        {
+          "id": "conductor.reviews",
+          "name": "Reviews"
+        },
+        {
+          "id": "conductor.details",
+          "name": "Review Details",
+          "type": "webview"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "conductor.refresh",
+          "when": "view == conductor.reviews",
+          "group": "navigation"
+        },
+        {
+          "command": "conductor.copySkillPrompt",
+          "when": "view == conductor.reviews",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "clean": "rm -rf dist coverage",
+    "dev": "node esbuild.mjs --watch",
+    "lint": "tsc --noEmit",
+    "package": "pnpm build && vsce package --no-dependencies --allow-missing-repository",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conductor/core": "workspace:*",
+    "@conductor/storage": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@types/vscode": "^1.105.0",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.27.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@conductor/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "conductor": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --external better-sqlite3 && node -e \"require('node:fs').chmodSync('dist/index.js', 0o755)\"",
+    "clean": "rm -rf dist coverage",
+    "dev": "tsx src/index.ts",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@conductor/core": "workspace:*",
+    "@conductor/git": "workspace:*",
+    "@conductor/storage": "workspace:*",
+    "commander": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
