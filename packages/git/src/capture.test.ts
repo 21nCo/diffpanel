@@ -12,11 +12,11 @@ afterEach(async () => {
 });
 
 async function createRepository(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "conductor-git-"));
+  const directory = await mkdtemp(join(tmpdir(), "diffpanel-git-"));
   temporaryDirectories.push(directory);
   await runProcess("git", ["init", "-b", "main"], directory);
-  await runProcess("git", ["config", "user.email", "conductor@example.com"], directory);
-  await runProcess("git", ["config", "user.name", "Conductor Test"], directory);
+  await runProcess("git", ["config", "user.email", "diffpanel@example.com"], directory);
+  await runProcess("git", ["config", "user.name", "Diffpanel Test"], directory);
   await writeFile(join(directory, "alpha.ts"), "export const alpha = 1;\n");
   await runProcess("git", ["add", "alpha.ts"], directory);
   await runProcess("git", ["commit", "-m", "initial"], directory);

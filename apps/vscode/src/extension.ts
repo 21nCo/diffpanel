@@ -1,50 +1,85 @@
 import { basename } from "node:path";
 import * as vscode from "vscode";
-import type { ReviewFile, ReviewItem } from "@conductor/core";
-import { ConductorCli } from "./cli.js";
-import { ConductorContentProvider } from "./content.js";
+import type { ReviewFile, ReviewItem } from "@diffpanel/core";
+import { DiffpanelCli } from "./cli.js";
+import { DiffpanelContentProvider } from "./content.js";
 import { DetailsProvider } from "./details.js";
 import type { ChapterNode, ItemNode, ReviewTreeNode, RunNode } from "./model.js";
+import { workingFileCandidates } from "./repository-file.js";
 import { ReviewTreeProvider } from "./tree.js";
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const cli = new ConductorCli(context.extensionPath);
-  const content = new ConductorContentProvider(cli);
+  const cli = new DiffpanelCli(context.extensionPath);
+  const content = new DiffpanelContentProvider(cli);
   const tree = new ReviewTreeProvider(cli);
   const details = new DetailsProvider(context.extensionUri, async (runId, itemId) => {
     await openItemById(tree, runId, itemId);
   });
-  const treeView = vscode.window.createTreeView("conductor.reviews", {
+  const treeView = vscode.window.createTreeView("diffpanel.reviews", {
     treeDataProvider: tree,
     showCollapseAll: true,
   });
+  await vscode.commands.executeCommand("setContext", "diffpanel.showingArchived", false);
 
   context.subscriptions.push(
     cli,
     tree,
     treeView,
-    vscode.workspace.registerTextDocumentContentProvider("conductor", content),
-    vscode.window.registerWebviewViewProvider("conductor.details", details),
-    vscode.commands.registerCommand("conductor.refresh", async () => {
+    vscode.workspace.registerTextDocumentContentProvider("diffpanel", content),
+    vscode.window.registerWebviewViewProvider("diffpanel.details", details),
+    vscode.commands.registerCommand("diffpanel.refresh", async () => {
       content.clear();
       await tree.refresh();
     }),
-    vscode.commands.registerCommand("conductor.openRun", async (node: RunNode | ChapterNode) => {
+    vscode.commands.registerCommand("diffpanel.showArchivedReviews", async () => {
+      await tree.showArchived(true);
+      await vscode.commands.executeCommand("setContext", "diffpanel.showingArchived", true);
+    }),
+    vscode.commands.registerCommand("diffpanel.hideArchivedReviews", async () => {
+      await tree.showArchived(false);
+      await vscode.commands.executeCommand("setContext", "diffpanel.showingArchived", false);
+    }),
+    vscode.commands.registerCommand("diffpanel.archiveReview", async (node: RunNode | undefined) => {
+      if (!node) {
+        void vscode.window.showInformationMessage("Use the archive action on a review in the Diffpanel panel.");
+        return;
+      }
+      await tree.setArchived(node.run.runId, true);
+    }),
+    vscode.commands.registerCommand("diffpanel.unarchiveReview", async (node: RunNode | undefined) => {
+      if (!node) {
+        void vscode.window.showInformationMessage("Show archived reviews, then use the restore action on a review.");
+        return;
+      }
+      await tree.setArchived(node.run.runId, false);
+    }),
+    vscode.commands.registerCommand("diffpanel.openRun", async (node: RunNode | ChapterNode) => {
       const stored = await tree.getStoredRun(node.run.runId);
       details.show({ run: stored, ...(node.type === "chapter" ? { chapter: node.chapter } : {}) });
     }),
-    vscode.commands.registerCommand("conductor.openItem", async (node: ItemNode) => {
+    vscode.commands.registerCommand("diffpanel.openItem", async (node: ItemNode) => {
       await openReviewItem(node.run.runId, node.file, node.item);
       const stored = await tree.getStoredRun(node.run.runId);
       details.show({ run: stored, chapter: node.chapter });
     }),
-    vscode.commands.registerCommand("conductor.copySkillPrompt", async () => {
+    vscode.commands.registerCommand("diffpanel.openWorkingFile", async (node: ItemNode | undefined) => {
+      if (!node) {
+        void vscode.window.showInformationMessage("Use the open-file action on a review item in the Diffpanel panel.");
+        return;
+      }
+      try {
+        await openWorkingFile(node);
+      } catch (error) {
+        void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error));
+      }
+    }),
+    vscode.commands.registerCommand("diffpanel.copySkillPrompt", async () => {
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       const prompt = root
-        ? `Use $conductor-chapters to generate and publish a Conductor review for ${root}.`
-        : "Use $conductor-chapters to generate and publish a Conductor review for the current repository.";
+        ? `Use $diffpanel-chapters to generate and publish a Diffpanel review for ${root}.`
+        : "Use $diffpanel-chapters to generate and publish a Diffpanel review for the current repository.";
       await vscode.env.clipboard.writeText(prompt);
-      void vscode.window.showInformationMessage("Conductor skill prompt copied.");
+      void vscode.window.showInformationMessage("Diffpanel skill prompt copied.");
     }),
     treeView.onDidChangeSelection(async (event) => {
       const node: ReviewTreeNode | undefined = event.selection[0];
@@ -59,6 +94,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 export function deactivate(): void {}
+
+async function openWorkingFile(node: ItemNode): Promise<void> {
+  for (const path of workingFileCandidates(node.run.repositoryRoot, node.file)) {
+    const uri = vscode.Uri.file(path);
+    try {
+      await vscode.workspace.fs.stat(uri);
+      const document = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(document, {
+        preview: false,
+        selection: selectionFor(node.item, node.item.newStart ? "after" : "before"),
+      });
+      return;
+    } catch (error) {
+      if (error instanceof vscode.FileSystemError && error.code === "FileNotFound") continue;
+      throw error;
+    }
+  }
+  throw new Error(`Working file no longer exists: ${node.file.filePath}`);
+}
 
 async function openItemById(tree: ReviewTreeProvider, runId: string, itemId: string): Promise<void> {
   const stored = await tree.getStoredRun(runId);
@@ -91,7 +145,7 @@ async function openReviewItem(
     "vscode.diff",
     before,
     after,
-    `${basename(file.filePath)} — Conductor`,
+    `${basename(file.filePath)} — Diffpanel`,
     { preview: true, selection: selectionFor(item, item.newStart ? "after" : "before") },
   );
 }
@@ -99,7 +153,7 @@ async function openReviewItem(
 function contentUri(runId: string, file: ReviewFile, side: "before" | "after"): vscode.Uri {
   const path = `/${side}/${file.filePath}`;
   return vscode.Uri.from({
-    scheme: "conductor",
+    scheme: "diffpanel",
     path,
     query: new URLSearchParams({ run: runId, file: file.id, side }).toString(),
   });

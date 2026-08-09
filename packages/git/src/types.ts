@@ -1,4 +1,4 @@
-import type { ReviewItem, ReviewScope } from "@conductor/core";
+import type { ReviewItem, ReviewScope } from "@diffpanel/core";
 
 export interface CapturedFile {
   id: string;

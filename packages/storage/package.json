@@ -1,5 +1,5 @@
 {
-  "name": "@conductor/storage",
+  "name": "@diffpanel/storage",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -17,8 +17,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@conductor/core": "workspace:*",
-    "@conductor/git": "workspace:*",
+    "@diffpanel/core": "workspace:*",
+    "@diffpanel/git": "workspace:*",
     "better-sqlite3": "^12.2.0"
   },
   "devDependencies": {

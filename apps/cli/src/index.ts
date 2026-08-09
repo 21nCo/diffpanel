@@ -2,13 +2,13 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Command } from "commander";
-import { captureReview, type CaptureRequest } from "@conductor/git";
-import { ConductorStore, defaultConductorHome } from "@conductor/storage";
+import { captureReview, type CaptureRequest } from "@diffpanel/git";
+import { DiffpanelStore, defaultDiffpanelHome } from "@diffpanel/storage";
 
 const program = new Command();
 program
-  .name("conductor")
-  .description("Prepare, publish, and inspect persistent Conductor review runs.")
+  .name("diffpanel")
+  .description("Prepare, publish, and inspect persistent Diffpanel review runs.")
   .version("0.0.0");
 
 program
@@ -27,7 +27,7 @@ program
     if (selected.length > 1) throw new Error("Choose only one of a range, --worktree, --staged, or --repo.");
     const request = toCaptureRequest(range, options);
     const captured = await captureReview(request);
-    const store = await ConductorStore.open();
+    const store = await DiffpanelStore.open();
     try {
       const receipt = await store.createPreparedRun(captured);
       process.stdout.write(options.json ? `${JSON.stringify(receipt, null, 2)}\n` : `${receipt.receiptPath}\n`);
@@ -44,7 +44,7 @@ program
   .option("--json", "Print the published review as JSON")
   .action(async (reviewFile: string, options) => {
     const review = JSON.parse(await readFile(resolve(reviewFile), "utf8"));
-    const store = await ConductorStore.open();
+    const store = await DiffpanelStore.open();
     try {
       const published = await store.publish(options.run, review);
       process.stdout.write(options.json
@@ -62,7 +62,7 @@ program
   .requiredOption("--run <run-id>", "Prepared run ID")
   .action(async (reviewFile: string, options) => {
     const review = JSON.parse(await readFile(resolve(reviewFile), "utf8"));
-    const store = await ConductorStore.open();
+    const store = await DiffpanelStore.open();
     try {
       const validated = await store.validate(options.run, review);
       process.stdout.write(`Valid review: ${validated.chapters.length} chapters cover every item exactly once.\n`);
@@ -75,11 +75,12 @@ program
   .command("list")
   .description("List generated and prepared review runs.")
   .option("--repository <path>", "Only runs for this repository")
+  .option("--include-archived", "Include archived review runs")
   .option("--json", "Print JSON")
   .action(async (options) => {
-    const store = await ConductorStore.open();
+    const store = await DiffpanelStore.open();
     try {
-      const runs = store.listRuns(options.repository ? resolve(options.repository) : undefined);
+      const runs = store.listRuns(options.repository ? resolve(options.repository) : undefined, options.includeArchived);
       if (options.json) {
         process.stdout.write(`${JSON.stringify(runs, null, 2)}\n`);
         return;
@@ -93,12 +94,40 @@ program
   });
 
 program
+  .command("archive")
+  .description("Archive a review run so it is hidden from default listings.")
+  .argument("<run-id>", "Review run ID")
+  .action(async (runId: string) => {
+    const store = await DiffpanelStore.open();
+    try {
+      store.setArchived(runId, true);
+      process.stdout.write(`Archived ${runId}.\n`);
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("unarchive")
+  .description("Restore an archived review run to default listings.")
+  .argument("<run-id>", "Review run ID")
+  .action(async (runId: string) => {
+    const store = await DiffpanelStore.open();
+    try {
+      store.setArchived(runId, false);
+      process.stdout.write(`Restored ${runId}.\n`);
+    } finally {
+      store.close();
+    }
+  });
+
+program
   .command("show")
   .description("Read a complete review run.")
   .argument("<run-id>", "Review run ID")
   .option("--json", "Print JSON", true)
   .action(async (runId: string) => {
-    const store = await ConductorStore.open();
+    const store = await DiffpanelStore.open();
     try {
       process.stdout.write(`${JSON.stringify(await store.getRun(runId), null, 2)}\n`);
     } finally {
@@ -114,7 +143,7 @@ program
   .argument("<side>", "before or after")
   .action(async (runId: string, fileId: string, side: string) => {
     if (side !== "before" && side !== "after") throw new Error("Content side must be before or after.");
-    const store = await ConductorStore.open();
+    const store = await DiffpanelStore.open();
     try {
       const run = await store.getRun(runId);
       const file = run.manifest.files.find((candidate) => candidate.id === fileId);
@@ -128,18 +157,18 @@ program
 
 program
   .command("doctor")
-  .description("Print the local Conductor installation and storage configuration.")
+  .description("Print the local Diffpanel installation and storage configuration.")
   .option("--json", "Print JSON")
   .action(async (options) => {
-    const store = await ConductorStore.open();
+    const store = await DiffpanelStore.open();
     try {
       const report = {
         ok: true,
         node: process.version,
         platform: process.platform,
-        home: defaultConductorHome(),
+        home: defaultDiffpanelHome(),
         databasePath: store.databasePath,
-        runs: store.listRuns().length,
+        runs: store.listRuns(undefined, true).length,
       };
       process.stdout.write(options.json
         ? `${JSON.stringify(report, null, 2)}\n`
@@ -151,7 +180,7 @@ program
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`conductor: ${message}\n`);
+  process.stderr.write(`diffpanel: ${message}\n`);
   process.exitCode = 1;
 });
 
@@ -183,4 +212,3 @@ function toCaptureRequest(range: string | undefined, options: {
   }
   return { type: "auto", repository };
 }
-

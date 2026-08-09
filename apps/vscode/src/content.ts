@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
-import { ConductorCli } from "./cli.js";
+import { DiffpanelCli } from "./cli.js";
 
-export class ConductorContentProvider implements vscode.TextDocumentContentProvider {
+export class DiffpanelContentProvider implements vscode.TextDocumentContentProvider {
   private readonly cache = new Map<string, string>();
 
-  constructor(private readonly cli: ConductorCli) {}
+  constructor(private readonly cli: DiffpanelCli) {}
 
   clear(): void {
     this.cache.clear();
@@ -17,7 +17,7 @@ export class ConductorContentProvider implements vscode.TextDocumentContentProvi
     const runId = required(query, "run");
     const fileId = required(query, "file");
     const side = required(query, "side");
-    if (side !== "before" && side !== "after") throw new Error(`Invalid Conductor content side: ${side}`);
+    if (side !== "before" && side !== "after") throw new Error(`Invalid Diffpanel content side: ${side}`);
     const content = await this.cli.content(runId, fileId, side);
     this.cache.set(uri.toString(), content);
     return content;
@@ -26,7 +26,7 @@ export class ConductorContentProvider implements vscode.TextDocumentContentProvi
 
 function required(query: URLSearchParams, key: string): string {
   const value = query.get(key);
-  if (!value) throw new Error(`Missing Conductor URI parameter: ${key}`);
+  if (!value) throw new Error(`Missing Diffpanel URI parameter: ${key}`);
   return value;
 }
 

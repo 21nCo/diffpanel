@@ -1,5 +1,5 @@
-import type { Chapter, ReviewFile, ReviewItem } from "@conductor/core";
-import type { RunSummary } from "@conductor/storage";
+import type { Chapter, ReviewFile, ReviewItem } from "@diffpanel/core";
+import type { RunSummary } from "@diffpanel/storage";
 
 export type ReviewTreeNode = RepositoryNode | RunNode | ChapterNode | ItemNode;
 
@@ -20,6 +20,9 @@ export interface ChapterNode {
   type: "chapter";
   run: RunSummary;
   chapter: Chapter;
+  displayLabel: string;
+  itemCount: number;
+  subtopicCount: number;
 }
 
 export interface ItemNode {
@@ -29,4 +32,3 @@ export interface ItemNode {
   item: ReviewItem;
   file: ReviewFile;
 }
-

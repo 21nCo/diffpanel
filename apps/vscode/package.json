@@ -1,10 +1,10 @@
 {
-  "name": "conductor-vscode",
-  "displayName": "Conductor",
+  "name": "diffpanel-vscode",
+  "displayName": "Diffpanel",
   "description": "Browse persistent, agent-generated repository review chapters.",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "private": true,
-  "publisher": "conductor-local",
+  "publisher": "diffpanel-local",
   "license": "UNLICENSED",
   "files": [
     "dist/**",
@@ -15,57 +15,88 @@
   },
   "categories": ["SCM Providers", "Other"],
   "keywords": ["review", "diff", "chapters", "cursor", "codex", "claude"],
+  "icon": "media/diffpanel-icon.png",
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onView:conductor.reviews",
-    "onView:conductor.details",
-    "onCommand:conductor.refresh",
+    "onView:diffpanel.reviews",
+    "onView:diffpanel.details",
+    "onCommand:diffpanel.refresh",
     "onUri"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "conductor.refresh",
+        "command": "diffpanel.refresh",
         "title": "Refresh Reviews",
-        "category": "Conductor",
+        "category": "Diffpanel",
         "icon": "$(refresh)"
       },
       {
-        "command": "conductor.openRun",
+        "command": "diffpanel.openRun",
         "title": "Open Review",
-        "category": "Conductor"
+        "category": "Diffpanel"
       },
       {
-        "command": "conductor.openItem",
+        "command": "diffpanel.openItem",
         "title": "Open Review Item",
-        "category": "Conductor"
+        "category": "Diffpanel"
       },
       {
-        "command": "conductor.copySkillPrompt",
+        "command": "diffpanel.openWorkingFile",
+        "title": "Open Working File",
+        "category": "Diffpanel",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "diffpanel.copySkillPrompt",
         "title": "Copy Generation Prompt",
-        "category": "Conductor",
+        "category": "Diffpanel",
         "icon": "$(copy)"
+      },
+      {
+        "command": "diffpanel.showArchivedReviews",
+        "title": "Show Archived Reviews",
+        "category": "Diffpanel",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "diffpanel.hideArchivedReviews",
+        "title": "Hide Archived Reviews",
+        "category": "Diffpanel",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "diffpanel.archiveReview",
+        "title": "Archive Review",
+        "category": "Diffpanel",
+        "icon": "$(archive)"
+      },
+      {
+        "command": "diffpanel.unarchiveReview",
+        "title": "Restore Archived Review",
+        "category": "Diffpanel",
+        "icon": "$(discard)"
       }
     ],
     "configuration": {
-      "title": "Conductor",
+      "title": "Diffpanel",
       "properties": {
-        "conductor.cliPath": {
+        "diffpanel.cliPath": {
           "type": "string",
           "default": "",
-          "description": "Path to the Conductor CLI executable or built index.js. Empty uses the bundled development CLI when present, then conductor on PATH."
+          "description": "Path to the Diffpanel CLI executable or built index.js. Empty uses the bundled development CLI when present, then diffpanel on PATH."
         },
-        "conductor.nodePath": {
+        "diffpanel.nodePath": {
           "type": "string",
           "default": "",
-          "description": "Optional Node.js executable used when conductor.cliPath points to a JavaScript file. Empty checks common installation paths."
+          "description": "Optional Node.js executable used when the Diffpanel CLI is a JavaScript file or a symlink to one. Empty checks common installation paths."
         },
-        "conductor.home": {
+        "diffpanel.home": {
           "type": "string",
           "default": "",
-          "description": "Optional Conductor data directory. Equivalent to CONDUCTOR_HOME."
+          "description": "Optional Diffpanel data directory. Equivalent to DIFFPANEL_HOME."
         },
-        "conductor.refreshIntervalSeconds": {
+        "diffpanel.refreshIntervalSeconds": {
           "type": "number",
           "default": 4,
           "minimum": 2,
@@ -77,20 +108,20 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "conductor",
-          "title": "Conductor",
-          "icon": "media/conductor.svg"
+          "id": "diffpanel",
+          "title": "Diffpanel",
+          "icon": "media/diffpanel.svg"
         }
       ]
     },
     "views": {
-      "conductor": [
+      "diffpanel": [
         {
-          "id": "conductor.reviews",
+          "id": "diffpanel.reviews",
           "name": "Reviews"
         },
         {
-          "id": "conductor.details",
+          "id": "diffpanel.details",
           "name": "Review Details",
           "type": "webview"
         }
@@ -99,14 +130,41 @@
     "menus": {
       "view/title": [
         {
-          "command": "conductor.refresh",
-          "when": "view == conductor.reviews",
+          "command": "diffpanel.refresh",
+          "when": "view == diffpanel.reviews",
           "group": "navigation"
         },
         {
-          "command": "conductor.copySkillPrompt",
-          "when": "view == conductor.reviews",
+          "command": "diffpanel.copySkillPrompt",
+          "when": "view == diffpanel.reviews",
           "group": "navigation"
+        },
+        {
+          "command": "diffpanel.showArchivedReviews",
+          "when": "view == diffpanel.reviews && !diffpanel.showingArchived",
+          "group": "navigation"
+        },
+        {
+          "command": "diffpanel.hideArchivedReviews",
+          "when": "view == diffpanel.reviews && diffpanel.showingArchived",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "diffpanel.archiveReview",
+          "when": "view == diffpanel.reviews && viewItem == diffpanelRun",
+          "group": "inline"
+        },
+        {
+          "command": "diffpanel.unarchiveReview",
+          "when": "view == diffpanel.reviews && viewItem == diffpanelArchivedRun",
+          "group": "inline"
+        },
+        {
+          "command": "diffpanel.openWorkingFile",
+          "when": "view == diffpanel.reviews && viewItem == diffpanelItem",
+          "group": "inline"
         }
       ]
     }
@@ -121,8 +179,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@conductor/core": "workspace:*",
-    "@conductor/storage": "workspace:*",
+    "@diffpanel/core": "workspace:*",
+    "@diffpanel/storage": "workspace:*",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

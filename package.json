@@ -1,17 +1,17 @@
 {
-  "name": "conductor",
+  "name": "diffpanel",
   "version": "0.0.0",
   "private": true,
   "description": "Local-first, agent-generated code review chapters across editor surfaces.",
   "packageManager": "pnpm@11.16.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13"
   },
   "scripts": {
     "build": "turbo run build",
     "clean": "turbo run clean",
-    "conductor": "pnpm --filter @conductor/cli dev",
-    "dev:vscode": "pnpm --filter conductor-vscode dev",
+    "diffpanel": "pnpm --filter @diffpanel/cli dev",
+    "dev:vscode": "pnpm --filter diffpanel-vscode dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",

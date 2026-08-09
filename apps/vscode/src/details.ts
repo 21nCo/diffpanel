@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import type { Chapter } from "@conductor/core";
-import type { StoredRun } from "@conductor/storage";
+import type { Chapter } from "@diffpanel/core";
+import type { StoredRun } from "@diffpanel/storage";
 
 export interface DetailsSelection {
   run: StoredRun;
@@ -54,7 +54,7 @@ export class DetailsProvider implements vscode.WebviewViewProvider {
           <meta name="viewport" content="width=device-width, initial-scale=1.0" />
           <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';" />
           <link rel="stylesheet" href="${style}" />
-          <title>Conductor Review Details</title>
+          <title>Diffpanel Review Details</title>
         </head>
         <body>
           <div id="root"></div>

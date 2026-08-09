@@ -26,13 +26,13 @@ importers:
 
   apps/cli:
     dependencies:
-      '@conductor/core':
+      '@diffpanel/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@conductor/git':
+      '@diffpanel/git':
         specifier: workspace:*
         version: link:../../packages/git
-      '@conductor/storage':
+      '@diffpanel/storage':
         specifier: workspace:*
         version: link:../../packages/storage
       commander:
@@ -57,10 +57,10 @@ importers:
 
   apps/vscode:
     dependencies:
-      '@conductor/core':
+      '@diffpanel/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@conductor/storage':
+      '@diffpanel/storage':
         specifier: workspace:*
         version: link:../../packages/storage
       react:
@@ -116,7 +116,7 @@ importers:
 
   packages/git:
     dependencies:
-      '@conductor/core':
+      '@diffpanel/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -135,10 +135,10 @@ importers:
 
   packages/storage:
     dependencies:
-      '@conductor/core':
+      '@diffpanel/core':
         specifier: workspace:*
         version: link:../core
-      '@conductor/git':
+      '@diffpanel/git':
         specifier: workspace:*
         version: link:../git
       better-sqlite3:

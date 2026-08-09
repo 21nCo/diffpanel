@@ -1,9 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import type { CapturedReview } from "@conductor/git";
-import { ConductorStore } from "./store.js";
+import type { CapturedReview } from "@diffpanel/git";
+import { DiffpanelStore } from "./store.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -64,11 +64,22 @@ function generatedReview(runId: string) {
   };
 }
 
-describe("ConductorStore", () => {
-  it("persists prepared and published runs", async () => {
-    const home = await mkdtemp(join(tmpdir(), "conductor-store-"));
+describe("DiffpanelStore", () => {
+  it("opens the legacy database filename when it is the only existing store", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-legacy-store-"));
     temporaryDirectories.push(home);
-    const store = await ConductorStore.open(home);
+    const legacyDatabase = join(home, "conductor.sqlite3");
+    await writeFile(legacyDatabase, "");
+
+    const store = await DiffpanelStore.open(home);
+    expect(store.databasePath).toBe(legacyDatabase);
+    store.close();
+  });
+
+  it("persists prepared and published runs", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-store-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
     const receipt = await store.createPreparedRun(capturedReview());
     expect(store.listRuns()).toHaveLength(1);
     expect((await store.getRun(receipt.runId)).review).toBeNull();
@@ -76,8 +87,15 @@ describe("ConductorStore", () => {
     await store.publish(receipt.runId, generatedReview(receipt.runId));
     const stored = await store.getRun(receipt.runId);
     expect(stored.summary.status).toBe("ready");
+    expect(stored.summary.archivedAt).toBeNull();
     expect(stored.review?.chapters[0]?.itemRefs).toEqual(["item-1"]);
+
+    const archived = store.setArchived(receipt.runId, true);
+    expect(archived.archivedAt).not.toBeNull();
+    expect(store.listRuns()).toEqual([]);
+    expect(store.listRuns(undefined, true)).toHaveLength(1);
+    expect(store.setArchived(receipt.runId, false).archivedAt).toBeNull();
+    expect(store.listRuns()).toHaveLength(1);
     store.close();
   });
 });
-

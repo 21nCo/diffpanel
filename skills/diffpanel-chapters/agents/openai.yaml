@@ -1,0 +1,4 @@
+interface:
+  display_name: "Diffpanel Chapters"
+  short_description: "Generate structured repository review chapters"
+  default_prompt: "Use $diffpanel-chapters to prepare and generate a structured review of this repository."

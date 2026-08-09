@@ -1,4 +1,4 @@
-import type { GeneratedReview, ReviewManifest } from "@conductor/core";
+import type { GeneratedReview, ReviewManifest } from "@diffpanel/core";
 
 export interface PreparedRunReceipt {
   runId: string;
@@ -23,6 +23,7 @@ export interface RunSummary {
   generator: string | null;
   createdAt: string;
   publishedAt: string | null;
+  archivedAt: string | null;
   fileCount: number;
   itemCount: number;
   chapterCount: number;
@@ -34,4 +35,3 @@ export interface StoredRun {
   manifest: ReviewManifest;
   review: GeneratedReview | null;
 }
-

@@ -4,7 +4,7 @@ const PREVIEW_LIMIT = 24_000;
 
 export function formatGenerationInput(manifest: ReviewManifest): string {
   const lines: string[] = [
-    "# Conductor review generation input",
+    "# Diffpanel review generation input",
     "",
     `Run ID: ${manifest.runId}`,
     `Repository: ${manifest.repositoryName}`,

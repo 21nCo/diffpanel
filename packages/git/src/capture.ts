@@ -5,7 +5,7 @@ import {
   stableId,
   type ReviewItem,
   type ReviewScope,
-} from "@conductor/core";
+} from "@diffpanel/core";
 import { gitBuffer, gitText } from "./process.js";
 import type { CaptureRequest, CapturedFile, CapturedReview } from "./types.js";
 

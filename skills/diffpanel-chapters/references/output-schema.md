@@ -62,7 +62,7 @@ Return one JSON object:
 - `id`: unique non-empty string.
 - `parentId`: `null` for a root chapter or another chapter's `id` for nesting. Hierarchies must not contain cycles.
 - `order`: unique positive integer across the run.
-- `title`: action-oriented phrase, preferably eight words or fewer.
+- `title`: action-oriented phrase, preferably eight words or fewer, without a numeric or alphabetic prefix. The Diffpanel surface numbers roots and letters child chapters.
 - `summary`: short explanation of impact, intent, and dependencies.
 - `itemRefs`: item IDs copied from the generation input. Each item must occur exactly once across all chapters. A structural parent may use an empty array.
 - `keyChanges`: zero or more human judgment questions.
@@ -83,4 +83,3 @@ Return one JSON object:
 - `focusAreas[].type`: `security`, `breaking-change`, `high-complexity`, `data-integrity`, `new-pattern`, `architecture`, `performance`, or `testing-gap`.
 - `focusAreas[].severity`: `critical`, `high`, `medium`, or `info`.
 - `complexity.level`: `low`, `medium`, `high`, or `very-high`.
-

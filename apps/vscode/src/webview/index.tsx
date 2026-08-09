@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { Chapter } from "@conductor/core";
-import type { StoredRun } from "@conductor/storage";
+import type { Chapter } from "@diffpanel/core";
+import type { StoredRun } from "@diffpanel/storage";
+import { chapterItemRefs, diffCounts, uniqueFileCount } from "../presentation.js";
 import "./styles.css";
 
 interface DetailsSelection {
@@ -35,15 +36,25 @@ function App(): React.JSX.Element {
   const review = run.review;
   const chapters = chapter ? [chapter] : review?.chapters ?? [];
   const items = new Map(run.manifest.files.flatMap((file) => file.items.map((item) => [item.id, { file, item }] as const)));
+  const selectedItemRefs = chapter && review ? chapterItemRefs(review.chapters, chapter.id) : [];
+  const selectedFileCount = chapter ? uniqueFileCount(run.manifest.files, selectedItemRefs) : 0;
+  const subtopicCount = chapter && review ? review.chapters.filter((candidate) => candidate.parentId === chapter.id).length : 0;
   return (
     <main>
       <header>
         <div className="eyebrow">{run.summary.repositoryName}</div>
         <h1>{chapter?.title ?? run.summary.reviewTitle}</h1>
         <div className="metrics">
-          <span>{run.summary.fileCount} files</span>
-          <span>{run.summary.itemCount} items</span>
-          <span>{run.summary.chapterCount} chapters</span>
+          {chapter ? <>
+            <span>{selectedFileCount} {selectedFileCount === 1 ? "file" : "files"}</span>
+            <span>{selectedItemRefs.length} {selectedItemRefs.length === 1 ? "item" : "items"}</span>
+            {subtopicCount > 0 && <span>{subtopicCount} {subtopicCount === 1 ? "subtopic" : "subtopics"}</span>}
+          </> : <>
+            <span>{run.summary.fileCount} files</span>
+            <span>{run.summary.itemCount} items</span>
+            <span>{run.summary.chapterCount} chapters</span>
+            {run.summary.archivedAt && <span>archived</span>}
+          </>}
         </div>
       </header>
 
@@ -67,7 +78,7 @@ function App(): React.JSX.Element {
       )}
 
       {run.summary.status !== "ready" && (
-        <section className="waiting"><h3>Awaiting chapter generation</h3><p>Run the <code>$conductor-chapters</code> skill and publish its output for this snapshot.</p></section>
+        <section className="waiting"><h3>Awaiting chapter generation</h3><p>Run the <code>$diffpanel-chapters</code> skill and publish its output for this snapshot.</p></section>
       )}
 
       {chapters.map((current) => (
@@ -80,12 +91,17 @@ function App(): React.JSX.Element {
             {current.keyChanges.map((change) => <p key={change.content}>{change.content}</p>)}
           </div>}
           <div className="files">
-            {current.itemRefs.map((itemRef) => {
+            {(chapter ? selectedItemRefs : current.itemRefs).map((itemRef) => {
               const match = items.get(itemRef);
               if (!match) return null;
+              const counts = diffCounts(match.file, match.item);
               return <button key={itemRef} onClick={() => vscodeApi.postMessage({ type: "openItem", runId: run.summary.runId, itemId: itemRef })}>
-                <span>{match.file.filePath}</span>
-                <small>{match.item.kind === "file" ? "snapshot" : `line ${match.item.newStart ?? match.item.oldStart ?? 1}`}</small>
+                <span className="file-path" title={match.file.filePath}>{match.file.filePath}</span>
+                <small className="file-meta">
+                  <span className="additions">+{counts.additions}</span>
+                  <span className="deletions">−{counts.deletions}</span>
+                  <span className="line-label">{match.item.kind === "file" ? "snapshot" : `line ${match.item.newStart ?? match.item.oldStart ?? 1}`}</span>
+                </small>
               </button>;
             })}
           </div>

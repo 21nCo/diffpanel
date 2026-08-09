@@ -30,7 +30,7 @@ const webview = {
 if (watch) {
   const contexts = await Promise.all([esbuild.context(extension), esbuild.context(webview)]);
   await Promise.all(contexts.map((context) => context.watch()));
-  console.log("Watching Conductor extension and webview...");
+  console.log("Watching Diffpanel extension and webview...");
 } else {
   await Promise.all([esbuild.build(extension), esbuild.build(webview)]);
 }

@@ -1,5 +1,5 @@
 {
-  "name": "@conductor/git",
+  "name": "@diffpanel/git",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@conductor/core": "workspace:*"
+    "@diffpanel/core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

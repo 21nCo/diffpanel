@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { runProcess } from "@conductor/git";
-import type { ReviewManifest } from "@conductor/core";
+import { runProcess } from "@diffpanel/git";
+import type { ReviewManifest } from "@diffpanel/core";
 
 const temporaryDirectories: string[] = [];
 
@@ -25,21 +25,21 @@ async function runCli(args: string[], home: string, cwd: string): Promise<string
   return result.stdout;
 }
 
-describe("conductor CLI", () => {
+describe("diffpanel CLI", () => {
   it("prepares, validates, publishes, lists, and reads immutable content", async () => {
-    const repository = await mkdtemp(join(tmpdir(), "conductor-cli-repo-"));
-    const home = await mkdtemp(join(tmpdir(), "conductor-cli-home-"));
+    const repository = await mkdtemp(join(tmpdir(), "diffpanel-cli-repo-"));
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-cli-home-"));
     temporaryDirectories.push(repository, home);
     await runProcess("git", ["init", "-b", "main"], repository);
-    await runProcess("git", ["config", "user.email", "conductor@example.com"], repository);
-    await runProcess("git", ["config", "user.name", "Conductor Test"], repository);
+    await runProcess("git", ["config", "user.email", "diffpanel@example.com"], repository);
+    await runProcess("git", ["config", "user.name", "Diffpanel Test"], repository);
     await writeFile(join(repository, "example.ts"), "export const value = 1;\n");
     await runProcess("git", ["add", "example.ts"], repository);
     await runProcess("git", ["commit", "-m", "initial"], repository);
     await writeFile(join(repository, "example.ts"), "export const value = 2;\n");
 
-    const previousHome = process.env.CONDUCTOR_HOME;
-    process.env.CONDUCTOR_HOME = home;
+    const previousHome = process.env.DIFFPANEL_HOME;
+    process.env.DIFFPANEL_HOME = home;
     try {
       const receipt = JSON.parse(await runCli(["prep", "--worktree", "--repository", repository, "--json"], home, repository)) as {
         runId: string;
@@ -75,12 +75,16 @@ describe("conductor CLI", () => {
       expect(await runCli(["publish", reviewPath, "--run", receipt.runId], home, repository)).toContain("Published 1 chapters");
       const runs = JSON.parse(await runCli(["list", "--json"], home, repository)) as Array<{ status: string; runId: string }>;
       expect(runs).toEqual([expect.objectContaining({ runId: receipt.runId, status: "ready" })]);
+      expect(await runCli(["archive", receipt.runId], home, repository)).toContain(`Archived ${receipt.runId}`);
+      expect(JSON.parse(await runCli(["list", "--json"], home, repository))).toEqual([]);
+      const archivedRuns = JSON.parse(await runCli(["list", "--include-archived", "--json"], home, repository)) as Array<{ archivedAt: string | null }>;
+      expect(archivedRuns[0]?.archivedAt).not.toBeNull();
+      expect(await runCli(["unarchive", receipt.runId], home, repository)).toContain(`Restored ${receipt.runId}`);
       const file = manifest.files[0]!;
       expect(await runCli(["content", receipt.runId, file.id, "after"], home, repository)).toContain("value = 2");
     } finally {
-      if (previousHome === undefined) delete process.env.CONDUCTOR_HOME;
-      else process.env.CONDUCTOR_HOME = previousHome;
+      if (previousHome === undefined) delete process.env.DIFFPANEL_HOME;
+      else process.env.DIFFPANEL_HOME = previousHome;
     }
   });
 });
-

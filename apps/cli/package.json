@@ -1,10 +1,10 @@
 {
-  "name": "@conductor/cli",
+  "name": "@diffpanel/cli",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "bin": {
-    "conductor": "./dist/index.js"
+    "diffpanel": "./dist/index.js"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap --external better-sqlite3 && node -e \"require('node:fs').chmodSync('dist/index.js', 0o755)\"",
@@ -15,9 +15,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@conductor/core": "workspace:*",
-    "@conductor/git": "workspace:*",
-    "@conductor/storage": "workspace:*",
+    "@diffpanel/core": "workspace:*",
+    "@diffpanel/git": "workspace:*",
+    "@diffpanel/storage": "workspace:*",
     "commander": "^14.0.0"
   },
   "devDependencies": {

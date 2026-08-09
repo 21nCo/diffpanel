@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Build Conductor",
+      "label": "Build Diffpanel",
       "type": "shell",
       "command": "pnpm build",
       "group": "build",

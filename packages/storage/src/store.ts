@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -9,9 +10,9 @@ import {
   sha256,
   type GeneratedReview,
   type ReviewManifest,
-} from "@conductor/core";
-import type { CapturedReview } from "@conductor/git";
-import { defaultConductorHome } from "./paths.js";
+} from "@diffpanel/core";
+import type { CapturedReview } from "@diffpanel/git";
+import { defaultDiffpanelHome } from "./paths.js";
 import type { PreparedRunReceipt, RunSummary, StoredRun } from "./types.js";
 
 interface RunRow {
@@ -25,6 +26,7 @@ interface RunRow {
   generator: string | null;
   created_at: string;
   published_at: string | null;
+  archived_at: string | null;
   file_count: number;
   item_count: number;
   chapter_count: number;
@@ -32,30 +34,30 @@ interface RunRow {
   review_path: string | null;
 }
 
-export class ConductorStore {
+export class DiffpanelStore {
   readonly home: string;
   readonly databasePath: string;
   readonly blobsPath: string;
   readonly runsPath: string;
   private readonly database: Database.Database;
 
-  private constructor(home: string, database: Database.Database) {
+  private constructor(home: string, databasePath: string, database: Database.Database) {
     this.home = home;
-    this.databasePath = join(home, "conductor.sqlite3");
+    this.databasePath = databasePath;
     this.blobsPath = join(home, "blobs");
     this.runsPath = join(home, "runs");
     this.database = database;
   }
 
-  static async open(home = defaultConductorHome()): Promise<ConductorStore> {
+  static async open(home = defaultDiffpanelHome()): Promise<DiffpanelStore> {
     await mkdir(join(home, "blobs"), { recursive: true });
     await mkdir(join(home, "runs"), { recursive: true });
-    const databasePath = join(home, "conductor.sqlite3");
+    const databasePath = resolveDatabasePath(home);
     const database = new Database(databasePath);
     database.pragma("journal_mode = WAL");
     database.pragma("foreign_keys = ON");
     migrate(database);
-    return new ConductorStore(home, database);
+    return new DiffpanelStore(home, databasePath, database);
   }
 
   close(): void {
@@ -182,16 +184,28 @@ export class ConductorStore {
     return assertGeneratedReview(run.manifest, reviewInput);
   }
 
-  listRuns(repositoryRoot?: string): RunSummary[] {
+  listRuns(repositoryRoot?: string, includeArchived = false): RunSummary[] {
     const rows = repositoryRoot
-      ? this.database.prepare("SELECT * FROM runs WHERE root_path = ? ORDER BY created_at DESC").all(repositoryRoot) as RunRow[]
-      : this.database.prepare("SELECT * FROM runs ORDER BY created_at DESC").all() as RunRow[];
+      ? includeArchived
+        ? this.database.prepare("SELECT * FROM runs WHERE root_path = ? ORDER BY created_at DESC").all(repositoryRoot) as RunRow[]
+        : this.database.prepare("SELECT * FROM runs WHERE root_path = ? AND archived_at IS NULL ORDER BY created_at DESC").all(repositoryRoot) as RunRow[]
+      : includeArchived
+        ? this.database.prepare("SELECT * FROM runs ORDER BY created_at DESC").all() as RunRow[]
+        : this.database.prepare("SELECT * FROM runs WHERE archived_at IS NULL ORDER BY created_at DESC").all() as RunRow[];
     return rows.map(toRunSummary);
+  }
+
+  setArchived(runId: string, archived: boolean): RunSummary {
+    const archivedAt = archived ? new Date().toISOString() : null;
+    const result = this.database.prepare("UPDATE runs SET archived_at = ? WHERE run_id = ?").run(archivedAt, runId);
+    if (result.changes === 0) throw new Error(`Unknown Diffpanel run: ${runId}`);
+    const row = this.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(runId) as RunRow;
+    return toRunSummary(row);
   }
 
   async getRun(runId: string): Promise<StoredRun> {
     const row = this.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(runId) as RunRow | undefined;
-    if (!row) throw new Error(`Unknown Conductor run: ${runId}`);
+    if (!row) throw new Error(`Unknown Diffpanel run: ${runId}`);
     const manifest = reviewManifestSchema.parse(JSON.parse(await readFile(row.manifest_path, "utf8")));
     const review = row.review_path
       ? JSON.parse(await readFile(row.review_path, "utf8")) as GeneratedReview
@@ -225,6 +239,12 @@ export class ConductorStore {
   }
 }
 
+function resolveDatabasePath(home: string): string {
+  const current = join(home, "diffpanel.sqlite3");
+  const legacy = join(home, "conductor.sqlite3");
+  return !existsSync(current) && existsSync(legacy) ? legacy : current;
+}
+
 function migrate(database: Database.Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_version (
@@ -244,6 +264,7 @@ function migrate(database: Database.Database): void {
       generator TEXT,
       created_at TEXT NOT NULL,
       published_at TEXT,
+      archived_at TEXT,
       file_count INTEGER NOT NULL,
       item_count INTEGER NOT NULL,
       chapter_count INTEGER NOT NULL DEFAULT 0,
@@ -262,6 +283,11 @@ function migrate(database: Database.Database): void {
       PRIMARY KEY (run_id, item_id)
     );
   `);
+  const columns = database.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "archived_at")) {
+    database.exec("ALTER TABLE runs ADD COLUMN archived_at TEXT");
+  }
+  database.exec("UPDATE schema_version SET version = 2");
 }
 
 function toRunSummary(row: RunRow): RunSummary {
@@ -277,6 +303,7 @@ function toRunSummary(row: RunRow): RunSummary {
     generator: row.generator,
     createdAt: row.created_at,
     publishedAt: row.published_at,
+    archivedAt: row.archived_at,
     fileCount: row.file_count,
     itemCount: row.item_count,
     chapterCount: row.chapter_count,
@@ -296,4 +323,3 @@ async function atomicWrite(path: string, content: string | Buffer): Promise<void
   await writeFile(temporary, content);
   await rename(temporary, path);
 }
-

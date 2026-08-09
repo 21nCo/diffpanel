@@ -1,10 +1,25 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export function defaultConductorHome(environment = process.env, platform = process.platform): string {
+export function defaultDiffpanelHome(
+  environment = process.env,
+  platform = process.platform,
+  homeDirectory = homedir(),
+): string {
+  if (environment.DIFFPANEL_HOME) return environment.DIFFPANEL_HOME;
   if (environment.CONDUCTOR_HOME) return environment.CONDUCTOR_HOME;
-  if (platform === "darwin") return join(homedir(), "Library", "Application Support", "Conductor");
-  if (platform === "win32") return join(environment.APPDATA ?? join(homedir(), "AppData", "Roaming"), "Conductor");
-  return join(environment.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "conductor");
-}
 
+  const current = platform === "darwin"
+    ? join(homeDirectory, "Library", "Application Support", "Diffpanel")
+    : platform === "win32"
+      ? join(environment.APPDATA ?? join(homeDirectory, "AppData", "Roaming"), "Diffpanel")
+      : join(environment.XDG_DATA_HOME ?? join(homeDirectory, ".local", "share"), "diffpanel");
+  const legacy = platform === "darwin"
+    ? join(homeDirectory, "Library", "Application Support", "Conductor")
+    : platform === "win32"
+      ? join(environment.APPDATA ?? join(homeDirectory, "AppData", "Roaming"), "Conductor")
+      : join(environment.XDG_DATA_HOME ?? join(homeDirectory, ".local", "share"), "conductor");
+
+  return !existsSync(current) && existsSync(legacy) ? legacy : current;
+}

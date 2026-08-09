@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run Conductor Extension",
+      "name": "Run Diffpanel Extension",
       "type": "extensionHost",
       "request": "launch",
       "args": [
@@ -11,7 +11,7 @@
       "outFiles": [
         "${workspaceFolder}/apps/vscode/dist/**/*.js"
       ],
-      "preLaunchTask": "Build Conductor"
+      "preLaunchTask": "Build Diffpanel"
     }
   ]
 }
