@@ -11,7 +11,7 @@
     "build": "turbo run build",
     "clean": "turbo run clean",
     "diffpanel": "pnpm --filter @diffpanel/cli dev",
-    "dev:vscode": "pnpm --filter diffpanel-vscode dev",
+    "dev:vscode": "pnpm --filter diffpanel dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",

@@ -49,8 +49,8 @@ ln -s "$PWD/skills/diffpanel-chapters" "${CODEX_HOME:-$HOME/.codex}/skills/diffp
 Build and install the Cursor/VS Code surface:
 
 ```bash
-pnpm --filter diffpanel-vscode package
-cursor --install-extension apps/vscode/diffpanel-vscode-0.0.4.vsix
+pnpm --filter diffpanel package
+cursor --install-extension apps/vscode/diffpanel-0.1.0.vsix
 ```
 
 During extension development, press `F5` from the monorepo root. The development extension automatically discovers `apps/cli/dist/index.js`; packaged installations use `diffpanel` from `PATH` unless `diffpanel.cliPath` is configured.

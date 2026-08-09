@@ -1,12 +1,12 @@
 {
-  "name": "diffpanel-vscode",
+  "name": "diffpanel",
   "displayName": "Diffpanel",
   "description": "Browse persistent, agent-generated repository review chapters.",
-  "version": "0.0.4",
-  "private": true,
-  "publisher": "diffpanel-local",
+  "version": "0.1.0",
+  "publisher": "21nCo",
   "license": "UNLICENSED",
   "files": [
+    "CHANGELOG.md",
     "dist/**",
     "media/**"
   ],
@@ -16,6 +16,7 @@
   "categories": ["SCM Providers", "Other"],
   "keywords": ["review", "diff", "chapters", "cursor", "codex", "claude"],
   "icon": "media/diffpanel-icon.png",
+  "extensionKind": ["workspace"],
   "main": "./dist/extension.js",
   "activationEvents": [
     "onView:diffpanel.reviews",
