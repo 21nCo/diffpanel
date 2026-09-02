@@ -43,6 +43,13 @@ export function chapterItemRefs(chapters: Chapter[], chapterId: string): string[
   return refs;
 }
 
+export function childChapters(chapters: Chapter[], chapterId: string): Chapter[] {
+  return chapters
+    .filter((chapter) => chapter.parentId === chapterId)
+    .slice()
+    .sort((a, b) => a.order - b.order);
+}
+
 export function uniqueFileCount(files: ReviewFile[], itemRefs: string[]): number {
   const wanted = new Set(itemRefs);
   return files.filter((file) => file.items.some((item) => wanted.has(item.id))).length;
@@ -57,6 +64,13 @@ export function diffCounts(file: ReviewFile, item: ReviewItem): { additions: num
     if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
   }
   return { additions, deletions };
+}
+
+export function itemLocationLabel(item: ReviewItem): string {
+  if (item.kind === "file") return "snapshot";
+  if (item.status === "deleted") return "deleted";
+  const line = item.newStart && item.newStart > 0 ? item.newStart : item.oldStart ?? 1;
+  return `line ${line}`;
 }
 
 function alphabetic(index: number): string {

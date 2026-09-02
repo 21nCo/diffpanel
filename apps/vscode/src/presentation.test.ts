@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Chapter, ReviewFile } from "@diffpanel/core";
-import { chapterItemRefs, chapterLabels, diffCounts, uniqueFileCount } from "./presentation.js";
+import {
+  chapterItemRefs,
+  chapterLabels,
+  childChapters,
+  diffCounts,
+  itemLocationLabel,
+  uniqueFileCount,
+} from "./presentation.js";
 
 const chapters: Chapter[] = [
   chapter("foundation", null, 1, ["foundation-item"]),
@@ -28,9 +35,19 @@ describe("review presentation", () => {
     expect(uniqueFileCount([reviewFile()], ["key-item", "auth-item"])).toBe(1);
   });
 
+  it("returns direct child chapters in review order", () => {
+    expect(childChapters(chapters, "cutover").map((candidate) => candidate.id)).toEqual(["keys", "auth"]);
+  });
+
   it("derives additions and deletions from an individual hunk", () => {
     const file = reviewFile();
     expect(diffCounts(file, file.items[0]!)).toEqual({ additions: 2, deletions: 1 });
+  });
+
+  it("describes deleted hunks without exposing Git's zero line coordinate", () => {
+    const deletedItem = { ...reviewFile().items[0]!, status: "deleted" as const, newStart: 0 };
+    expect(itemLocationLabel(deletedItem)).toBe("deleted");
+    expect(itemLocationLabel(reviewFile().items[1]!)).toBe("line 6");
   });
 });
 
