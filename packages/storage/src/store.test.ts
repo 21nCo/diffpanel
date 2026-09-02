@@ -88,6 +88,7 @@ describe("DiffpanelStore", () => {
     const stored = await store.getRun(receipt.runId);
     expect(stored.summary.status).toBe("ready");
     expect(stored.summary.archivedAt).toBeNull();
+    expect(stored.summary.reviewTitle).toBe("Working tree");
     expect(stored.review?.chapters[0]?.itemRefs).toEqual(["item-1"]);
 
     const archived = store.setArchived(receipt.runId, true);
@@ -96,6 +97,26 @@ describe("DiffpanelStore", () => {
     expect(store.listRuns(undefined, true)).toHaveLength(1);
     expect(store.setArchived(receipt.runId, false).archivedAt).toBeNull();
     expect(store.listRuns()).toHaveLength(1);
+    store.close();
+  });
+
+  it("stores custom review titles from prep, publish, and rename", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-title-store-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview(), { title: "  Account runtime  " });
+    expect(receipt.title).toBe("Account runtime");
+    expect(receipt.reviewTitle).toBe("Account runtime");
+    expect(store.listRuns()[0]?.reviewTitle).toBe("Account runtime");
+
+    await store.publish(receipt.runId, {
+      ...generatedReview(receipt.runId),
+      title: "AuthFn account runtime",
+    });
+    expect((await store.getRun(receipt.runId)).summary.reviewTitle).toBe("AuthFn account runtime");
+
+    expect(store.setReviewTitle(receipt.runId, "PR 569 account runtime").reviewTitle).toBe("PR 569 account runtime");
+    expect(store.setReviewTitle(receipt.runId, null).reviewTitle).toBe("Working tree");
     store.close();
   });
 });

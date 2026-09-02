@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { titleForScope } from "@diffpanel/core";
 import type { StoredRun } from "@diffpanel/storage";
 import { DiffpanelCli } from "./cli.js";
 import type { ChapterNode, ItemNode, RepositoryNode, ReviewTreeNode, RunNode } from "./model.js";
@@ -29,7 +30,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNod
   async refresh(showErrors = true): Promise<void> {
     try {
       const runs = await this.cli.list(this.includeArchived);
-      const fingerprint = JSON.stringify(runs.map((run) => [run.runId, run.status, run.publishedAt, run.archivedAt, run.chapterCount]));
+      const fingerprint = JSON.stringify(runs.map((run) => [run.runId, run.status, run.publishedAt, run.archivedAt, run.chapterCount, run.reviewTitle]));
       if (!showErrors && fingerprint === this.fingerprint) return;
       this.fingerprint = fingerprint;
       this.runCache.clear();
@@ -66,6 +67,13 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNod
     await this.refresh();
   }
 
+  async setTitle(runId: string, title: string): Promise<void> {
+    await this.cli.setTitle(runId, title);
+    this.runCache.delete(runId);
+    this.fingerprint = "";
+    await this.refresh();
+  }
+
   async getStoredRun(runId: string): Promise<StoredRun> {
     const cached = this.runCache.get(runId);
     if (cached) return cached;
@@ -90,7 +98,9 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNod
       item.description = element.run.status === "ready"
         ? `${element.run.archivedAt ? "archived · " : ""}${element.run.chapterCount} chapters`
         : "awaiting generation";
-      item.tooltip = `${element.run.createdAt}\n${element.run.fileCount} files · ${element.run.itemCount} items`;
+      item.tooltip = [element.run.reviewTitle, titleForScope(element.run.scope), `${element.run.createdAt}\n${element.run.fileCount} files · ${element.run.itemCount} items`]
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .join("\n");
       item.iconPath = new vscode.ThemeIcon(element.run.archivedAt ? "archive" : element.run.status === "ready" ? "book" : "loading~spin");
       item.contextValue = element.run.archivedAt ? "diffpanelArchivedRun" : "diffpanelRun";
       item.command = { command: "diffpanel.openRun", title: "Open Review", arguments: [element] };

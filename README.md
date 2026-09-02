@@ -65,6 +65,15 @@ diffpanel list --include-archived
 diffpanel unarchive <run-id>
 ```
 
+Give a review a readable panel name instead of the git-range label:
+
+```bash
+diffpanel prep main...feature --title "PR 568 DataFn foundations"
+diffpanel publish review.json --run <run-id> --title "PR 568 DataFn foundations"
+diffpanel title <run-id> "PR 568 DataFn foundations"
+diffpanel title <run-id> --clear
+```
+
 ### Generate a review
 
 Invoke `$diffpanel-chapters` from a supported coding agent. The skill prepares an immutable run, generates exact-coverage chapters, validates the JSON, and publishes it. Return to the Diffpanel activity-bar panel to browse the generated review and open its saved files in native diff editors.

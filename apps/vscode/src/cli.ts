@@ -28,6 +28,10 @@ export class DiffpanelCli {
     await this.execute([archived ? "archive" : "unarchive", runId]);
   }
 
+  async setTitle(runId: string, title: string): Promise<void> {
+    await this.execute(["title", runId, title]);
+  }
+
   private async execute(args: string[]): Promise<string> {
     const configuration = vscode.workspace.getConfiguration("diffpanel");
     const invocation = resolveInvocation({

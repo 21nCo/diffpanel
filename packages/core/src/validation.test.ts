@@ -48,6 +48,10 @@ describe("validateGeneratedReview", () => {
     expect(validateGeneratedReview(manifest, review)).toMatchObject({ valid: true });
   });
 
+  it("accepts an optional review title", () => {
+    expect(validateGeneratedReview(manifest, { ...review, title: "PR 568 DataFn foundations" })).toMatchObject({ valid: true });
+  });
+
   it("reports missing and duplicate items", () => {
     const invalid = structuredClone(review);
     invalid.chapters[0]!.itemRefs = ["item-1", "item-1"];

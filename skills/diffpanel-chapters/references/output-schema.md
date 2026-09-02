@@ -7,6 +7,7 @@ Return one JSON object:
   "schemaVersion": 1,
   "runId": "20260808T120000Z-ab12cd34",
   "generator": "codex",
+  "title": "PR 568 DataFn foundations",
   "chapters": [
     {
       "id": "chapter-foundation",
@@ -57,15 +58,36 @@ Return one JSON object:
 }
 ```
 
+## Review title
+
+- `title`: optional 1-80 character label shown in the Diffpanel review list. Prefer the user-facing module or PR name, such as `PR 567 retired surfaces`. When omitted, Diffpanel keeps a title from `diffpanel prep --title` or falls back to the git-scope expression.
+
 ## Chapter rules
 
 - `id`: unique non-empty string.
 - `parentId`: `null` for a root chapter or another chapter's `id` for nesting. Hierarchies must not contain cycles.
 - `order`: unique positive integer across the run.
 - `title`: action-oriented phrase, preferably eight words or fewer, without a numeric or alphabetic prefix. The Diffpanel surface numbers roots and letters child chapters.
-- `summary`: short explanation of impact, intent, and dependencies.
+- `summary`: reviewer-facing explanation of the concrete outcome, intent, and any dependency that affects review order. Leaf chapters normally use one or two sentences; structural parents use two to four sentences and roll up their children.
 - `itemRefs`: item IDs copied from the generation input. Each item must occur exactly once across all chapters. A structural parent may use an empty array.
 - `keyChanges`: zero or more human judgment questions.
+
+## Summary quality
+
+A reviewer should be able to answer these questions from a chapter summary without opening its files:
+
+- What behavior, capability, or review surface changes?
+- What concrete paths, products, routes, contracts, or configuration anchors define the scope?
+- For a structural parent, what distinct outcomes do its child chapters contribute?
+- For a removal, is the code merely detached, or is an entire directory or capability deleted?
+
+Avoid summaries that only repeat the title with synonyms or list abstract categories. For example, prefer:
+
+> Deletes the entire `client/landing` workspace, including its branded routes and shared presentation modules. It also removes workspace registration and `@21n/landing` aliases from package and TypeScript tooling, leaving no buildable landing application in the repository.
+
+over:
+
+> Retires the marketing workspace, routes, and presentation system.
 
 ## Line references
 

@@ -28,15 +28,16 @@ Choose the narrowest scope matching the request:
 # Auto: working tree when dirty, otherwise current branch against main/master
 diffpanel prep
 
-diffpanel prep --worktree
+diffpanel prep --worktree --title "Auth session recovery"
 diffpanel prep --staged
-diffpanel prep main...feature
+diffpanel prep main...feature --title "PR 568 DataFn foundations"
 diffpanel prep HEAD~5..HEAD
 diffpanel prep --repo HEAD
 diffpanel prep --repo HEAD --max-files 4000
 ```
 
 Capture stdout as `RECEIPT_PATH`, then read that JSON file. Read its `generationInputPath` completely, in chunks when necessary. The receipt also provides the `runId` used for validation and publication.
+Pass `--title` whenever the user named the review, module, or PR so the Diffpanel panel shows that label instead of the git range. Copy the same string into the generated JSON `title` field. If the receipt already has a `title`, reuse it.
 
 Preparation stores immutable file blobs. The user may continue editing after this point. When a preview is insufficient, read the saved content rather than the mutable working tree:
 
@@ -64,7 +65,15 @@ Group items by causal and architectural relationship:
 
 Every review item must appear in exactly one chapter. Structural parent chapters may have no direct items when their child chapters own the coverage.
 
-Write summaries for a reviewer unfamiliar with the code. Lead with impact and explain dependencies between chapters. Key changes must be human judgment questions, not lint, type, formatting, or test reminders. Empty `keyChanges` arrays are valid.
+Write summaries for a reviewer unfamiliar with the code:
+
+- Explain the concrete outcome, not only the implementation category. Name the primary paths, user-facing surfaces, configuration entries, APIs, or dependencies that make the scope understandable.
+- Use one or two sentences for a leaf chapter. Use two to four sentences for a structural parent and roll up every materially distinct child outcome; the parent must remain useful when its children are collapsed.
+- For broad deletion chapters, say explicitly when an entire directory, workspace, route family, or capability disappears, and describe the wiring removed with it.
+- State review-order dependencies only when they affect how the change should be understood. Do not pad summaries with generic review advice.
+- Before publishing, read the hierarchy top-down. Rewrite any summary that merely restates its title, relies on vague category nouns, or omits concrete information present in its child summaries.
+
+Key changes must be human judgment questions, not lint, type, formatting, or test reminders. Empty `keyChanges` arrays are valid.
 
 ## Validate and publish
 
@@ -76,5 +85,6 @@ diffpanel publish "$OUTPUT_PATH" --run "$RUN_ID"
 ```
 
 If validation reports missing, duplicate, or unknown item IDs, repair the JSON and validate again. Do not publish partial coverage.
+`diffpanel publish` also accepts `--title` to set or override the panel label without editing the JSON.
 
-After publication, report the run ID, chapter count, scope, and that the review is available in the Diffpanel extension panel.
+After publication, report the run ID, review title, chapter count, scope, and that the review is available in the Diffpanel extension panel. Existing runs can be renamed later with `diffpanel title <run-id> "Readable name"`.

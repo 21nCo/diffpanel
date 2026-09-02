@@ -41,10 +41,14 @@ describe("diffpanel CLI", () => {
     const previousHome = process.env.DIFFPANEL_HOME;
     process.env.DIFFPANEL_HOME = home;
     try {
-      const receipt = JSON.parse(await runCli(["prep", "--worktree", "--repository", repository, "--json"], home, repository)) as {
+      const receipt = JSON.parse(await runCli(["prep", "--worktree", "--repository", repository, "--title", "Worktree review", "--json"], home, repository)) as {
         runId: string;
         manifestPath: string;
+        title: string;
+        reviewTitle: string;
       };
+      expect(receipt.title).toBe("Worktree review");
+      expect(receipt.reviewTitle).toBe("Worktree review");
       const manifest = JSON.parse(await readFile(receipt.manifestPath, "utf8")) as ReviewManifest;
       const itemRefs = manifest.files.flatMap((file) => file.items.map((item) => item.id));
       const reviewPath = join(home, "review.json");
@@ -72,9 +76,14 @@ describe("diffpanel CLI", () => {
       }));
 
       expect(await runCli(["validate", reviewPath, "--run", receipt.runId], home, repository)).toContain("cover every item exactly once");
-      expect(await runCli(["publish", reviewPath, "--run", receipt.runId], home, repository)).toContain("Published 1 chapters");
-      const runs = JSON.parse(await runCli(["list", "--json"], home, repository)) as Array<{ status: string; runId: string }>;
-      expect(runs).toEqual([expect.objectContaining({ runId: receipt.runId, status: "ready" })]);
+      expect(await runCli(["publish", reviewPath, "--run", receipt.runId, "--title", "Update exported value"], home, repository)).toContain("Published 1 chapters");
+      const runs = JSON.parse(await runCli(["list", "--json"], home, repository)) as Array<{ status: string; runId: string; reviewTitle: string }>;
+      expect(runs).toEqual([expect.objectContaining({ runId: receipt.runId, status: "ready", reviewTitle: "Update exported value" })]);
+      expect(await runCli(["title", receipt.runId, "Named review"], home, repository)).toContain("Renamed");
+      expect(JSON.parse(await runCli(["list", "--json"], home, repository))).toEqual([
+        expect.objectContaining({ runId: receipt.runId, reviewTitle: "Named review" }),
+      ]);
+      expect(await runCli(["title", receipt.runId, "--clear"], home, repository)).toContain("Working tree");
       expect(await runCli(["archive", receipt.runId], home, repository)).toContain(`Archived ${receipt.runId}`);
       expect(JSON.parse(await runCli(["list", "--json"], home, repository))).toEqual([]);
       const archivedRuns = JSON.parse(await runCli(["list", "--include-archived", "--json"], home, repository)) as Array<{ archivedAt: string | null }>;

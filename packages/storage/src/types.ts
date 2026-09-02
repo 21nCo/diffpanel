@@ -7,6 +7,8 @@ export interface PreparedRunReceipt {
   generationInputPath: string;
   repositoryRoot: string;
   scope: ReviewManifest["scope"];
+  title: string | null;
+  reviewTitle: string;
   fileCount: number;
   itemCount: number;
   skippedCount: number;

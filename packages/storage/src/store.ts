@@ -5,7 +5,9 @@ import { dirname, join } from "node:path";
 import {
   assertGeneratedReview,
   createRunId,
+  displayReviewTitle,
   formatGenerationInput,
+  parseReviewTitle,
   reviewManifestSchema,
   sha256,
   type GeneratedReview,
@@ -32,6 +34,7 @@ interface RunRow {
   chapter_count: number;
   manifest_path: string;
   review_path: string | null;
+  review_title: string | null;
 }
 
 export class DiffpanelStore {
@@ -64,7 +67,7 @@ export class DiffpanelStore {
     this.database.close();
   }
 
-  async createPreparedRun(captured: CapturedReview): Promise<PreparedRunReceipt> {
+  async createPreparedRun(captured: CapturedReview, options: { title?: string } = {}): Promise<PreparedRunReceipt> {
     const createdAt = new Date().toISOString();
     const runId = createRunId();
     const runDirectory = join(this.runsPath, runId);
@@ -116,6 +119,7 @@ export class DiffpanelStore {
     const generationInputPath = join(runDirectory, "generation-input.md");
     const receiptPath = join(runDirectory, "receipt.json");
     const itemCount = files.reduce((total, file) => total + file.items.length, 0);
+    const title = options.title === undefined ? null : parseReviewTitle(options.title);
     const receipt: PreparedRunReceipt = {
       runId,
       receiptPath,
@@ -123,6 +127,8 @@ export class DiffpanelStore {
       generationInputPath,
       repositoryRoot: captured.repositoryRoot,
       scope: captured.scope,
+      title,
+      reviewTitle: displayReviewTitle(title, captured.scope),
       fileCount: files.length,
       itemCount,
       skippedCount: captured.skipped.length,
@@ -135,8 +141,9 @@ export class DiffpanelStore {
     const insertRun = this.database.prepare(`
       INSERT INTO runs (
         run_id, repository_id, root_path, repository_name, scope_json,
-        snapshot_hash, status, created_at, file_count, item_count, manifest_path
-      ) VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?)
+        snapshot_hash, status, created_at, file_count, item_count, manifest_path,
+        review_title
+      ) VALUES (?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, ?, ?)
     `);
     const insertItem = this.database.prepare(`
       INSERT INTO items (item_id, run_id, file_id, file_path, ordinal, kind)
@@ -154,6 +161,7 @@ export class DiffpanelStore {
         files.length,
         itemCount,
         manifestPath,
+        title,
       );
       for (const file of files) {
         for (const item of file.items) {
@@ -171,11 +179,19 @@ export class DiffpanelStore {
     const reviewPath = join(this.runsPath, runId, "review.json");
     await atomicWrite(reviewPath, `${JSON.stringify(review, null, 2)}\n`);
     const publishedAt = new Date().toISOString();
+    const row = this.requireRunRow(runId);
     this.database.prepare(`
       UPDATE runs
-      SET status = 'ready', generator = ?, published_at = ?, chapter_count = ?, review_path = ?
+      SET status = 'ready', generator = ?, published_at = ?, chapter_count = ?, review_path = ?, review_title = ?
       WHERE run_id = ?
-    `).run(review.generator ?? "agent", publishedAt, review.chapters.length, reviewPath, runId);
+    `).run(
+      review.generator ?? "agent",
+      publishedAt,
+      review.chapters.length,
+      reviewPath,
+      review.title ?? row.review_title,
+      runId,
+    );
     return review;
   }
 
@@ -199,8 +215,14 @@ export class DiffpanelStore {
     const archivedAt = archived ? new Date().toISOString() : null;
     const result = this.database.prepare("UPDATE runs SET archived_at = ? WHERE run_id = ?").run(archivedAt, runId);
     if (result.changes === 0) throw new Error(`Unknown Diffpanel run: ${runId}`);
-    const row = this.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(runId) as RunRow;
-    return toRunSummary(row);
+    return toRunSummary(this.requireRunRow(runId));
+  }
+
+  setReviewTitle(runId: string, title: string | null): RunSummary {
+    this.requireRunRow(runId);
+    const reviewTitle = title === null ? null : parseReviewTitle(title);
+    this.database.prepare("UPDATE runs SET review_title = ? WHERE run_id = ?").run(reviewTitle, runId);
+    return toRunSummary(this.requireRunRow(runId));
   }
 
   async getRun(runId: string): Promise<StoredRun> {
@@ -236,6 +258,12 @@ export class DiffpanelStore {
 
   private blobPath(hash: string): string {
     return join(this.blobsPath, hash.slice(0, 2), hash.slice(2));
+  }
+
+  private requireRunRow(runId: string): RunRow {
+    const row = this.database.prepare("SELECT * FROM runs WHERE run_id = ?").get(runId) as RunRow | undefined;
+    if (!row) throw new Error(`Unknown Diffpanel run: ${runId}`);
+    return row;
   }
 }
 
@@ -287,7 +315,10 @@ function migrate(database: Database.Database): void {
   if (!columns.some((column) => column.name === "archived_at")) {
     database.exec("ALTER TABLE runs ADD COLUMN archived_at TEXT");
   }
-  database.exec("UPDATE schema_version SET version = 2");
+  if (!columns.some((column) => column.name === "review_title")) {
+    database.exec("ALTER TABLE runs ADD COLUMN review_title TEXT");
+  }
+  database.exec("UPDATE schema_version SET version = 3");
 }
 
 function toRunSummary(row: RunRow): RunSummary {
@@ -307,15 +338,8 @@ function toRunSummary(row: RunRow): RunSummary {
     fileCount: row.file_count,
     itemCount: row.item_count,
     chapterCount: row.chapter_count,
-    reviewTitle: titleForScope(scope),
+    reviewTitle: displayReviewTitle(row.review_title, scope),
   };
-}
-
-function titleForScope(scope: ReviewManifest["scope"]): string {
-  if (scope.type === "worktree") return "Working tree";
-  if (scope.type === "staged") return "Staged changes";
-  if (scope.type === "range") return scope.expression;
-  return `Repository at ${scope.ref}`;
 }
 
 async function atomicWrite(path: string, content: string | Buffer): Promise<void> {

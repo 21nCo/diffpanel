@@ -135,10 +135,15 @@ export const prologueSchema = z.object({
   }),
 });
 
+export const REVIEW_TITLE_MAX_LENGTH = 80;
+
+export const reviewTitleSchema = z.string().trim().min(1).max(REVIEW_TITLE_MAX_LENGTH);
+
 export const generatedReviewSchema = z.object({
   schemaVersion: z.literal(1),
   runId: z.string().min(1),
   generator: z.string().min(1).optional(),
+  title: reviewTitleSchema.optional(),
   chapters: z.array(chapterSchema).min(1),
   prologue: prologueSchema,
 });

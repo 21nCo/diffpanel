@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import * as vscode from "vscode";
-import type { ReviewFile, ReviewItem } from "@diffpanel/core";
+import { REVIEW_TITLE_MAX_LENGTH, type ReviewFile, type ReviewItem } from "@diffpanel/core";
 import { DiffpanelCli } from "./cli.js";
 import { DiffpanelContentProvider } from "./content.js";
 import { DetailsProvider } from "./details.js";
@@ -52,6 +52,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       await tree.setArchived(node.run.runId, false);
+    }),
+    vscode.commands.registerCommand("diffpanel.renameReview", async (node: RunNode | undefined) => {
+      if (!node) {
+        void vscode.window.showInformationMessage("Use Rename Review on a review in the Diffpanel panel.");
+        return;
+      }
+      const title = await vscode.window.showInputBox({
+        title: "Rename Diffpanel review",
+        prompt: "Shown in the Diffpanel review list.",
+        value: node.run.reviewTitle,
+        validateInput: (value) => {
+          const trimmed = value.trim();
+          if (!trimmed) return "Enter a review title.";
+          if (trimmed.length > REVIEW_TITLE_MAX_LENGTH) {
+            return `Title must be ${REVIEW_TITLE_MAX_LENGTH} characters or fewer.`;
+          }
+          return undefined;
+        },
+      });
+      if (title === undefined) return;
+      await tree.setTitle(node.run.runId, title.trim());
     }),
     vscode.commands.registerCommand("diffpanel.openRun", async (node: RunNode | ChapterNode) => {
       const stored = await tree.getStoredRun(node.run.runId);

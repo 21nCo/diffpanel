@@ -77,6 +77,11 @@
         "title": "Restore Archived Review",
         "category": "Diffpanel",
         "icon": "$(discard)"
+      },
+      {
+        "command": "diffpanel.renameReview",
+        "title": "Rename Review",
+        "category": "Diffpanel"
       }
     ],
     "configuration": {
@@ -161,6 +166,16 @@
           "command": "diffpanel.unarchiveReview",
           "when": "view == diffpanel.reviews && viewItem == diffpanelArchivedRun",
           "group": "inline"
+        },
+        {
+          "command": "diffpanel.renameReview",
+          "when": "view == diffpanel.reviews && viewItem == diffpanelRun",
+          "group": "0_actions"
+        },
+        {
+          "command": "diffpanel.renameReview",
+          "when": "view == diffpanel.reviews && viewItem == diffpanelArchivedRun",
+          "group": "0_actions"
         },
         {
           "command": "diffpanel.openWorkingFile",

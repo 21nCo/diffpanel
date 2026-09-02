@@ -21,6 +21,7 @@ program
   .option("--repo [ref]", "Capture a repository-wide snapshot", false)
   .option("--base <ref>", "Base ref for worktree or staged capture", "HEAD")
   .option("--max-files <count>", "Repository snapshot file limit", parseInteger, 2_000)
+  .option("--title <title>", "Display name for this review in the Diffpanel panel")
   .option("--json", "Print the full receipt as JSON")
   .action(async (range: string | undefined, options) => {
     const selected = [Boolean(range), options.worktree, options.staged, Boolean(options.repo)].filter(Boolean);
@@ -29,7 +30,7 @@ program
     const captured = await captureReview(request);
     const store = await DiffpanelStore.open();
     try {
-      const receipt = await store.createPreparedRun(captured);
+      const receipt = await store.createPreparedRun(captured, { title: options.title });
       process.stdout.write(options.json ? `${JSON.stringify(receipt, null, 2)}\n` : `${receipt.receiptPath}\n`);
     } finally {
       store.close();
@@ -41,9 +42,11 @@ program
   .description("Validate and persist generated chapters for a prepared run.")
   .argument("<review-file>", "Generated review JSON file")
   .requiredOption("--run <run-id>", "Prepared run ID")
+  .option("--title <title>", "Display name for this review in the Diffpanel panel")
   .option("--json", "Print the published review as JSON")
   .action(async (reviewFile: string, options) => {
     const review = JSON.parse(await readFile(resolve(reviewFile), "utf8"));
+    if (options.title) review.title = options.title;
     const store = await DiffpanelStore.open();
     try {
       const published = await store.publish(options.run, review);
@@ -88,6 +91,27 @@ program
       for (const run of runs) {
         process.stdout.write(`${run.runId}\t${run.status}\t${run.repositoryName}\t${run.reviewTitle}\t${run.chapterCount} chapters\n`);
       }
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("title")
+  .description("Set or clear the display name for a review run.")
+  .argument("<run-id>", "Review run ID")
+  .argument("[title]", "Display name shown in the Diffpanel panel")
+  .option("--clear", "Revert to the default git-scope label")
+  .action(async (runId: string, title: string | undefined, options) => {
+    if (Boolean(options.clear) === Boolean(title)) {
+      throw new Error("Pass a title or --clear.");
+    }
+    const store = await DiffpanelStore.open();
+    try {
+      const summary = store.setReviewTitle(runId, options.clear ? null : title!);
+      process.stdout.write(options.clear
+        ? `Cleared title for ${runId}; now ${summary.reviewTitle}.\n`
+        : `Renamed ${runId} to ${summary.reviewTitle}.\n`);
     } finally {
       store.close();
     }
