@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -41,6 +41,44 @@ describe("captureReview", () => {
     expect(captured.scope.type).toBe("repository");
     expect(captured.files[0]?.items[0]?.kind).toBe("file");
   });
+
+  it.each(["staged", "worktree", "range"] as const)("retains pure move evidence in %s captures", async (type) => {
+    const repository = await createRepository();
+    await runProcess("git", ["mv", "alpha.ts", "moved.ts"], repository);
+    if (type === "range") await runProcess("git", ["commit", "-m", "move"], repository);
+    const request = type === "range" ? { type, repository, expression: "HEAD~1..HEAD" } : { type, repository };
+    const captured = await captureReview(request);
+    expect(captured.skipped).toEqual([]);
+    expect(captured.files).toHaveLength(1);
+    const file = captured.files[0]!;
+    expect(file).toMatchObject({ status: "renamed", oldPath: "alpha.ts", filePath: "moved.ts", additions: 0, deletions: 0 });
+    expect(file.beforeContent?.equals(file.afterContent!)).toBe(true);
+    expect(file.items).toHaveLength(1);
+    expect(file.items[0]).toMatchObject({ kind: "file", status: "renamed", oldStart: null, newStart: null });
+    expect(file.items[0]!.patch).toContain("rename from alpha.ts");
+  });
+
+  it("retains mode-only edits and distinguishes excluded binary content", async () => {
+    const repository = await createRepository();
+    await runProcess("git", ["config", "core.filemode", "true"], repository);
+    await chmod(join(repository, "alpha.ts"), 0o755);
+    await writeFile(join(repository, "binary.dat"), Buffer.from([0, 1, 2]));
+    const captured = await captureReview({ type: "worktree", repository });
+    expect(captured.files[0]!.items[0]!.kind).toBe("file");
+    expect(captured.files[0]!.items[0]!.patch).toContain("new mode 100755");
+    expect(captured.skipped).toEqual([{ filePath: "binary.dat", reason: "binary file" }]);
+  });
+
+  it("captures an empty-file move", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "empty.ts"), "");
+    await runProcess("git", ["add", "empty.ts"], repository);
+    await runProcess("git", ["commit", "-m", "empty file"], repository);
+    await runProcess("git", ["mv", "empty.ts", "empty-moved.ts"], repository);
+    const captured = await captureReview({ type: "staged", repository });
+    expect(captured.files[0]).toMatchObject({ status: "renamed", beforeContent: Buffer.alloc(0), afterContent: Buffer.alloc(0) });
+    expect(captured.files[0]!.items[0]!.kind).toBe("file");
+  });
 });
 
 describe("parseNameStatus", () => {
@@ -52,4 +90,3 @@ describe("parseNameStatus", () => {
     ]);
   });
 });
-

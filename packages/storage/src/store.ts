@@ -113,6 +113,7 @@ export class DiffpanelStore {
       scope: captured.scope,
       files,
       skipped: captured.skipped,
+      requirements: { diagramAssessment: true },
     });
 
     const manifestPath = join(runDirectory, "manifest.json");

@@ -68,7 +68,8 @@ program
     const store = await DiffpanelStore.open();
     try {
       const validated = await store.validate(options.run, review);
-      process.stdout.write(`Valid review: ${validated.chapters.length} chapters cover every item exactly once.\n`);
+      const { manifest } = await store.getRun(options.run);
+      process.stdout.write(`Valid review: ${validated.chapters.length} chapters cover every item exactly once; ${manifest.files.length} captured files, ${manifest.skipped.length} skipped paths outside coverage.\n`);
     } finally {
       store.close();
     }

@@ -8,6 +8,11 @@ Return one JSON object:
   "runId": "20260808T120000Z-ab12cd34",
   "generator": "codex",
   "title": "PR 568 DataFn foundations",
+  "diagramAssessment": {
+    "kind": "other",
+    "reasoning": "This example only changes review snapshot storage, with no new cross-component flow.",
+    "overviewOmissionReason": "The chapter summary and file evidence explain the single storage boundary."
+  },
   "chapters": [
     {
       "id": "chapter-foundation",
@@ -105,3 +110,36 @@ over:
 - `focusAreas[].type`: `security`, `breaking-change`, `high-complexity`, `data-integrity`, `new-pattern`, `architecture`, `performance`, or `testing-gap`.
 - `focusAreas[].severity`: `critical`, `high`, `medium`, or `info`.
 - `complexity.level`: `low`, `medium`, `high`, or `very-high`.
+
+For large mixed migrations, use the first prologue `keyChanges` entry for a recommended reading order naming actual chapters and explaining the risk priority. Retain the one-to-eight entry limit. Large chapter summaries should name the repeated transformation, representative paths, and exceptions; preserve all item references rather than replacing coverage with examples.
+
+Focused diagrams should cover material failure and restoration branches, including successful persistence followed by failed callbacks, repeated restored-state delivery, and terminal states when relevant. Use labeled arrows or a legend to distinguish imports, configuration calls, and runtime requirements. Validate diagram claims against immutable content and render the actual source before publication when a renderer is available.
+
+## Visual explanations and repetitive changes
+
+- Chapters may optionally contain `diagram` (Mermaid source, at most 20,000 characters, or null) and `diagramItemRefs` (supporting immutable item IDs). A chapter diagram requires at least one evidence reference belonging to the chapter or its descendants. Evidence references do not assign chapter ownership and do not change exact coverage.
+- The prologue uses `diagramItemRefs` pointing to supporting items in the run. They are required for overview diagrams in newly prepared snapshots; older reviews without these references remain supported.
+- Use small before/after maps for restructuring, sequence diagrams for ordering, state diagrams for behavior, or field maps for contract changes. Do not draw a whole-repository graph by default.
+- Name concrete paths, symbols, or contracts, explain what an arrow means, and ground claims in the referenced evidence. Distinguish inferred intent from observed changes in the accompanying summary. The UI labels generated diagrams as author-provided explanations, not verified architecture.
+- Use plain Mermaid without fences, frontmatter, configuration directives, HTML, click handlers, or external links. The renderer uses strict local rendering and provides source text when a diagram cannot render.
+- Diffpanel automatically groups matching complete static import-source text rewrites across at least two files, including renamed files, and exact-content renames. Segment-aligned prefix rules may combine different modules when every observed suffix is preserved and multiple source paths in multiple files support the rule. This is conservative textual classification, not proof of unchanged behavior. Mixed hunks, changed bindings, dynamic imports, and unsupported syntax remain individually visible.
+- Assign every item exactly once even for bulk edits. Never omit repeated hunks, invent representative-only coverage, or claim that grouping verifies module resolution, exports, or side effects. Explain these checks in the chapter questions.
+- Keep cohesive migrations together when appropriate so transformation groups span their affected files. A file may legitimately have different hunks in different chapters; the panel groups files within a chapter and links their other chapters.
+
+
+## Required diagram assessment for new reviews
+
+New generation inputs carry `requirements.diagramAssessment: true`. Publishing against those snapshots requires a top-level `diagramAssessment` object:
+
+- `kind`: `architectural` when ownership, dependency direction, composition, or execution flow changes; otherwise `other`.
+- `reasoning`: explain the visual decision using concrete changes from this snapshot.
+- `overviewOmissionReason`: required only when `prologue.diagram` is absent. Explain why an overview would not help or cannot be grounded in available evidence.
+- `chapterDiagramOmissionReason`: architectural reviews with no chapter diagrams must explain why focused diagrams would not help or cannot be grounded.
+
+For restructuring like TIDY-477, normally generate a before/after ownership map in the prologue and focused diagrams for host initialization, dependency inversion, or contract ownership in their respective chapters. Choose the useful views; do not generate filler diagrams for every leaf chapter. Every generated diagram must include evidence refs. Evidence validates provenance, not the truth of inferred architectural claims.
+
+The validator rejects missing assessments, unexplained omissions, missing/out-of-scope evidence, and a diagram accompanied by a contradictory omission reason. Legacy snapshots remain compatible. Use actual newline characters after JSON decoding, not literal backslash-n characters inside Mermaid.
+
+## Capture completeness
+
+File items can represent pure moves or metadata-only changes, not only repository snapshots. Assign them exactly once even if the patch has no `@@` hunk and both line counts are zero. Inspect previous/current paths and the metadata patch. State captured file/item counts separately from skipped paths; never call skipped paths reviewed. Old immutable runs must be recaptured to recover paths that older capture versions skipped as `no textual hunks`.

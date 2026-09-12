@@ -76,6 +76,7 @@ export const reviewManifestSchema = z.object({
   scope: reviewScopeSchema,
   files: z.array(reviewFileSchema),
   skipped: z.array(skippedEntrySchema),
+  requirements: z.object({ diagramAssessment: z.literal(true) }).optional(),
 });
 
 export const lineReferenceSchema = z.object({
@@ -99,6 +100,8 @@ export const chapterSchema = z.object({
   order: z.number().int().positive(),
   title: z.string().min(1).max(100),
   summary: z.string().min(1),
+  diagram: z.string().max(20_000).nullable().optional(),
+  diagramItemRefs: z.array(z.string().min(1)).optional(),
   itemRefs: z.array(z.string().min(1)).default([]),
   keyChanges: z.array(keyChangeSchema).default([]),
 });
@@ -124,6 +127,7 @@ export const prologueSchema = z.object({
   motivation: z.string().nullable(),
   outcome: z.string().nullable(),
   diagram: z.string().nullable(),
+  diagramItemRefs: z.array(z.string().min(1)).optional(),
   keyChanges: z.array(z.object({
     summary: z.string().min(1),
     description: z.string().min(1),
@@ -144,6 +148,12 @@ export const generatedReviewSchema = z.object({
   runId: z.string().min(1),
   generator: z.string().min(1).optional(),
   title: reviewTitleSchema.optional(),
+  diagramAssessment: z.object({
+    kind: z.enum(["architectural", "other"]),
+    reasoning: z.string().trim().min(1),
+    overviewOmissionReason: z.string().trim().min(1).optional(),
+    chapterDiagramOmissionReason: z.string().trim().min(1).optional(),
+  }).optional(),
   chapters: z.array(chapterSchema).min(1),
   prologue: prologueSchema,
 });

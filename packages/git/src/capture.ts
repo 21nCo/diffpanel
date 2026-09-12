@@ -177,7 +177,20 @@ async function captureChangedFile(
 
   const patch = await readPatch(repositoryRoot, scope, changedPath, beforeContent, afterContent);
   const items = parseHunks(patch, changedPath);
-  if (items.length === 0) return { reason: "no textual hunks" };
+  // Git can report a real path/mode change without producing a textual hunk.
+  // Keep its metadata as review evidence, including an empty file rename.
+  if (items.length === 0) {
+    const contentHash = sha256(patch || JSON.stringify(changedPath));
+    items.push({
+      id: stableId("item", changedPath.filePath, changedPath.oldPath, contentHash),
+      kind: "file",
+      ...changedPath,
+      ordinal: 0,
+      oldStart: null, oldLines: null, newStart: null, newLines: null,
+      patch,
+      contentHash,
+    });
+  }
   const additions = items.reduce((total, item) => total + countPatchLines(item.patch, "+"), 0);
   const deletions = items.reduce((total, item) => total + countPatchLines(item.patch, "-"), 0);
   return {

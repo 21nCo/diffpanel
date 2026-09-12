@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -52,6 +52,7 @@ function generatedReview(runId: string) {
     schemaVersion: 1 as const,
     runId,
     generator: "test",
+    diagramAssessment: { kind: "other" as const, reasoning: "One local value edit.", overviewOmissionReason: "No ownership or flow changes to draw." },
     chapters: [{ id: "chapter-1", order: 1, title: "Review the behavior", summary: "One coherent behavior changed.", itemRefs: ["item-1"], keyChanges: [] }],
     prologue: {
       motivation: null,
@@ -83,6 +84,8 @@ describe("DiffpanelStore", () => {
     const receipt = await store.createPreparedRun(capturedReview());
     expect(store.listRuns()).toHaveLength(1);
     expect((await store.getRun(receipt.runId)).review).toBeNull();
+    expect((await store.getRun(receipt.runId)).manifest.requirements).toEqual({ diagramAssessment: true });
+    expect(await readFile(receipt.generationInputPath, "utf8")).toContain("## Required visual assessment");
 
     await store.publish(receipt.runId, generatedReview(receipt.runId));
     const stored = await store.getRun(receipt.runId);
@@ -118,5 +121,27 @@ describe("DiffpanelStore", () => {
     expect(store.setReviewTitle(receipt.runId, "PR 569 account runtime").reviewTitle).toBe("PR 569 account runtime");
     expect(store.setReviewTitle(receipt.runId, null).reviewTitle).toBe("Working tree");
     store.close();
+  });
+
+  it("persists empty-file move evidence and its zero-byte content hashes", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-empty-move-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const captured = capturedReview();
+      const file = captured.files[0]!;
+      file.oldPath = "old/example.ts";
+      file.status = "renamed";
+      file.beforeContent = file.afterContent = Buffer.alloc(0);
+      file.additions = file.deletions = file.size = 0;
+      file.items = [{ ...file.items[0]!, kind: "file", status: "renamed", oldPath: file.oldPath,
+        oldStart: null, oldLines: null, newStart: null, newLines: null, patch: "rename from old/example.ts\nrename to src/example.ts" }];
+      const receipt = await store.createPreparedRun(captured);
+      const stored = await store.getRun(receipt.runId);
+      expect(stored.manifest.files[0]!.beforeBlob).not.toBeNull();
+      expect(stored.manifest.files[0]!.beforeBlob).toBe(stored.manifest.files[0]!.afterBlob);
+      await store.publish(receipt.runId, generatedReview(receipt.runId));
+      expect((await store.getRun(receipt.runId)).review?.chapters[0]!.itemRefs).toEqual(["item-1"]);
+    } finally { store.close(); }
   });
 });

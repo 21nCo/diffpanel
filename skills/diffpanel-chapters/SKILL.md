@@ -88,3 +88,13 @@ If validation reports missing, duplicate, or unknown item IDs, repair the JSON a
 `diffpanel publish` also accepts `--title` to set or override the panel label without editing the JSON.
 
 After publication, report the run ID, review title, chapter count, scope, and that the review is available in the Diffpanel extension panel. Existing runs can be renamed later with `diffpanel title <run-id> "Readable name"`.
+
+## Human review of large migrations
+
+Lead the prologue with a concrete recommended reading order when high-risk behavior is mixed with repetitive migration. Name the relevant chapter titles: initialization, persistence, lifecycle and failure paths should receive early attention, with their prerequisite contracts identified. Keep the structural hierarchy coherent rather than moving unrelated items solely to force priority.
+
+For large chapters, summarize the shared transformation, name representative source/configuration paths, and identify exceptions before asking the reviewer to browse files. Preserve complete coverage and distinguish textual matching from semantic equivalence. Keep behavior fixes in focused chapters with their tests.
+
+Diagram high-risk state restoration and partial-success paths when the evidence supports them. For sequences, inspect failures both before and after persistence, including callback rejection, cleanup, selection state and retry implications; do not imply rollback unless implemented. For state restoration, show normalization, repeated delivery guards, immediate work and terminal states. Label arrow semantics explicitly; separate module imports, configuration calls and runtime dependencies with labeled groups or a legend. Validate syntax by rendering the actual generated diagrams before publication when a local renderer is available.
+
+For restructuring and repetitive edits, explain the shared transformation once and identify exceptions, alias/export configuration, and any behavior changes in the summary and questions. Keep complete item coverage. The panel compresses conservative matching import edits and exact-content moves while preserving individual evidence. For every newly prepared run, include the required `diagramAssessment`. For architectural restructuring, normally produce a before/after overview and focused chapter diagrams with `diagramItemRefs`; otherwise record concrete omission reasons as specified in `references/output-schema.md`. Verify diagram source uses real newlines and all evidence refs belong to the snapshot and chapter scope. Do not silently omit visuals. Assign pure moves and metadata-only file items too, and report skipped paths separately from captured coverage.

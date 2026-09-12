@@ -62,3 +62,60 @@ describe("validateGeneratedReview", () => {
   });
 });
 
+
+describe("diagram evidence", () => {
+  it("accepts supporting refs without counting them as duplicate ownership", () => {
+    const input = { ...review, chapters: [{ ...review.chapters[0], diagram: "flowchart LR\nA-->B", diagramItemRefs: ["item-1"] }] };
+    expect(validateGeneratedReview(manifest, input).valid).toBe(true);
+  });
+  it("requires evidence for new chapter diagrams", () => {
+    expect(validateGeneratedReview(manifest, { ...review, chapters: [{ ...review.chapters[0], diagram: "flowchart LR\nA-->B" }] }).errors).toContain("chapter chapter-1 diagram requires evidence item refs");
+  });
+  it("rejects unknown and duplicate prologue evidence", () => {
+    const input = { ...review, prologue: { ...review.prologue, diagramItemRefs: ["missing", "item-1", "item-1"] } };
+    expect(validateGeneratedReview(manifest, input).errors).toEqual(expect.arrayContaining(["prologue diagram references out-of-scope item missing", "prologue diagram repeats item item-1"]));
+  });
+  it("allows descendant evidence but rejects sibling evidence", () => {
+    const input = { ...review, chapters: [
+      { ...review.chapters[0], id: "parent", itemRefs: [], diagram: "flowchart LR\nA-->B", diagramItemRefs: ["item-1"] },
+      { ...review.chapters[0], id: "child", parentId: "parent", order: 2, itemRefs: ["item-1"] },
+      { ...review.chapters[0], id: "sibling", order: 3, itemRefs: ["item-2"] },
+    ] };
+    expect(validateGeneratedReview(manifest, input).valid).toBe(true);
+    const invalid = { ...input, chapters: input.chapters.map((chapter, index) => index === 0 ? { ...chapter, diagramItemRefs: ["item-2"] } : chapter) };
+    expect(validateGeneratedReview(manifest, invalid).errors).toContain("chapter parent diagram references out-of-scope item item-2");
+  });
+});
+
+describe("required visual assessment for new snapshots", () => {
+  const currentManifest = { ...manifest, requirements: { diagramAssessment: true as const } };
+  const assessment = { kind: "architectural" as const, reasoning: "Ownership and host initialization move across packages." };
+
+  it("keeps historical reviews valid but rejects an absent decision for new captures", () => {
+    expect(validateGeneratedReview(manifest, review).valid).toBe(true);
+    expect(validateGeneratedReview(currentManifest, review).errors).toContain("review requires diagramAssessment for this snapshot");
+  });
+  it("requires an overview and focused diagrams, or explicit omission reasons", () => {
+    const result = validateGeneratedReview(currentManifest, { ...review, diagramAssessment: assessment });
+    expect(result.errors).toContain("provide an overview diagram or overviewOmissionReason");
+    expect(result.errors).toContain("architectural reviews require focused chapter diagrams or chapterDiagramOmissionReason");
+    expect(validateGeneratedReview(currentManifest, { ...review, diagramAssessment: { ...assessment,
+      overviewOmissionReason: "The captured subset does not contain enough dependency evidence for a truthful overview.",
+      chapterDiagramOmissionReason: "These chapters contain declarations only; no flow is established by this snapshot.",
+    } }).valid).toBe(true);
+  });
+  it("requires evidence for new overview diagrams, and rejects contradictory omissions", () => {
+    const input = { ...review, diagramAssessment: { kind: "other", reasoning: "Show a simple transition." },
+      prologue: { ...review.prologue, diagram: "flowchart LR\nA-->B" } };
+    expect(validateGeneratedReview(currentManifest, input).errors).toContain("prologue diagram requires evidence item refs");
+    expect(validateGeneratedReview(currentManifest, { ...input, prologue: { ...input.prologue, diagramItemRefs: ["item-1"] } }).valid).toBe(true);
+    expect(validateGeneratedReview(currentManifest, { ...input, diagramAssessment: { ...input.diagramAssessment, overviewOmissionReason: "omitted" } }).errors).toContain("overview diagram and overviewOmissionReason are mutually exclusive");
+  });
+  it("accepts an evidenced overview and chapter diagram without duplicate ownership", () => {
+    const input = { ...review, diagramAssessment: assessment,
+      prologue: { ...review.prologue, diagram: "flowchart LR\nA-->B", diagramItemRefs: ["item-1"] },
+      chapters: [{ ...review.chapters[0], diagram: "flowchart LR\nB-->C", diagramItemRefs: ["item-2"] }],
+    };
+    expect(validateGeneratedReview(currentManifest, input)).toMatchObject({ valid: true, duplicateItemRefs: [] });
+  });
+});

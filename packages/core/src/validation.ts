@@ -40,6 +40,22 @@ export function validateGeneratedReview(
 
   const manifest = manifestResult.data;
   const review = reviewResult.data;
+  const visualAssessment = review.diagramAssessment;
+  const enforceVisuals = !!manifest.requirements?.diagramAssessment || !!visualAssessment;
+  const hasOverview = !!review.prologue.diagram?.trim();
+  const hasChapterDiagrams = review.chapters.some((chapter) => !!chapter.diagram?.trim());
+  if (enforceVisuals) {
+    if (!visualAssessment) errors.push("review requires diagramAssessment for this snapshot");
+    else {
+      if (!hasOverview && !visualAssessment.overviewOmissionReason) errors.push("provide an overview diagram or overviewOmissionReason");
+      if (hasOverview && visualAssessment.overviewOmissionReason) errors.push("overview diagram and overviewOmissionReason are mutually exclusive");
+      if (visualAssessment.kind === "architectural" && !hasChapterDiagrams && !visualAssessment.chapterDiagramOmissionReason) {
+        errors.push("architectural reviews require focused chapter diagrams or chapterDiagramOmissionReason");
+      }
+      if (hasChapterDiagrams && visualAssessment.chapterDiagramOmissionReason) errors.push("chapter diagrams and chapterDiagramOmissionReason are mutually exclusive");
+    }
+    if (hasOverview && !review.prologue.diagramItemRefs?.length) errors.push("prologue diagram requires evidence item refs");
+  }
   if (manifest.runId !== review.runId) {
     errors.push(`review.runId ${review.runId} does not match manifest runId ${manifest.runId}`);
   }
@@ -74,6 +90,32 @@ export function validateGeneratedReview(
   }
 
   const expected = new Set(manifest.files.flatMap((file) => file.items.map((item) => item.id)));
+  const checkDiagramRefs = (label: string, refs: string[] | undefined, allowed: Set<string>): void => {
+    const seen = new Set<string>();
+    for (const ref of refs ?? []) {
+      if (!allowed.has(ref)) errors.push(`${label} diagram references out-of-scope item ${ref}`);
+      if (seen.has(ref)) errors.push(`${label} diagram repeats item ${ref}`);
+      seen.add(ref);
+    }
+  };
+  checkDiagramRefs("prologue", review.prologue.diagramItemRefs, expected);
+  for (const chapter of review.chapters) {
+    const allowed = new Set<string>();
+    const visited = new Set<string>();
+    const collect = (id: string): void => {
+      if (visited.has(id)) return;
+      visited.add(id);
+      for (const candidate of review.chapters) {
+        if (candidate.id === id) for (const ref of candidate.itemRefs) if (expected.has(ref)) allowed.add(ref);
+        if (candidate.parentId === id) collect(candidate.id);
+      }
+    };
+    collect(chapter.id);
+    checkDiagramRefs(`chapter ${chapter.id}`, chapter.diagramItemRefs, allowed);
+    if (chapter.diagram && !chapter.diagramItemRefs?.length) {
+      errors.push(`chapter ${chapter.id} diagram requires evidence item refs`);
+    }
+  }
   const observed = new Map<string, number>();
   for (const itemRef of review.chapters.flatMap((chapter) => chapter.itemRefs)) {
     observed.set(itemRef, (observed.get(itemRef) ?? 0) + 1);

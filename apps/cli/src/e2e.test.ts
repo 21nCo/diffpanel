@@ -56,6 +56,7 @@ describe("diffpanel CLI", () => {
         schemaVersion: 1,
         runId: receipt.runId,
         generator: "e2e",
+        diagramAssessment: { kind: "other", reasoning: "One constant changes.", overviewOmissionReason: "No structural or execution flow change." },
         chapters: [{
           id: "chapter-1",
           parentId: null,
