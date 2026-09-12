@@ -192,15 +192,19 @@
     "lint": "tsc --noEmit",
     "package": "pnpm build && vsce package --no-dependencies --allow-missing-repository",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:browser": "pnpm build && playwright test --config playwright.config.mjs"
   },
   "dependencies": {
     "@diffpanel/core": "workspace:*",
     "@diffpanel/storage": "workspace:*",
+    "dompurify": "3.3.3",
+    "mermaid": "11.17.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@types/node": "^22.15.30",
     "@types/react": "^19.1.6",
     "@types/react-dom": "^19.1.5",

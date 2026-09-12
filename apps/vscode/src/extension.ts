@@ -4,6 +4,7 @@ import { REVIEW_TITLE_MAX_LENGTH, type ReviewFile, type ReviewItem } from "@diff
 import { DiffpanelCli } from "./cli.js";
 import { DiffpanelContentProvider } from "./content.js";
 import { DetailsProvider } from "./details.js";
+import { DiagramEditor } from "./diagram-editor.js";
 import type { ChapterNode, ItemNode, ReviewTreeNode, RunNode } from "./model.js";
 import { workingFileCandidates } from "./repository-file.js";
 import { ReviewTreeProvider } from "./tree.js";
@@ -12,9 +13,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const cli = new DiffpanelCli(context.extensionPath);
   const content = new DiffpanelContentProvider(cli);
   const tree = new ReviewTreeProvider(cli);
+  const diagrams = new DiagramEditor(context.extensionUri, (runId, itemId) => openItemById(tree, runId, itemId));
   const details = new DetailsProvider(context.extensionUri, async (runId, itemId) => {
     await openItemById(tree, runId, itemId);
-  });
+  }, async (runId, chapterId) => diagrams.open(await tree.getStoredRun(runId), chapterId));
   const treeView = vscode.window.createTreeView("diffpanel.reviews", {
     treeDataProvider: tree,
     showCollapseAll: true,
@@ -24,6 +26,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     cli,
     tree,
+    diagrams,
     treeView,
     vscode.workspace.registerTextDocumentContentProvider("diffpanel", content),
     vscode.window.registerWebviewViewProvider("diffpanel.details", details),

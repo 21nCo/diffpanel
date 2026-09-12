@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Chapter, GeneratedReview, ReviewFile, ReviewItem } from "@diffpanel/core";
 import type { StoredRun } from "@diffpanel/storage";
@@ -6,10 +6,10 @@ import {
   chapterItemRefs,
   chapterLabels,
   childChapters,
-  diffCounts,
-  itemLocationLabel,
   uniqueFileCount,
 } from "../presentation.js";
+import { FileList, ReviewEvidence } from "./review-evidence.js";
+import { CaptureCoverage, DiagramDirectory } from "./review-overview.js";
 import "./styles.css";
 
 interface DetailsSelection {
@@ -30,11 +30,14 @@ interface ItemMatch {
   item: ReviewItem;
 }
 
+const Navigation = createContext<{ chapters: Chapter[]; onChapter: (chapter: Chapter) => void }>({ chapters: [], onChapter: () => {} });
+
 function App(): React.JSX.Element {
   const [selection, setSelection] = useState<DetailsSelection | null>(null);
+  const [allFiles, setAllFiles] = useState(false);
   useEffect(() => {
     const listener = (event: MessageEvent<{ type?: string; payload?: DetailsSelection | null }>) => {
-      if (event.data.type === "selection") setSelection(event.data.payload ?? null);
+      if (event.data.type === "selection") { setSelection(event.data.payload ?? null); setAllFiles(false); }
     };
     window.addEventListener("message", listener);
     return () => window.removeEventListener("message", listener);
@@ -54,12 +57,13 @@ function App(): React.JSX.Element {
   const selectedChildren = chapter && review ? childChapters(review.chapters, chapter.id) : [];
   const labels = review ? chapterLabels(review.chapters) : new Map<string, string>();
   return (
-    <main>
+    <Navigation.Provider value={{ chapters: review?.chapters ?? [], onChapter: (next) => { setSelection({ run, chapter: next }); setAllFiles(false); } }}>
+    <main key={`${run.summary.runId}:${chapter?.id ?? "overview"}`}>
       <header>
         <div className="eyebrow">{run.summary.repositoryName}</div>
-        <h1>{chapter?.title ?? run.summary.reviewTitle}</h1>
+        <h1>{allFiles ? "All review files" : chapter?.title ?? run.summary.reviewTitle}</h1>
         <div className="metrics">
-          {chapter ? <>
+          {chapter && !allFiles ? <>
             <span>{selectedFileCount} {selectedFileCount === 1 ? "file" : "files"}</span>
             <span>{selectedItemRefs.length} {selectedItemRefs.length === 1 ? "item" : "items"}</span>
             {subtopicCount > 0 && <span>{subtopicCount} {subtopicCount === 1 ? "subtopic" : "subtopics"}</span>}
@@ -71,6 +75,17 @@ function App(): React.JSX.Element {
           </>}
         </div>
       </header>
+
+      <nav className="review-navigation" aria-label="Review views">
+        <button onClick={() => { setSelection({ run }); setAllFiles(false); }}>Review overview</button>
+        <button aria-pressed={allFiles} onClick={() => setAllFiles(!allFiles)}>{allFiles ? "Return to chapters" : "All review files"}</button>
+      </nav>
+
+      <CaptureCoverage manifest={run.manifest} />
+      {!allFiles && chapter?.diagram?.trim() && <button onClick={() => vscodeApi.postMessage({ type: "openDiagram", runId: run.summary.runId, chapterId: chapter.id })}>Open chapter diagram</button>}
+      {!chapter && !allFiles && review && <DiagramDirectory review={review} onOpen={(chapterId) => vscodeApi.postMessage({ type: "openDiagram", runId: run.summary.runId, ...(chapterId ? { chapterId } : {}) })} />}
+
+      {allFiles ? <FileList matches={[...items.values()]} chapters={review?.chapters ?? []} onChapter={(next) => { setSelection({ run, chapter: next }); setAllFiles(false); }} onOpen={(itemId) => vscodeApi.postMessage({ type: "openItem", runId: run.summary.runId, itemId })} /> : <>
 
       {!chapter && review && (
         <section className="prologue">
@@ -100,7 +115,7 @@ function App(): React.JSX.Element {
           <p>{chapter.summary}</p>
           <Questions chapter={chapter} />
           {chapter.itemRefs.length > 0 && (
-            <ItemList itemRefs={chapter.itemRefs} items={items} runId={run.summary.runId} />
+            <ItemList chapterId={chapter.id} itemRefs={chapter.itemRefs} items={items} runId={run.summary.runId} />
           )}
           {selectedChildren.length > 0 && (
             <div className="review-guide">
@@ -124,10 +139,12 @@ function App(): React.JSX.Element {
           <h2>{current.title}</h2>
           <p>{current.summary}</p>
           <Questions chapter={current} />
-          <ItemList itemRefs={current.itemRefs} items={items} runId={run.summary.runId} />
+          <ItemList chapterId={current.id} itemRefs={current.itemRefs} items={items} runId={run.summary.runId} />
         </section>
       ))}
+      </>}
     </main>
+    </Navigation.Provider>
   );
 }
 
@@ -160,7 +177,7 @@ function ChapterGuide({
       {chapter.itemRefs.length > 0 && (
         <details className="review-items">
           <summary>Show {chapter.itemRefs.length} review {chapter.itemRefs.length === 1 ? "item" : "items"}</summary>
-          <ItemList itemRefs={chapter.itemRefs} items={items} runId={runId} />
+          <ItemList chapterId={chapter.id} itemRefs={chapter.itemRefs} items={items} runId={runId} />
         </details>
       )}
       {children.map((child) => (
@@ -188,32 +205,19 @@ function Questions({ chapter }: { chapter: Chapter }): React.JSX.Element | null 
 }
 
 function ItemList({
+  chapterId,
   itemRefs,
   items,
   runId,
 }: {
+  chapterId?: string;
   itemRefs: string[];
   items: Map<string, ItemMatch>;
   runId: string;
 }): React.JSX.Element | null {
+  const navigation = useContext(Navigation);
   if (itemRefs.length === 0) return null;
-  return (
-    <div className="files">
-      {itemRefs.map((itemRef) => {
-        const match = items.get(itemRef);
-        if (!match) return null;
-        const counts = diffCounts(match.file, match.item);
-        return <button key={itemRef} onClick={() => vscodeApi.postMessage({ type: "openItem", runId, itemId: itemRef })}>
-          <span className="file-path" title={match.file.filePath}>{match.file.filePath}</span>
-          <small className="file-meta">
-            <span className="additions">+{counts.additions}</span>
-            <span className="deletions">−{counts.deletions}</span>
-            <span className="line-label">{itemLocationLabel(match.item)}</span>
-          </small>
-        </button>;
-      })}
-    </div>
-  );
+  return <ReviewEvidence key={`${runId}:${chapterId ?? "all"}:${itemRefs.join(",")}`} matches={itemRefs.flatMap((ref) => { const match = items.get(ref); return match ? [match] : []; })} chapters={navigation.chapters} chapterId={chapterId} onChapter={navigation.onChapter} onOpen={(itemId) => vscodeApi.postMessage({ type: "openItem", runId, itemId })} />;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

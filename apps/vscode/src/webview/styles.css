@@ -50,6 +50,36 @@ p { line-height: 1.5; color: var(--vscode-descriptionForeground); }
 .mark { color: var(--vscode-textLink-foreground); font-size: 28px; }
 code { font-family: var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); padding: 1px 3px; border-radius: 3px; }
 
+button { font: inherit; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); background: var(--vscode-button-secondaryBackground, var(--vscode-editor-background)); border: 1px solid var(--vscode-panel-border); border-radius: 4px; padding: 6px 8px; cursor: pointer; overflow-wrap: anywhere; }
+button:hover { background: var(--vscode-list-hoverBackground); }
+button:focus-visible, summary:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+button[aria-pressed="true"] { border-color: var(--vscode-focusBorder); }
+summary { cursor: pointer; overflow-wrap: anywhere; line-height: 1.5; }
+details { margin-top: 8px; min-width: 0; }
+.review-navigation, .evidence-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.evidence-toolbar span, .old-path { color: var(--vscode-descriptionForeground); font-size: 11px; overflow-wrap: anywhere; }
+.file-group { padding-bottom: 10px; border-bottom: 1px solid var(--vscode-panel-border); }
+.file-heading { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.file-heading .file-open { flex: 1 1 auto; width: auto; }
+.file-heading .hunk-toggle { flex: 0 0 auto; width: auto; font-size: 11px; white-space: nowrap; }
+.hunk-scope { font-size: 11px; margin: 6px 8px; }
+.file-group > details, .old-path { margin: 6px 8px 0; }
+.hunk-list, .other-chapters { padding-left: 8px; }
+.transformation { padding: 10px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: var(--vscode-editor-background); }
+.transformation > summary { font-weight: 600; }
+.transformation button { margin: 4px 0; }
+.patch { max-height: 240px; overflow: auto; font-family: var(--vscode-editor-font-family); font-size: 12px; background: var(--vscode-textCodeBlock-background); padding: 10px; }
+.mapping { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: center; width: 100%; margin-top: 8px; text-align: left; }
+.mapping > span, .mapping code { overflow-wrap: anywhere; min-width: 0; }
+.mapping small { display: block; color: var(--vscode-descriptionForeground); margin-top: 4px; }
+.diagram-canvas { max-width: 100%; overflow: auto; background: #fff; color: #222; border-radius: 4px; }
+.diagram-canvas:empty { display: none; }
+.diagram-canvas svg { display: block; min-width: 280px; max-width: 100%; height: auto; margin: 0 auto; }
+.diagram-directory { padding: 8px 0 12px; border-bottom: 1px solid var(--vscode-panel-border); }
+.diagram-directory > button { display: block; width: 100%; text-align: left; margin-top: 5px; }
+.diagram-directory p, .compression-summary { font-size: 12px; }
+.capture-coverage p { overflow-wrap: anywhere; }
+
 @media (max-width: 260px) {
   .line-label { display: none; }
 }

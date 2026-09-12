@@ -27,11 +27,12 @@ const webview = {
   target: "es2022",
 };
 
+const diagramEditor = { ...webview, entryPoints: ["src/webview/diagram-editor.tsx"], outfile: "dist/diagram-editor.js" };
+
 if (watch) {
-  const contexts = await Promise.all([esbuild.context(extension), esbuild.context(webview)]);
+  const contexts = await Promise.all([esbuild.context(extension), esbuild.context(webview), esbuild.context(diagramEditor)]);
   await Promise.all(contexts.map((context) => context.watch()));
   console.log("Watching Diffpanel extension and webview...");
 } else {
-  await Promise.all([esbuild.build(extension), esbuild.build(webview)]);
+  await Promise.all([esbuild.build(extension), esbuild.build(webview), esbuild.build(diagramEditor)]);
 }
-

@@ -1,0 +1,190 @@
+{
+  "sourceRun": "20260908T112229Z-57cde031",
+  "range": "b598ae69..ce01fcd0",
+  "baseSha": "b598ae69daf64bacfff98447e431a8d7b0fb8588",
+  "compareSha": "ce01fcd058fcb03db325ef61a84017c43622ea21",
+  "note": "Selected unchanged hunks from the saved migration; file.items is narrowed to each selected hunk.",
+  "matches": [
+    {
+      "file": {
+        "id": "file_e7026f87df5be089",
+        "filePath": "client/application/cx/ghost/GhostEmbed.svelte",
+        "oldPath": "client/components/cx/ghost/GhostEmbed.svelte",
+        "status": "renamed",
+        "beforeBlob": "9f6f5b977f7f1c60bd5af27de7e5ad0e6ce47137bbd4bf7ee3b7be85dbb7e21b",
+        "afterBlob": "33acad83eb961f289010cfcdba1002e59d9162e59edf8ee84a58fd1cdc83a596",
+        "additions": 1,
+        "deletions": 1,
+        "language": "svelte",
+        "size": 265,
+        "items": [
+          {
+            "id": "item_e31d94b1ab97a0e8",
+            "kind": "hunk",
+            "filePath": "client/application/cx/ghost/GhostEmbed.svelte",
+            "oldPath": "client/components/cx/ghost/GhostEmbed.svelte",
+            "status": "renamed",
+            "ordinal": 0,
+            "oldStart": 1,
+            "oldLines": 5,
+            "newStart": 1,
+            "newLines": 5,
+            "patch": "@@ -1,5 +1,5 @@\n <script lang=\"ts\">\n-  import { appStore } from \"@21n/stores/app.store\";\n+  import { appStore } from \"@nucleum/stores/app.store\";\n </script>\n \n {#if $appStore?.appData?.urls?.changelogEmbed}\n",
+            "contentHash": "08f6718ad3a8fec94e70ab0779c8b7e13e6ddd32fad81bb45f37274f9d09ecdd"
+          }
+        ]
+      },
+      "item": {
+        "id": "item_e31d94b1ab97a0e8",
+        "kind": "hunk",
+        "filePath": "client/application/cx/ghost/GhostEmbed.svelte",
+        "oldPath": "client/components/cx/ghost/GhostEmbed.svelte",
+        "status": "renamed",
+        "ordinal": 0,
+        "oldStart": 1,
+        "oldLines": 5,
+        "newStart": 1,
+        "newLines": 5,
+        "patch": "@@ -1,5 +1,5 @@\n <script lang=\"ts\">\n-  import { appStore } from \"@21n/stores/app.store\";\n+  import { appStore } from \"@nucleum/stores/app.store\";\n </script>\n \n {#if $appStore?.appData?.urls?.changelogEmbed}\n",
+        "contentHash": "08f6718ad3a8fec94e70ab0779c8b7e13e6ddd32fad81bb45f37274f9d09ecdd"
+      }
+    },
+    {
+      "file": {
+        "id": "file_33668cc865e6e17b",
+        "filePath": "client/application/debug/Test.svelte",
+        "oldPath": "client/components/Test.svelte",
+        "status": "renamed",
+        "beforeBlob": "d553448d18d6c0e8ca256a56f2f257d74c49980aefea8f3539e22318eee77d87",
+        "afterBlob": "ddf4c3f372634c364b9b26e1edc5157d5bd6c3d773fd80409a553186d09e66da",
+        "additions": 1,
+        "deletions": 1,
+        "language": "svelte",
+        "size": 224,
+        "items": [
+          {
+            "id": "item_94126da77b1dd32a",
+            "kind": "hunk",
+            "filePath": "client/application/debug/Test.svelte",
+            "oldPath": "client/components/Test.svelte",
+            "status": "renamed",
+            "ordinal": 0,
+            "oldStart": 1,
+            "oldLines": 6,
+            "newStart": 1,
+            "newLines": 6,
+            "patch": "@@ -1,6 +1,6 @@\n <script lang=\"ts\">\n   import { onMount } from \"svelte\";\n-  import { fullPageLoadingScreen } from \"@21n/stores/notification.store\";\n+  import { fullPageLoadingScreen } from \"@nucleum/stores/notification.store\";\n \n   onMount(() => {\n     fullPageLoadingScreen.show(\"Finishing session...\");\n",
+            "contentHash": "d14ccdb6d55f6e9d2bac2a6eff50cbe665fa8904ebefd5793044d7bd293199e9"
+          }
+        ]
+      },
+      "item": {
+        "id": "item_94126da77b1dd32a",
+        "kind": "hunk",
+        "filePath": "client/application/debug/Test.svelte",
+        "oldPath": "client/components/Test.svelte",
+        "status": "renamed",
+        "ordinal": 0,
+        "oldStart": 1,
+        "oldLines": 6,
+        "newStart": 1,
+        "newLines": 6,
+        "patch": "@@ -1,6 +1,6 @@\n <script lang=\"ts\">\n   import { onMount } from \"svelte\";\n-  import { fullPageLoadingScreen } from \"@21n/stores/notification.store\";\n+  import { fullPageLoadingScreen } from \"@nucleum/stores/notification.store\";\n \n   onMount(() => {\n     fullPageLoadingScreen.show(\"Finishing session...\");\n",
+        "contentHash": "d14ccdb6d55f6e9d2bac2a6eff50cbe665fa8904ebefd5793044d7bd293199e9"
+      }
+    },
+    {
+      "file": {
+        "id": "file_7fade0557ee41e43",
+        "filePath": "client/application/settings/ShareToFriends.svelte",
+        "oldPath": "client/components/settings/ShareToFriends.svelte",
+        "status": "renamed",
+        "beforeBlob": "74c016d057b777ebe740c34a74f1a7dabb3d3ccb616f1c17cf8eeb29adc28195",
+        "afterBlob": "31f32e583edbf3c907148ac1130b3d2e2b98657c28654a84b4ee2dea46382723",
+        "additions": 2,
+        "deletions": 2,
+        "language": "svelte",
+        "size": 689,
+        "items": [
+          {
+            "id": "item_7e78da0580ef0052",
+            "kind": "hunk",
+            "filePath": "client/application/settings/ShareToFriends.svelte",
+            "oldPath": "client/components/settings/ShareToFriends.svelte",
+            "status": "renamed",
+            "ordinal": 0,
+            "oldStart": 1,
+            "oldLines": 7,
+            "newStart": 1,
+            "newLines": 7,
+            "patch": "@@ -1,7 +1,7 @@\n <script>\n   import CopyableText from \"@21n/elements/text/CopyableText.svelte\";\n-  import { appStore } from \"@21n/stores/app.store\";\n-  import account from \"@21n/stores/account.store\";\n+  import { appStore } from \"@nucleum/stores/app.store\";\n+  import account from \"@nucleum/stores/account.store\";\n </script>\n \n <div class=\"w-full h-full flex justify-center\">\n",
+            "contentHash": "3dae35dc8682fbddf619141c3ab8e04bf070327b28e98d749bb3eed3c1bbd0df"
+          }
+        ]
+      },
+      "item": {
+        "id": "item_7e78da0580ef0052",
+        "kind": "hunk",
+        "filePath": "client/application/settings/ShareToFriends.svelte",
+        "oldPath": "client/components/settings/ShareToFriends.svelte",
+        "status": "renamed",
+        "ordinal": 0,
+        "oldStart": 1,
+        "oldLines": 7,
+        "newStart": 1,
+        "newLines": 7,
+        "patch": "@@ -1,7 +1,7 @@\n <script>\n   import CopyableText from \"@21n/elements/text/CopyableText.svelte\";\n-  import { appStore } from \"@21n/stores/app.store\";\n-  import account from \"@21n/stores/account.store\";\n+  import { appStore } from \"@nucleum/stores/app.store\";\n+  import account from \"@nucleum/stores/account.store\";\n </script>\n \n <div class=\"w-full h-full flex justify-center\">\n",
+        "contentHash": "3dae35dc8682fbddf619141c3ab8e04bf070327b28e98d749bb3eed3c1bbd0df"
+      }
+    },
+    {
+      "file": {
+        "id": "file_6079769aa5602a65",
+        "filePath": "client/application/debug/DexieConsole.svelte",
+        "oldPath": "client/components/debug/DexieConsole.svelte",
+        "status": "renamed",
+        "beforeBlob": "05c69b0a536ebce1d91938886534c11664c57ffe08d4dd8e17756f90d938da10",
+        "afterBlob": "0dede18a32b37a8a45f6224348c728186ccc7b5b9c2c1e9ee1d73a843f9909b2",
+        "additions": 1,
+        "deletions": 1,
+        "language": "svelte",
+        "size": 1022,
+        "items": [
+          {
+            "id": "item_0abe711dfc98e662",
+            "kind": "hunk",
+            "filePath": "client/application/debug/DexieConsole.svelte",
+            "oldPath": "client/components/debug/DexieConsole.svelte",
+            "status": "renamed",
+            "ordinal": 0,
+            "oldStart": 3,
+            "oldLines": 7,
+            "newStart": 3,
+            "newLines": 7,
+            "patch": "@@ -3,7 +3,7 @@\n   import {\n     nucleumDatafnStatus,\n     refreshNucleumDatafnStatus\n-  } from \"@21n/stores/datafn.store\";\n+  } from \"@nucleum/datafn/datafn.store\";\n   import { stringify } from \"@21n/shared-utils/json.utils\";\n \n   let isRefreshing = false;\n",
+            "contentHash": "d28ddab7d29b35e58d48c28388c9e109eb55c0f1fff644adc3847fdaad96f8f1"
+          }
+        ]
+      },
+      "item": {
+        "id": "item_0abe711dfc98e662",
+        "kind": "hunk",
+        "filePath": "client/application/debug/DexieConsole.svelte",
+        "oldPath": "client/components/debug/DexieConsole.svelte",
+        "status": "renamed",
+        "ordinal": 0,
+        "oldStart": 3,
+        "oldLines": 7,
+        "newStart": 3,
+        "newLines": 7,
+        "patch": "@@ -3,7 +3,7 @@\n   import {\n     nucleumDatafnStatus,\n     refreshNucleumDatafnStatus\n-  } from \"@21n/stores/datafn.store\";\n+  } from \"@nucleum/datafn/datafn.store\";\n   import { stringify } from \"@21n/shared-utils/json.utils\";\n \n   let isRefreshing = false;\n",
+        "contentHash": "d28ddab7d29b35e58d48c28388c9e109eb55c0f1fff644adc3847fdaad96f8f1"
+      }
+    }
+  ],
+  "expectedGroupedItemIds": [
+    "item_e31d94b1ab97a0e8",
+    "item_94126da77b1dd32a",
+    "item_7e78da0580ef0052"
+  ]
+}
