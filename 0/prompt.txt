@@ -1,0 +1,26 @@
+$use-skillplane work linear issue DIFF-1
+
+Linked Linear issue: DIFF-1
+https://linear.app/21n/issue/DIFF-1/publish-reusable-diffpanel-packages-for-native-review-integrations
+
+
+I already published the core package as "diffpanel" and the org @diffpanel is already created in our npm account
+
+create a tag based publishing pipeline similar to superfunctions and npm token is already present in org pipeline secrets
+
+Ask me any questions before you start
+
+---
+
+1. check superfunction-dev worktree - let me know if you couldn't locate the repo
+2. didn't understand your question
+3. isn't that why I asked you to refer super functions?
+4. stop at pipeline changes
+
+---
+
+DIFF-1 only requires publishing of packages? no code changes?
+
+---
+
+complete DIFF-1 fully
