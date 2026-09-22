@@ -11,7 +11,7 @@
     "clean": "rm -rf dist coverage",
     "dev": "tsx src/index.ts",
     "lint": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "pnpm --filter @diffpanel/cli... build && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

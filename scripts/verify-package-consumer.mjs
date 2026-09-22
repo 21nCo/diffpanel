@@ -111,6 +111,11 @@ try {
     cwd: consumerDirectory,
     stdio: "inherit",
   });
+  assert.throws(() => execFileSync(
+    process.execPath,
+    [join(root, "scripts", "verify-browser-imports.mjs"), consumerDirectory, "--probe-node-global"],
+    { cwd: consumerDirectory, stdio: "pipe" },
+  ), /Browser bundle contains a Node\.js-only global/);
 
   const packedNames = tarballs.map((tarball) => tarball.slice(tarball.lastIndexOf("/") + 1));
   assert.equal(new Set(packedNames).size, packagePaths.length);

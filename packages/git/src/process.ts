@@ -40,17 +40,20 @@ export async function runProcess(
       env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    const processGroupId = child.pid;
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let outputBytes = 0;
     let terminalError: Error | null = null;
     let settled = false;
     let timeout: NodeJS.Timeout | undefined;
+    let forceTimer: NodeJS.Timeout | undefined;
 
     const finish = (error: Error | null, result?: ProcessResult): void => {
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
+      if (forceTimer) clearTimeout(forceTimer);
       options.signal?.removeEventListener("abort", onAbort);
       if (error) reject(error);
       else resolve(result!);
@@ -59,8 +62,8 @@ export async function runProcess(
     const terminate = (error: Error): void => {
       if (terminalError) return;
       terminalError = error;
-      terminateProcess(child, "SIGTERM");
-      const forceTimer = setTimeout(() => terminateProcess(child, "SIGKILL"), 1_000);
+      terminateProcess(child, processGroupId, "SIGTERM");
+      forceTimer = setTimeout(() => terminateProcess(child, processGroupId, "SIGKILL"), 1_000);
       forceTimer.unref();
     };
 
@@ -110,14 +113,25 @@ function abortError(command: string): Error {
   return new Error(`${command} was cancelled.`);
 }
 
-function terminateProcess(child: ChildProcess, signal: NodeJS.Signals): void {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  try {
-    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, signal);
-    else child.kill(signal);
-  } catch {
-    child.kill(signal);
+function terminateProcess(child: ChildProcess, processGroupId: number | undefined, signal: NodeJS.Signals): void {
+  if (process.platform !== "win32" && processGroupId) {
+    try {
+      process.kill(-processGroupId, signal);
+      return;
+    } catch {
+      // Fall through to the direct-child fallback when the group is already gone.
+    }
   }
+  if (process.platform === "win32" && processGroupId) {
+    const args = ["/PID", String(processGroupId), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])];
+    try {
+      const killer = spawn("taskkill.exe", args, { stdio: "ignore", windowsHide: true });
+      killer.unref();
+    } catch {
+      // Fall through to the direct-child fallback.
+    }
+  }
+  if (child.exitCode === null && child.signalCode === null) child.kill(signal);
 }
 
 export async function gitBuffer(

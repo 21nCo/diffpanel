@@ -50,6 +50,10 @@ export interface RunPage {
   nextCursor: string | null;
 }
 
+export interface OpenStoreOptions {
+  recover?: boolean;
+}
+
 export interface RetentionPolicy {
   repositoryRoot?: string;
   olderThan?: Date;

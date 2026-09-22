@@ -80,7 +80,7 @@ program
   .requiredOption("--run <run-id>", "Prepared run ID")
   .action(async (reviewFile: string, options) => {
     const review = JSON.parse(await readFile(resolve(reviewFile), "utf8"));
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       const validated = await store.validate(options.run, review);
       const { manifest } = await store.getRun(options.run);
@@ -100,7 +100,7 @@ program
   .option("--page", "Return runs with the next cursor")
   .option("--json", "Print JSON")
   .action(async (options) => {
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       const page = store.listRunsPage({
         repositoryRoot: options.repository ? await realpath(resolve(options.repository)) : undefined,
@@ -131,7 +131,7 @@ program
     if (Boolean(options.clear) === Boolean(title)) {
       throw new Error("Pass a title or --clear.");
     }
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       const summary = store.setReviewTitle(runId, options.clear ? null : title!);
       process.stdout.write(options.clear
@@ -147,7 +147,7 @@ program
   .description("Archive a review run so it is hidden from default listings.")
   .argument("<run-id>", "Review run ID")
   .action(async (runId: string) => {
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       store.setArchived(runId, true);
       process.stdout.write(`Archived ${runId}.\n`);
@@ -161,7 +161,7 @@ program
   .description("Restore an archived review run to default listings.")
   .argument("<run-id>", "Review run ID")
   .action(async (runId: string) => {
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       store.setArchived(runId, false);
       process.stdout.write(`Restored ${runId}.\n`);
@@ -176,7 +176,7 @@ program
   .argument("<run-id>", "Review run ID")
   .option("--json", "Print JSON", true)
   .action(async (runId: string) => {
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       process.stdout.write(`${JSON.stringify(await store.getRun(runId), null, 2)}\n`);
     } finally {
@@ -192,7 +192,7 @@ program
   .argument("<side>", "before or after")
   .action(async (runId: string, fileId: string, side: string) => {
     if (side !== "before" && side !== "after") throw new Error("Content side must be before or after.");
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       const content = await store.getFileContent(runId, fileId, side);
       if (content) process.stdout.write(content);
@@ -210,7 +210,7 @@ program
   .option("--include-active", "Allow prepared and ready, non-archived runs to expire")
   .option("--json", "Print JSON")
   .action(async (options) => {
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       const result = await store.applyRetention({
         repositoryRoot: options.repository ? await realpath(resolve(options.repository)) : undefined,

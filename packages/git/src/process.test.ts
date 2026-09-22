@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -45,5 +46,29 @@ describe("runProcess", () => {
     );
     controller.abort();
     await expect(running).rejects.toThrow(/cancelled/);
+  });
+
+  it.skipIf(process.platform === "win32")("terminates descendants that keep inherited pipes open after the leader exits", async () => {
+    const directory = await workingDirectory();
+    const pidFile = join(directory, "descendant.pid");
+    const script = [
+      "const { spawn } = require('node:child_process');",
+      "const { writeFileSync } = require('node:fs');",
+      "const child = spawn(process.execPath, ['--eval', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'inherit', 'inherit'] });",
+      "writeFileSync(process.argv[1], String(child.pid));",
+    ].join("\n");
+    const cleanup = setTimeout(() => {
+      if (!existsSync(pidFile)) return;
+      try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); } catch { /* Already terminated. */ }
+    }, 1_500);
+    const startedAt = Date.now();
+    try {
+      await expect(runProcess(process.execPath, ["--eval", script, pidFile], directory, { timeoutMs: 250 })).rejects.toThrow(/timed out/);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      const descendantPid = Number(readFileSync(pidFile, "utf8"));
+      expect(() => process.kill(descendantPid, 0)).toThrow();
+    } finally {
+      clearTimeout(cleanup);
+    }
   });
 });

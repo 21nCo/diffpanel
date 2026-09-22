@@ -289,6 +289,34 @@ describe("DiffpanelStore", () => {
     } finally { store.close(); }
   });
 
+  it("does not restore rows after filesystem deletion when an unrelated retained manifest is corrupt", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-retention-global-preflight-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const scoped = { ...capturedReview(), repositoryId: "repo-scoped", repositoryRoot: "/tmp/scoped" };
+      const older = await store.createPreparedRun(scoped, { title: "Scoped older" });
+      store.setArchived(older.runId, true);
+      const newest = await store.createPreparedRun(scoped, { title: "Scoped newest" });
+      store.setArchived(newest.runId, true);
+      const unrelated = await store.createPreparedRun({
+        ...capturedReview(),
+        repositoryId: "repo-unrelated",
+        repositoryRoot: "/tmp/unrelated",
+      });
+      await writeFile(unrelated.manifestPath, "not json\n");
+
+      await expect(store.applyRetention({
+        repositoryRoot: scoped.repositoryRoot,
+        keepLatest: 1,
+        olderThan: new Date(Date.now() + 60_000),
+      })).rejects.toThrow(/retained run|collect blobs/);
+
+      expect(store.listRuns(undefined, true).map((run) => run.runId)).toContain(older.runId);
+      await access(older.manifestPath);
+    } finally { store.close(); }
+  });
+
   it("marks ready runs failed when their review is corrupt", async () => {
     const home = await mkdtemp(join(tmpdir(), "diffpanel-corrupt-review-"));
     temporaryDirectories.push(home);
@@ -317,5 +345,26 @@ describe("DiffpanelStore", () => {
       expect(recovered.lastRecoveryReport?.removedOrphanRunIds).toContain("orphan-run");
       await expect(access(join(home, "runs", "orphan-run"))).rejects.toThrow();
     } finally { recovered.close(); }
+  });
+
+  it("allows read-only clients to open without running filesystem recovery", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-read-only-open-"));
+    temporaryDirectories.push(home);
+    const initial = await DiffpanelStore.open(home);
+    initial.close();
+    const orphan = join(home, "runs", "active-external-writer");
+    await mkdir(orphan, { recursive: true });
+
+    const reader = await DiffpanelStore.open(home, { recover: false });
+    try {
+      expect(reader.lastRecoveryReport).toBeNull();
+      await access(orphan);
+    } finally { reader.close(); }
+
+    const maintainer = await DiffpanelStore.open(home);
+    try {
+      expect(maintainer.lastRecoveryReport?.removedOrphanRunIds).toContain("active-external-writer");
+      await expect(access(orphan)).rejects.toThrow();
+    } finally { maintainer.close(); }
   });
 });

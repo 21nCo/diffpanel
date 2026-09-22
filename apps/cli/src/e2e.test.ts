@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -78,8 +78,11 @@ describe("diffpanel CLI", () => {
 
       expect(await runCli(["validate", reviewPath, "--run", receipt.runId], home, repository)).toContain("cover every item exactly once");
       expect(await runCli(["publish", reviewPath, "--run", receipt.runId, "--title", "Update exported value"], home, repository)).toContain("Published 1 chapters");
+      const activeWriterDirectory = join(home, "runs", "active-external-writer");
+      await mkdir(activeWriterDirectory, { recursive: true });
       const runs = JSON.parse(await runCli(["list", "--json"], home, repository)) as Array<{ status: string; runId: string; reviewTitle: string }>;
       expect(runs).toEqual([expect.objectContaining({ runId: receipt.runId, status: "ready", reviewTitle: "Update exported value" })]);
+      await access(activeWriterDirectory);
       expect(await runCli(["title", receipt.runId, "Named review"], home, repository)).toContain("Renamed");
       expect(JSON.parse(await runCli(["list", "--json"], home, repository))).toEqual([
         expect.objectContaining({ runId: receipt.runId, reviewTitle: "Named review" }),

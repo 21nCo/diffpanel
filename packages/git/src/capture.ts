@@ -333,6 +333,7 @@ async function readAfterContent(
 
 async function readWorktreeContent(repositoryRoot: string, filePath: string): Promise<Buffer> {
   const absolute = safeRepositoryPath(repositoryRoot, filePath);
+  await assertNoIntermediateSymlinks(repositoryRoot, filePath);
   const metadata = await lstat(absolute);
   if (metadata.isSymbolicLink()) return Buffer.from(await readlink(absolute), "utf8");
   if (!metadata.isFile()) throw new Error(`Review path is not a regular file: ${filePath}`);
@@ -343,6 +344,21 @@ async function readWorktreeContent(repositoryRoot: string, filePath: string): Pr
     return await handle.readFile();
   } finally {
     await handle.close();
+  }
+}
+
+async function assertNoIntermediateSymlinks(repositoryRoot: string, filePath: string): Promise<void> {
+  const segments = filePath.split("/");
+  let current = repositoryRoot;
+  for (const segment of segments.slice(0, -1)) {
+    current = join(current, segment);
+    const metadata = await lstat(current);
+    if (metadata.isSymbolicLink()) {
+      throw new Error(`Review path has a symbolic-link parent: ${filePath}`);
+    }
+    if (!metadata.isDirectory()) {
+      throw new Error(`Review path parent is not a directory: ${filePath}`);
+    }
   }
 }
 

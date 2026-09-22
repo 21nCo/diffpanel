@@ -194,7 +194,7 @@
     "package": "pnpm --filter diffpanel-vscode... build && node scripts/package-extension.mjs",
     "test": "pnpm --filter diffpanel-vscode... build && vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
-    "test:browser": "pnpm build && playwright test --config playwright.config.mjs"
+    "test:browser": "pnpm --filter diffpanel-vscode... build && playwright test --config playwright.config.mjs"
   },
   "dependencies": {
     "diffpanel": "workspace:*",

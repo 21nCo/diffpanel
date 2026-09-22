@@ -2,6 +2,7 @@ import { appendFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { npmTagForVersion } from './release-version.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -74,6 +75,7 @@ if (!match?.groups) {
 }
 
 const { slug, version } = match.groups;
+const npmTag = npmTagForVersion(version);
 const releaseTargets = await loadReleaseTargets();
 const target = releaseTargets.find((candidate) => candidate.slug === slug);
 
@@ -104,7 +106,7 @@ await writeOutputs({
   pkg_name: target.name,
   pkg_version: packageJson.version,
   pkg_path: target.path,
-  npm_tag: version.includes('-') ? 'next' : 'latest',
+  npm_tag: npmTag,
 });
 
 console.log(
@@ -115,7 +117,7 @@ console.log(
       name: target.name,
       version: packageJson.version,
       path: target.path,
-      npmTag: version.includes('-') ? 'next' : 'latest',
+      npmTag,
     },
     null,
     2,

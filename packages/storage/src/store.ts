@@ -17,6 +17,7 @@ import type { CapturedReview } from "@diffpanel/git";
 import { defaultDiffpanelHome } from "./paths.js";
 import type {
   ListRunsOptions,
+  OpenStoreOptions,
   PreparedRunReceipt,
   RecoveryReport,
   RetentionPolicy,
@@ -66,7 +67,7 @@ export class DiffpanelStore {
     this.database = database;
   }
 
-  static async open(home = defaultDiffpanelHome()): Promise<DiffpanelStore> {
+  static async open(home = defaultDiffpanelHome(), options: OpenStoreOptions = {}): Promise<DiffpanelStore> {
     await mkdir(join(home, "blobs"), { recursive: true });
     await mkdir(join(home, "runs"), { recursive: true });
     const resolvedHome = await realpath(home);
@@ -78,7 +79,7 @@ export class DiffpanelStore {
     migrate(database);
     const store = new DiffpanelStore(resolvedHome, databasePath, database);
     try {
-      store.lastRecoveryReport = await store.recover();
+      if (options.recover ?? true) store.lastRecoveryReport = await store.recover();
       return store;
     } catch (error) {
       database.close();
@@ -323,7 +324,11 @@ export class DiffpanelStore {
   }
 
   async applyRetention(policy: RetentionPolicy = {}): Promise<RetentionResult> {
-    return await this.withMaintenanceLock(() => this.applyRetentionLocked(policy));
+    const result = await this.withMaintenanceLock(() => this.applyRetentionLocked(policy));
+    for (const runId of result.deletedRunIds) {
+      await rm(join(this.runsPath, runId), { recursive: true, force: true });
+    }
+    return { ...result, deletedBlobCount: await this.garbageCollectBlobs() };
   }
 
   private async applyRetentionLocked(policy: RetentionPolicy): Promise<RetentionResult> {
@@ -331,9 +336,10 @@ export class DiffpanelStore {
     if (!Number.isSafeInteger(keepLatest) || keepLatest < 0) throw new Error("keepLatest must be a non-negative integer.");
     const olderThan = policy.olderThan ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1_000);
     if (Number.isNaN(olderThan.getTime())) throw new Error("olderThan must be a valid date.");
-    const rows = (policy.repositoryRoot
-      ? this.database.prepare("SELECT * FROM runs WHERE root_path = ? ORDER BY created_at DESC, run_id DESC").all(policy.repositoryRoot)
-      : this.database.prepare("SELECT * FROM runs ORDER BY created_at DESC, run_id DESC").all()) as RunRow[];
+    const allRows = this.database.prepare("SELECT * FROM runs ORDER BY created_at DESC, run_id DESC").all() as RunRow[];
+    const rows = policy.repositoryRoot
+      ? allRows.filter((row) => row.root_path === policy.repositoryRoot)
+      : allRows;
     const retainedPerRepository = new Map<string, number>();
     const deletedRunIds: string[] = [];
     for (const row of rows) {
@@ -347,7 +353,7 @@ export class DiffpanelStore {
       deletedRunIds.push(row.run_id);
     }
     const deleting = new Set(deletedRunIds);
-    for (const row of rows) {
+    for (const row of allRows) {
       if (deleting.has(row.run_id)) continue;
       try {
         const manifest = reviewManifestSchema.parse(JSON.parse(await readFile(row.manifest_path, "utf8")));
@@ -359,11 +365,9 @@ export class DiffpanelStore {
     if (deletedRunIds.length > 0) {
       const removeRun = this.database.prepare("DELETE FROM runs WHERE run_id = ?");
       for (const runId of deletedRunIds) removeRun.run(runId);
-      for (const runId of deletedRunIds) await rm(join(this.runsPath, runId), { recursive: true, force: true });
     }
-    const deletedBlobCount = await this.garbageCollectBlobsLocked();
     const retainedRunCount = (this.database.prepare("SELECT COUNT(*) AS count FROM runs").get() as { count: number }).count;
-    return { deletedRunIds, deletedBlobCount, retainedRunCount };
+    return { deletedRunIds, deletedBlobCount: 0, retainedRunCount };
   }
 
   async garbageCollectBlobs(): Promise<number> {

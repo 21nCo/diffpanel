@@ -13,7 +13,8 @@
     "diffpanel": "pnpm --filter @diffpanel/cli dev",
     "dev:vscode": "pnpm --filter diffpanel-vscode dev",
     "lint": "turbo run lint",
-    "test": "turbo run test",
+    "test": "turbo run test && pnpm test:release",
+    "test:release": "node --test scripts/*.test.mjs",
     "typecheck": "turbo run typecheck",
     "verify:packages": "node scripts/verify-package-consumer.mjs",
     "validate": "pnpm typecheck && pnpm test && pnpm build && pnpm verify:packages"

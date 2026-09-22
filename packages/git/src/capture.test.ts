@@ -1,5 +1,5 @@
-import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmodSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,7 +9,12 @@ import { runProcess } from "./process.js";
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, {
+    recursive: true,
+    force: true,
+    maxRetries: 3,
+    retryDelay: 50,
+  })));
 });
 
 async function createRepository(): Promise<string> {
@@ -98,6 +103,29 @@ describe("captureReview", () => {
     const linked = captured.files.find((file) => file.filePath === "linked.ts");
     expect(linked?.afterContent?.toString("utf8")).toBe(secret);
     expect(linked?.afterContent?.toString("utf8")).not.toContain("do not capture");
+  });
+
+  it("rejects an intermediate directory replaced by a symlink during capture", async () => {
+    const repository = await createRepository();
+    const outside = await mkdtemp(join(tmpdir(), "diffpanel-parent-symlink-"));
+    temporaryDirectories.push(outside);
+    await mkdir(join(repository, "nested"));
+    await writeFile(join(repository, "nested", "value.ts"), "export const value = 'inside';\n");
+    await runProcess("git", ["add", "nested/value.ts"], repository);
+    await runProcess("git", ["commit", "-m", "nested file"], repository);
+    await writeFile(join(repository, "nested", "value.ts"), "export const value = 'changed';\n");
+    await writeFile(join(outside, "value.ts"), "outside secret\n");
+    let replaced = false;
+
+    await expect(captureReview({ type: "worktree", repository }, {
+      onProgress(progress) {
+        if (progress.phase === "capture" && progress.filePath === "nested/value.ts" && !replaced) {
+          replaced = true;
+          rmSync(join(repository, "nested"), { recursive: true, force: true });
+          symlinkSync(outside, join(repository, "nested"));
+        }
+      },
+    })).rejects.toThrow(/symbolic-link parent/);
   });
 
   it("retries when the worktree changes during capture", async () => {
