@@ -1,0 +1,37 @@
+.cursor/hooks.json
+  s_ede325ca52612d::t_e9b7347d41e888 1-40
+.gemini/settings.json
+  s_ede325ca52612d::t_e9b7347d41e888 1-141
+.github/hooks/entire.json
+  s_ede325ca52612d::t_e9b7347d41e888 1-61
+.entire/.gitignore
+  s_ede325ca52612d::t_e9b7347d41e888 1-5
+.claude/settings.json
+  s_ede325ca52612d::t_e9b7347d41e888 1-90
+.entire/settings.json
+  s_ede325ca52612d::t_e9b7347d41e888 1-9
+.opencode/plugins/entire.ts
+  s_ede325ca52612d::t_e9b7347d41e888 1-269
+.codex/hooks.json
+  s_ede325ca52612d::t_e9b7347d41e888 1-88
+.factory/settings.json
+  s_ede325ca52612d::t_e9b7347d41e888 1-85
+.pi/extensions/entire/index.ts
+  s_ede325ca52612d::t_e9b7347d41e888 1-147
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ffc57b5b3168d856a5ca60ae4a474b2a25ae5b70",
+  "prompts": {},
+  "sessions": {
+    "s_ede325ca52612d": {
+      "agent_id": {
+        "tool": "amp",
+        "id": "TU-034TAWLDl7bLHdHbi2PxEc",
+        "model": "unknown"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
