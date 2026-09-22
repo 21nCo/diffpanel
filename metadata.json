@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.10.6",
+  "checkpoint_id": "01M34Y6VASZQ10ZDXTN2763PZ6",
+  "strategy": "manual-commit",
+  "branch": "aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "apps/cli/src/e2e.test.ts",
+    "apps/cli/src/index.ts",
+    "packages/git/src/capture.test.ts",
+    "packages/git/src/capture.ts",
+    "packages/git/src/process.test.ts",
+    "packages/git/src/process.ts",
+    "packages/git/src/windows-process.test.ts",
+    "packages/git/src/windows-process.ts",
+    "packages/git/src/worktree-file.test.ts",
+    "packages/git/src/worktree-file.ts",
+    "packages/storage/src/store.test.ts",
+    "packages/storage/src/store.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 168924,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 9272576,
+    "output_tokens": 43236,
+    "api_call_count": 56
+  }
+}
