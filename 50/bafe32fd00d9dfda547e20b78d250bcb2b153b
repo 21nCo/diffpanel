@@ -1,0 +1,87 @@
+scripts/verify-package-consumer.mjs
+  s_4a1f51a32f40b2::t_89a2abec09472a 114-118
+scripts/verify-browser-imports.mjs
+  s_4a1f51a32f40b2::t_89a2abec09472a 4-11,18-19,27,33-34
+packages/storage/src/store.test.ts
+  s_4a1f51a32f40b2::t_0fbd6b6c870973 349-369
+  s_4a1f51a32f40b2::t_29bdcedbaa54e5 292-319
+packages/storage/src/types.ts
+  s_4a1f51a32f40b2::t_1013a07d6a42ee 53-56
+.github/workflows/publish-tag.yml
+  s_4a1f51a32f40b2::t_fc2a95252df032 36
+packages/git/src/capture.test.ts
+  s_4a1f51a32f40b2::t_72dab4f58afff7 12-17
+  s_4a1f51a32f40b2::t_29c78b67538f46 2,108-128
+  s_4a1f51a32f40b2::t_855d3ec9f1c459 1
+  s_042fa740c37bf3::t_6c70e88b45a029 129-130
+packages/storage/src/store.ts
+  s_4a1f51a32f40b2::t_8eefdbfb9a387a 356
+  s_4a1f51a32f40b2::t_1013a07d6a42ee 20,70,82,327-330,339-342
+  s_4a1f51a32f40b2::t_cdf6cd3b779599 331,370
+apps/cli/src/index.ts
+  s_4a1f51a32f40b2::t_82688cf81b5625 83
+  s_4a1f51a32f40b2::t_8cc33e9f37d075 103,134,150,164,179,195,213
+apps/vscode/src/cli-list.ts
+  s_4a1f51a32f40b2::t_61d556f52a840d 1-41
+apps/vscode/src/cli.ts
+  s_4a1f51a32f40b2::t_61d556f52a840d 3,5,17
+apps/cli/src/e2e.test.ts
+  s_4a1f51a32f40b2::t_2066b7ef9a6687 1,81-82,85
+scripts/resolve-release-tag.mjs
+  s_4a1f51a32f40b2::t_4f8aa1461c9d7a 5,78,109,120
+packages/git/src/capture.ts
+  s_4a1f51a32f40b2::t_29c78b67538f46 336,350-361
+  s_042fa740c37bf3::t_566175a1e7ec28 362-364
+package.json
+  s_4a1f51a32f40b2::t_4f8aa1461c9d7a 16-17
+apps/cli/package.json
+  s_4a1f51a32f40b2::t_45fc076ec19573 14
+apps/vscode/src/cli-list.test.ts
+  s_4a1f51a32f40b2::t_61d556f52a840d 1-31
+scripts/release-version.mjs
+  s_4a1f51a32f40b2::t_4f8aa1461c9d7a 1-3
+packages/git/src/process.ts
+  s_4a1f51a32f40b2::t_d8951c0b35a2f5 121-122
+  s_4a1f51a32f40b2::t_394cc089720281 43,65,116-120,123,125-134
+  s_4a1f51a32f40b2::t_2f511c79de3dab 50,56,66
+scripts/release-version.test.mjs
+  s_4a1f51a32f40b2::t_4f8aa1461c9d7a 1-10
+packages/git/src/process.test.ts
+  s_4a1f51a32f40b2::t_394cc089720281 1,50-62,64-65,68-72
+  s_4a1f51a32f40b2::t_531b2933e8cdb0 63,66-67
+  s_dbeaf6beea25e6::t_1baed2793a6ee9 73
+apps/vscode/package.json
+  s_4a1f51a32f40b2::t_4f8aa1461c9d7a 197
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "50bafe32fd00d9dfda547e20b78d250bcb2b153b",
+  "prompts": {},
+  "sessions": {
+    "s_042fa740c37bf3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e2d1f8ce-5606-4670-8d30-1b4b7f9475df",
+        "model": "claude-opus-5"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    },
+    "s_4a1f51a32f40b2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c88a-c379-7711-89ae-f383fcca0dab",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    },
+    "s_dbeaf6beea25e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c886-73ef-72c2-b7ee-54bc7cc84533",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
