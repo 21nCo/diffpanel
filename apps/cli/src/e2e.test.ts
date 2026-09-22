@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { runProcess } from "@diffpanel/git";
-import type { ReviewManifest } from "@diffpanel/core";
+import type { ReviewManifest } from "diffpanel";
 
 const temporaryDirectories: string[] = [];
 

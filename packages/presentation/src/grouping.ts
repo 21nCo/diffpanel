@@ -1,5 +1,5 @@
-import type { Chapter, ReviewFile, ReviewItem } from "@diffpanel/core";
-import { diffCounts } from "./presentation.js";
+import type { Chapter, ReviewFile, ReviewItem } from "diffpanel";
+import { diffCounts } from "./navigation.js";
 
 export interface ItemMatch { file: ReviewFile; item: ReviewItem }
 export interface FileGroup {
@@ -38,8 +38,6 @@ export function otherFileChapters(file: ReviewFile, chapters: Chapter[], current
   return chapters.filter((chapter) => chapter.id !== currentId && chapter.itemRefs.some((ref) => refs.has(ref)));
 }
 
-// Deliberately a textual classifier, not a claim about module resolution or runtime behavior.
-// Only complete, single-line static imports/re-exports with unchanged syntax qualify.
 function importLine(line: string): { source: string; shape: string } | null {
   const match = /^(\s*(?:import\s+(?:type\s+)?[\w$*{},\s]+\s+from\s*|export\s+(?:type\s+)?(?:\*|\{[\w$,\s]*\})\s+from\s*|import\s*))(["'])([^"'\\\r\n]+)\2(\s*;?\s*)$/.exec(line);
   if (!match) return null;
@@ -84,7 +82,6 @@ export function isExactMove(file: ReviewFile): boolean {
     && file.beforeBlob !== null && file.beforeBlob === file.afterBlob;
 }
 
-/** Infer a segment-aligned prefix rule; every concrete suffix must remain identical. */
 export function prefixRewrite(mapping: { before: string; after: string }): Transformation["mappings"][number] | null {
   const before = mapping.before.split("/");
   const after = mapping.after.split("/");
@@ -94,7 +91,6 @@ export function prefixRewrite(mapping: { before: string; after: string }): Trans
   if (common === 0) return null;
   const from = `${before.slice(0, -common).join("/")}/`;
   const to = `${after.slice(0, -common).join("/")}/`;
-  // Literal wildcard paths and dot-segment paths do not support an unambiguous rule.
   if (from === to || [...before, ...after].some((part) => !part || part === "." || part === ".." || part.includes("*"))) return null;
   return { before: from, after: to, prefix: true };
 }
@@ -128,7 +124,6 @@ export function partitionChanges(matches: ItemMatch[]): { transformations: Trans
       prefixes.set(key, entry);
     }
   }
-  // A repeated edit of one module is an exact mapping, not evidence of a prefix migration.
   const supported = new Set([...prefixes].filter(([, entry]) => entry.sources.size >= 2 && entry.files.size >= 2).map(([key]) => key));
   for (const match of unique) {
     const move = isExactMove(match.file);

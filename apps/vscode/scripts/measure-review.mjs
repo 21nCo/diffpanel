@@ -6,7 +6,7 @@ const [manifestPath, reviewPath] = process.argv.slice(2);
 if (!manifestPath || !reviewPath) throw new Error('Usage: node scripts/measure-review.mjs <manifest.json> <review.json>');
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 const review = JSON.parse(await readFile(reviewPath, 'utf8'));
-const result = await build({ entryPoints: [fileURLToPath(new URL('../src/review-groups.ts', import.meta.url))], bundle: true, platform: 'node', format: 'esm', write: false });
+const result = await build({ entryPoints: [fileURLToPath(new URL('../../../packages/presentation/src/index.ts', import.meta.url))], bundle: true, platform: 'node', format: 'esm', write: false });
 const { partitionChanges } = await import('data:text/javascript;base64,' + Buffer.from(result.outputFiles[0].text).toString('base64'));
 const matches = new Map(manifest.files.flatMap(file => file.items.map(item => [item.id, { file, item }])));
 const chapters = review.chapters.map(chapter => {

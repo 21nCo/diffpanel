@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -143,5 +143,119 @@ describe("DiffpanelStore", () => {
       await store.publish(receipt.runId, generatedReview(receipt.runId));
       expect((await store.getRun(receipt.runId)).review?.chapters[0]!.itemRefs).toEqual(["item-1"]);
     } finally { store.close(); }
+  });
+
+  it("paginates runs with stable cursors", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-pages-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      for (let index = 0; index < 3; index += 1) await store.createPreparedRun(capturedReview(), { title: `Run ${index}` });
+      const first = store.listRunsPage({ limit: 2 });
+      const second = store.listRunsPage({ limit: 2, cursor: first.nextCursor! });
+      expect(first.runs).toHaveLength(2);
+      expect(first.nextCursor).not.toBeNull();
+      expect(second.runs).toHaveLength(1);
+      expect(second.nextCursor).toBeNull();
+      expect(new Set([...first.runs, ...second.runs].map((run) => run.runId)).size).toBe(3);
+      expect(() => store.listRunsPage({ limit: 201 })).toThrow(/between 1 and 200/);
+      expect(() => store.listRunsPage({ cursor: "not-a-cursor" })).toThrow(/Invalid run-list cursor/);
+    } finally { store.close(); }
+  });
+
+  it("authorizes blob reads through a referencing run", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-blob-auth-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const first = await store.createPreparedRun(capturedReview());
+      const second = await store.createPreparedRun({ ...capturedReview(), repositoryId: "repo-2" });
+      const run = await store.getRun(first.runId);
+      const hash = run.manifest.files[0]!.afterBlob!;
+      expect((await store.getRunBlob(first.runId, hash)).toString("utf8")).toBe("after\n");
+      await expect(store.getRunBlob("missing-run", hash)).rejects.toThrow(/not referenced/);
+      expect((await store.getFileContent(second.runId, "file-1", "before"))?.toString("utf8")).toBe("before\n");
+    } finally { store.close(); }
+  });
+
+  it("keeps shared blobs referenced by retained runs during retention", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-retention-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const receipts: Array<{ runId: string }> = [];
+      for (let index = 0; index < 3; index += 1) {
+        const receipt = await store.createPreparedRun(capturedReview(), { title: `Run ${index}` });
+        store.setArchived(receipt.runId, true);
+        receipts.push(receipt);
+      }
+      const retainedHash = (await store.getRun(receipts[2]!.runId)).manifest.files[0]!.afterBlob!;
+      const result = await store.applyRetention({ keepLatest: 1, olderThan: new Date(Date.now() + 60_000) });
+      expect(result.deletedRunIds).toHaveLength(2);
+      expect(store.listRuns(undefined, true)).toHaveLength(1);
+      expect((await store.getRunBlob(store.listRuns(undefined, true)[0]!.runId, retainedHash)).toString()).toBe("after\n");
+      expect(result.deletedBlobCount).toBe(0);
+    } finally { store.close(); }
+  });
+
+  it("recovers a validated review written before its database update", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-recovery-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    await writeFile(join(home, "runs", receipt.runId, "review.json"), `${JSON.stringify(generatedReview(receipt.runId))}\n`);
+    store.close();
+
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.recoveredRunIds).toContain(receipt.runId);
+      expect((await recovered.getRun(receipt.runId)).summary.status).toBe("ready");
+    } finally { recovered.close(); }
+  });
+
+  it("marks runs failed when immutable content is missing on restart", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-missing-blob-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    const hash = (await store.getRun(receipt.runId)).manifest.files[0]!.afterBlob!;
+    store.close();
+    await unlink(join(home, "blobs", hash.slice(0, 2), hash.slice(2)));
+
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.failedRunIds).toContain(receipt.runId);
+      expect((await recovered.getRun(receipt.runId)).summary.status).toBe("failed");
+    } finally { recovered.close(); }
+  });
+
+  it("marks ready runs failed when their review is corrupt", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-corrupt-review-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    await store.publish(receipt.runId, generatedReview(receipt.runId));
+    store.close();
+    await writeFile(join(home, "runs", receipt.runId, "review.json"), "{}\n");
+
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.failedRunIds).toContain(receipt.runId);
+      expect((await recovered.getRun(receipt.runId)).summary.status).toBe("failed");
+    } finally { recovered.close(); }
+  });
+
+  it("removes orphan run directories and interrupted temporary writes on restart", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-orphan-recovery-"));
+    temporaryDirectories.push(home);
+    const initial = await DiffpanelStore.open(home);
+    initial.close();
+    await mkdir(join(home, "runs", "orphan-run"), { recursive: true });
+    await writeFile(join(home, "runs", "orphan-run", "manifest.json.tmp"), "partial");
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.removedOrphanRunIds).toContain("orphan-run");
+      await expect(access(join(home, "runs", "orphan-run"))).rejects.toThrow();
+    } finally { recovered.close(); }
   });
 });

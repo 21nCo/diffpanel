@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@diffpanel/core": "workspace:*",
+    "diffpanel": "workspace:*",
+    "@diffpanel/generation": "workspace:*",
     "@diffpanel/git": "workspace:*",
     "@diffpanel/storage": "workspace:*",
     "commander": "^14.0.0"

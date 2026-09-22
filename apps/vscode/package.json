@@ -1,5 +1,6 @@
 {
-  "name": "diffpanel",
+  "name": "diffpanel-vscode",
+  "private": true,
   "displayName": "Diffpanel",
   "description": "Browse persistent, agent-generated repository review chapters.",
   "version": "0.1.0",
@@ -190,13 +191,14 @@
     "clean": "rm -rf dist coverage",
     "dev": "node esbuild.mjs --watch",
     "lint": "tsc --noEmit",
-    "package": "pnpm build && vsce package --no-dependencies --allow-missing-repository",
+    "package": "pnpm build && node scripts/package-extension.mjs",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",
     "test:browser": "pnpm build && playwright test --config playwright.config.mjs"
   },
   "dependencies": {
-    "@diffpanel/core": "workspace:*",
+    "diffpanel": "workspace:*",
+    "@diffpanel/presentation": "workspace:*",
     "@diffpanel/storage": "workspace:*",
     "dompurify": "3.3.3",
     "mermaid": "11.17.0",

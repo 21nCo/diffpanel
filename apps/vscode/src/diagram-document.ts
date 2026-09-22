@@ -1,5 +1,5 @@
 import type { StoredRun } from "@diffpanel/storage";
-import { itemLocationLabel } from "./presentation.js";
+import { itemLocationLabel } from "@diffpanel/presentation";
 
 export interface DiagramDocument {
   title: string;

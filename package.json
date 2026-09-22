@@ -11,14 +11,16 @@
     "build": "turbo run build",
     "clean": "turbo run clean",
     "diffpanel": "pnpm --filter @diffpanel/cli dev",
-    "dev:vscode": "pnpm --filter diffpanel dev",
+    "dev:vscode": "pnpm --filter diffpanel-vscode dev",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "validate": "pnpm typecheck && pnpm test && pnpm build"
+    "verify:packages": "node scripts/verify-package-consumer.mjs",
+    "validate": "pnpm typecheck && pnpm test && pnpm build && node scripts/verify-browser-imports.mjs && pnpm verify:packages"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
+    "esbuild": "^0.27.0",
     "tsup": "^8.5.0",
     "turbo": "^2.5.4",
     "typescript": "^5.8.3",

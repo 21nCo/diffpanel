@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ReviewFile } from "@diffpanel/core";
+import type { ReviewFile } from "diffpanel";
 import { repositoryFilePath, workingFileCandidates } from "./repository-file.js";
 
 describe("repository file paths", () => {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Chapter, ReviewFile, ReviewItem } from "@diffpanel/core";
-import { groupFiles, importRewrite, isExactMove, matchesRewrite, moveDescription, otherFileChapters, partitionChanges, prefixRewrite, type ItemMatch } from "./review-groups.js";
-import { diagramSourceError } from "./diagram-policy.js";
+import type { Chapter, ReviewFile, ReviewItem } from "diffpanel";
+import { diagramSourceError, groupFiles, importRewrite, isExactMove, matchesRewrite, moveDescription, otherFileChapters, partitionChanges, prefixRewrite, type ItemMatch } from "@diffpanel/presentation";
 
 function match(id: string, patch = '@@ -1 +1 @@\n-import { foo } from "@/old";\n+import { foo } from "@/new";'): ItemMatch {
   const item: ReviewItem = { id, kind: "hunk", filePath: `${id}.ts`, oldPath: null, status: "modified", ordinal: 0, oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, patch, contentHash: id };

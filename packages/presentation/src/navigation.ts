@@ -1,4 +1,4 @@
-import type { Chapter, ReviewFile, ReviewItem } from "@diffpanel/core";
+import type { Chapter, ReviewFile, ReviewItem } from "diffpanel";
 
 export function chapterLabels(chapters: Chapter[]): Map<string, string> {
   const labels = new Map<string, string>();

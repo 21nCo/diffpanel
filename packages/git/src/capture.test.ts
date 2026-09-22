@@ -1,4 +1,5 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -42,6 +43,11 @@ describe("captureReview", () => {
     expect(captured.files[0]?.items[0]?.kind).toBe("file");
   });
 
+  it("rejects invalid repository snapshot limits", async () => {
+    const repository = await createRepository();
+    await expect(captureReview({ type: "repository", repository, maxFiles: 0 })).rejects.toThrow(/positive integer/);
+  });
+
   it.each(["staged", "worktree", "range"] as const)("retains pure move evidence in %s captures", async (type) => {
     const repository = await createRepository();
     await runProcess("git", ["mv", "alpha.ts", "moved.ts"], repository);
@@ -79,6 +85,64 @@ describe("captureReview", () => {
     expect(captured.files[0]).toMatchObject({ status: "renamed", beforeContent: Buffer.alloc(0), afterContent: Buffer.alloc(0) });
     expect(captured.files[0]!.items[0]!.kind).toBe("file");
   });
+
+  it("captures a symlink target without following it outside the repository", async () => {
+    const repository = await createRepository();
+    const outside = await mkdtemp(join(tmpdir(), "diffpanel-outside-"));
+    temporaryDirectories.push(outside);
+    const secret = join(outside, "secret.ts");
+    await writeFile(secret, "do not capture this content\n");
+    await symlink(secret, join(repository, "linked.ts"));
+
+    const captured = await captureReview({ type: "worktree", repository });
+    const linked = captured.files.find((file) => file.filePath === "linked.ts");
+    expect(linked?.afterContent?.toString("utf8")).toBe(secret);
+    expect(linked?.afterContent?.toString("utf8")).not.toContain("do not capture");
+  });
+
+  it("retries when the worktree changes during capture", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    let changed = false;
+    const captured = await captureReview(
+      { type: "worktree", repository },
+      { onProgress(progress) {
+        if (progress.phase === "verify" && !changed) {
+          changed = true;
+          writeFileSync(join(repository, "alpha.ts"), "export const alpha = 3;\n");
+        }
+      } },
+    );
+    expect(captured.files[0]?.afterContent?.toString("utf8")).toContain("alpha = 3");
+  });
+
+  it("anchors staged captures to an immutable index tree", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await runProcess("git", ["add", "alpha.ts"], repository);
+    const captured = await captureReview({ type: "staged", repository });
+    expect(captured.scope).toMatchObject({ type: "staged", indexSha: expect.stringMatching(/^[a-f0-9]{40}$/) });
+    expect(captured.files[0]?.afterContent?.toString("utf8")).toContain("alpha = 2");
+  });
+
+  it("enforces aggregate capture budgets", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await writeFile(join(repository, "beta.ts"), "export const beta = 2;\n");
+    const captured = await captureReview(
+      { type: "worktree", repository },
+      { limits: { maxTotalBytes: 55 } },
+    );
+    expect(captured.files).toHaveLength(1);
+    expect(captured.skipped).toEqual([expect.objectContaining({ reason: expect.stringContaining("content limit") })]);
+  });
+
+  it("honors cancellation before spawning Git", async () => {
+    const repository = await createRepository();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(captureReview({ type: "worktree", repository }, { signal: controller.signal })).rejects.toThrow(/cancelled/);
+  });
 });
 
 describe("parseNameStatus", () => {
@@ -88,5 +152,9 @@ describe("parseNameStatus", () => {
       { status: "modified", oldPath: null, filePath: "src/a.ts" },
       { status: "renamed", oldPath: "src/old.ts", filePath: "src/new.ts" },
     ]);
+  });
+
+  it("rejects paths that escape the repository", () => {
+    expect(() => parseNameStatus(Buffer.from("M\0../secret.ts\0"))).toThrow(/Unsafe repository path/);
   });
 });

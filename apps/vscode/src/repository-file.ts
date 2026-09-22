@@ -1,5 +1,5 @@
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { ReviewFile } from "@diffpanel/core";
+import type { ReviewFile } from "diffpanel";
 
 export function repositoryFilePath(repositoryRoot: string, filePath: string): string {
   const root = resolve(repositoryRoot);

@@ -21,13 +21,28 @@ program
   .option("--repo [ref]", "Capture a repository-wide snapshot", false)
   .option("--base <ref>", "Base ref for worktree or staged capture", "HEAD")
   .option("--max-files <count>", "Repository snapshot file limit", parseInteger, 2_000)
+  .option("--max-file-bytes <count>", "Maximum bytes captured from one file", parseInteger)
+  .option("--max-total-bytes <count>", "Maximum aggregate captured content bytes", parseInteger)
+  .option("--max-output-bytes <count>", "Maximum output bytes from each Git subprocess", parseInteger)
+  .option("--timeout-ms <count>", "Git subprocess deadline in milliseconds", parseInteger)
   .option("--title <title>", "Display name for this review in the Diffpanel panel")
   .option("--json", "Print the full receipt as JSON")
   .action(async (range: string | undefined, options) => {
     const selected = [Boolean(range), options.worktree, options.staged, Boolean(options.repo)].filter(Boolean);
     if (selected.length > 1) throw new Error("Choose only one of a range, --worktree, --staged, or --repo.");
     const request = toCaptureRequest(range, options);
-    const captured = await captureReview(request);
+    const controller = new AbortController();
+    const cancel = (): void => controller.abort();
+    process.once("SIGINT", cancel);
+    const captured = await captureReview(request, {
+      signal: controller.signal,
+      limits: {
+        ...(options.maxFileBytes ? { maxFileBytes: options.maxFileBytes } : {}),
+        ...(options.maxTotalBytes ? { maxTotalBytes: options.maxTotalBytes } : {}),
+        ...(options.maxOutputBytes ? { maxProcessOutputBytes: options.maxOutputBytes } : {}),
+        ...(options.timeoutMs ? { processTimeoutMs: options.timeoutMs } : {}),
+      },
+    }).finally(() => process.removeListener("SIGINT", cancel));
     const store = await DiffpanelStore.open();
     try {
       const receipt = await store.createPreparedRun(captured, { title: options.title });
@@ -80,18 +95,27 @@ program
   .description("List generated and prepared review runs.")
   .option("--repository <path>", "Only runs for this repository")
   .option("--include-archived", "Include archived review runs")
+  .option("--limit <count>", "Maximum runs to return (1-200)", parseInteger, 50)
+  .option("--cursor <cursor>", "Continue a prior paginated listing")
+  .option("--page", "Return runs with the next cursor")
   .option("--json", "Print JSON")
   .action(async (options) => {
     const store = await DiffpanelStore.open();
     try {
-      const runs = store.listRuns(options.repository ? resolve(options.repository) : undefined, options.includeArchived);
+      const page = store.listRunsPage({
+        repositoryRoot: options.repository ? resolve(options.repository) : undefined,
+        includeArchived: options.includeArchived,
+        limit: options.limit,
+        cursor: options.cursor,
+      });
       if (options.json) {
-        process.stdout.write(`${JSON.stringify(runs, null, 2)}\n`);
+        process.stdout.write(`${JSON.stringify(options.page ? page : page.runs, null, 2)}\n`);
         return;
       }
-      for (const run of runs) {
+      for (const run of page.runs) {
         process.stdout.write(`${run.runId}\t${run.status}\t${run.repositoryName}\t${run.reviewTitle}\t${run.chapterCount} chapters\n`);
       }
+      if (page.nextCursor) process.stdout.write(`Next cursor: ${page.nextCursor}\n`);
     } finally {
       store.close();
     }
@@ -170,11 +194,33 @@ program
     if (side !== "before" && side !== "after") throw new Error("Content side must be before or after.");
     const store = await DiffpanelStore.open();
     try {
-      const run = await store.getRun(runId);
-      const file = run.manifest.files.find((candidate) => candidate.id === fileId);
-      if (!file) throw new Error(`Unknown file ${fileId} in run ${runId}.`);
-      const hash = side === "before" ? file.beforeBlob : file.afterBlob;
-      if (hash) process.stdout.write(await store.getBlob(hash));
+      const content = await store.getFileContent(runId, fileId, side);
+      if (content) process.stdout.write(content);
+    } finally {
+      store.close();
+    }
+  });
+
+program
+  .command("prune")
+  .description("Delete expired runs and garbage-collect only unreferenced blobs.")
+  .option("--repository <path>", "Only apply retention to one repository")
+  .option("--older-than-days <count>", "Delete eligible runs older than this many days", parseNonNegativeInteger, 90)
+  .option("--keep-latest <count>", "Always retain this many latest runs per repository", parseNonNegativeInteger, 50)
+  .option("--include-active", "Allow prepared and ready, non-archived runs to expire")
+  .option("--json", "Print JSON")
+  .action(async (options) => {
+    const store = await DiffpanelStore.open();
+    try {
+      const result = await store.applyRetention({
+        repositoryRoot: options.repository ? resolve(options.repository) : undefined,
+        olderThan: new Date(Date.now() - options.olderThanDays * 24 * 60 * 60 * 1_000),
+        keepLatest: options.keepLatest,
+        archivedOnly: !options.includeActive,
+      });
+      process.stdout.write(options.json
+        ? `${JSON.stringify(result, null, 2)}\n`
+        : `Deleted ${result.deletedRunIds.length} runs and ${result.deletedBlobCount} unreferenced blobs; retained ${result.retainedRunCount} runs.\n`);
     } finally {
       store.close();
     }
@@ -194,6 +240,7 @@ program
         home: defaultDiffpanelHome(),
         databasePath: store.databasePath,
         runs: store.listRuns(undefined, true).length,
+        recovery: store.lastRecoveryReport,
       };
       process.stdout.write(options.json
         ? `${JSON.stringify(report, null, 2)}\n`
@@ -212,6 +259,12 @@ program.parseAsync(process.argv).catch((error: unknown) => {
 function parseInteger(value: string): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Expected a positive integer, received '${value}'.`);
+  return parsed;
+}
+
+function parseNonNegativeInteger(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`Expected a non-negative integer, received '${value}'.`);
   return parsed;
 }
 

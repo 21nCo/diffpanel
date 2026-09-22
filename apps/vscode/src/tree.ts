@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
-import { titleForScope } from "@diffpanel/core";
+import { titleForScope } from "diffpanel";
 import type { StoredRun } from "@diffpanel/storage";
 import { DiffpanelCli } from "./cli.js";
 import type { ChapterNode, ItemNode, RepositoryNode, ReviewTreeNode, RunNode } from "./model.js";
-import { chapterItemRefs, chapterLabels } from "./presentation.js";
+import { chapterItemRefs, chapterLabels } from "@diffpanel/presentation";
 import { repositoryFilePath } from "./repository-file.js";
 
 export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNode>, vscode.Disposable {

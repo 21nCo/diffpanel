@@ -1,0 +1,85 @@
+name: Publish tagged package
+
+on:
+  push:
+    tags:
+      - '*-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag in the form <package-slug>-v<version>'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Resolve publish target
+        id: resolve
+        run: node ./scripts/resolve-release-tag.mjs "${RELEASE_TAG}"
+
+      - name: Install package dependencies
+        working-directory: ${{ steps.resolve.outputs.pkg_path }}
+        run: npm install --workspaces=false --package-lock=false
+
+      - name: Build package
+        working-directory: ${{ steps.resolve.outputs.pkg_path }}
+        run: npm run build
+
+      - name: Test package
+        working-directory: ${{ steps.resolve.outputs.pkg_path }}
+        run: npm test
+
+      - name: Pack package
+        id: pack
+        working-directory: ${{ steps.resolve.outputs.pkg_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pack_dir="${RUNNER_TEMP}/diffpanel-pack"
+          mkdir -p "${pack_dir}"
+          npm pack --pack-destination "${pack_dir}" --json
+          mapfile -t tarballs < <(find "${pack_dir}" -maxdepth 1 -type f -name '*.tgz' -print)
+          if [[ ${#tarballs[@]} -ne 1 ]]; then
+            echo "Expected exactly one package tarball, found ${#tarballs[@]}" >&2
+            exit 1
+          fi
+          echo "tarball=${tarballs[0]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify clean external install
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_dir="$(mktemp -d)"
+          cd "${fixture_dir}"
+          npm init --yes >/dev/null
+          npm install --package-lock=false "${{ steps.pack.outputs.tarball }}"
+          node --input-type=module --eval 'await import(process.argv[1])' "${{ steps.resolve.outputs.pkg_name }}"
+
+      - name: Publish package
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
