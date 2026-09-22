@@ -1,0 +1,198 @@
+apps/cli/src/index.ts
+  s_4a1f51a32f40b2::t_614d67f244bcab 24-27,34-45,98-100,105-110,112,115,118,197-223,243,265-267
+  s_4a1f51a32f40b2::t_dfefbfa8c833e1 268-270
+apps/vscode/src/details.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 2
+packages/presentation/LICENSE
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-21
+packages/presentation/src/grouping.ts
+  s_4a1f51a32f40b2::t_028eb8170037cd 1-2
+skills/diffpanel-chapters/references/output-schema.md
+  s_4a1f51a32f40b2::t_a3756037ccb0c1 3-7
+apps/vscode/scripts/measure-review.mjs
+  s_4a1f51a32f40b2::t_f3fddac6354c84 9
+README.md
+  s_4a1f51a32f40b2::t_a3756037ccb0c1 9-10,12,54,82-99
+  s_4a1f51a32f40b2::t_894f9e2462a4f4 100-103
+packages/generation/src/contract.ts
+  s_4a1f51a32f40b2::t_28b4b1d387719c 1-13,17
+  s_4a1f51a32f40b2::t_7c29b167ff1e55 14-16
+apps/vscode/src/model.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 1
+scripts/resolve-release-tag.mjs
+  s_4a1f51a32f40b2::t_551b62540722bc 1-121
+packages/generation/src/index.ts
+  s_4a1f51a32f40b2::t_28b4b1d387719c 1-10
+LICENSE
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-21
+packages/core/package.json
+  s_4a1f51a32f40b2::t_894f9e2462a4f4 3
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 4,6-12,17-20,23-30,32
+  s_4a1f51a32f40b2::t_d8e21887abf923 2
+packages/core/src/node.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 1
+apps/vscode/src/webview/index.tsx
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 3
+  s_4a1f51a32f40b2::t_0c4796e2067e2c 10
+apps/vscode/src/webview/review-overview.tsx
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 2
+packages/generation/src/contract.test.ts
+  s_4a1f51a32f40b2::t_28b4b1d387719c 1-10
+apps/vscode/package.json
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 2-3,194,200-201
+packages/generation/src/format.ts
+  s_4a1f51a32f40b2::t_28b4b1d387719c 1-2,19-21
+apps/vscode/src/extension.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 3
+scripts/verify-browser-imports.mjs
+  s_4a1f51a32f40b2::t_b7426823db0dbb 6-9,11
+  s_4a1f51a32f40b2::t_a3756037ccb0c1 1-5,10,12-23
+packages/presentation/src/presentation.test.ts
+  s_4a1f51a32f40b2::t_00e0f51f56f347 1-76
+apps/vscode/src/repository-file.test.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 2
+packages/core/src/schemas.ts
+  s_4a1f51a32f40b2::t_fdbd6de4acf061 5
+packages/git/LICENSE
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-21
+pnpm-workspace.yaml
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 5-6
+packages/git/src/capture.ts
+  s_4a1f51a32f40b2::t_50fee2183bbaab 38-40,45
+  s_4a1f51a32f40b2::t_82a6426f44d2ce 55,210-215
+  s_4a1f51a32f40b2::t_4986909d3c1e3f 348
+  s_4a1f51a32f40b2::t_e10b52124dbf49 1-2,8-9,19-25,27-32,34,42-44,46-49,52-54,56-61,63,66,68,72-73,76-78,85,88,100,104-109,117-118,120-122,134,143,145,148
+  s_4a1f51a32f40b2::t_258a5fc49dcdf0 458-460,462-464,469-472,481,486-487,490-491
+  s_4a1f51a32f40b2::t_d9d633dde4b1af 266-267,270-271,273,276,312,315,323,326-332,336-341,349,353,365,371-374,381
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 6-7
+  s_4a1f51a32f40b2::t_5068c07db3d6a4 136-139,155-209,216-224,237-238,244
+  s_4a1f51a32f40b2::t_41fab8bba3f97a 342,548-589
+  s_4a1f51a32f40b2::t_d8826a781bd256 343
+packages/presentation/src/diagram.ts
+  s_4a1f51a32f40b2::t_028eb8170037cd 1-2,5
+packages/presentation/package.json
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 1-34,36-42
+  s_4a1f51a32f40b2::t_894f9e2462a4f4 35
+packages/git/src/process.test.ts
+  s_4a1f51a32f40b2::t_27bbc8ba4274a2 1-49
+packages/storage/README.md
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-16
+packages/core/LICENSE
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-21
+apps/vscode/src/webview/review-evidence.tsx
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 2
+  s_4a1f51a32f40b2::t_0c4796e2067e2c 3
+packages/presentation/README.md
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-7,11-14
+  s_4a1f51a32f40b2::t_a2eae5211985ef 8
+  s_4a1f51a32f40b2::t_145c3faf7246bc 9-10
+apps/vscode/src/tree.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 2,6
+packages/generation/LICENSE
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-21
+packages/storage/src/types.ts
+  s_4a1f51a32f40b2::t_75351db9b3ffbb 40-72
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 1
+release-packages.json
+  s_4a1f51a32f40b2::t_551b62540722bc 1-2,4,6-7
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 3,5
+packages/presentation/src/index.ts
+  s_4a1f51a32f40b2::t_028eb8170037cd 1-3
+.github/workflows/publish-tag.yml
+  s_4a1f51a32f40b2::t_551b62540722bc 1-43,47-49,51-53,55-63,65-85
+  s_4a1f51a32f40b2::t_6fd46409fe2c45 44-46,50,54,64
+packages/generation/tsconfig.json
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 1-4
+skills/diffpanel-chapters/SKILL.md
+  s_4a1f51a32f40b2::t_a3756037ccb0c1 52-55
+packages/git/src/process.ts
+  s_4a1f51a32f40b2::t_ea30a98673d2a0 25
+  s_4a1f51a32f40b2::t_649384fe434294 1,9-18,23,26-35,39,45-47,49-52,54-80,82-85,92,97,99-105,109-122,126,128,134,136
+  s_4a1f51a32f40b2::t_fdbd6de4acf061 48,53
+packages/presentation/src/navigation.ts
+  s_4a1f51a32f40b2::t_028eb8170037cd 1
+packages/git/README.md
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-17
+packages/storage/LICENSE
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-21
+apps/cli/package.json
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 18-19
+apps/vscode/src/webview/diagram.tsx
+  s_4a1f51a32f40b2::t_0c4796e2067e2c 4
+apps/vscode/scripts/package-extension.mjs
+  s_4a1f51a32f40b2::t_f10d540ca183de 1-36
+package.json
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 14
+  s_4a1f51a32f40b2::t_a3756037ccb0c1 18-19
+  s_4a1f51a32f40b2::t_8bd7f48de6bbaf 23
+packages/generation/package.json
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 1-34,36-42
+  s_4a1f51a32f40b2::t_894f9e2462a4f4 35
+packages/core/README.md
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-6,8-13
+  s_4a1f51a32f40b2::t_145c3faf7246bc 7
+packages/git/package.json
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 3-4,6-12,19-26
+  s_4a1f51a32f40b2::t_894f9e2462a4f4 35
+apps/vscode/src/diagram-document.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 2
+packages/presentation/tsconfig.json
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 1-4
+apps/cli/src/e2e.test.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 6
+packages/generation/README.md
+  s_4a1f51a32f40b2::t_a2eae5211985ef 8
+  s_4a1f51a32f40b2::t_145c3faf7246bc 10
+  s_4a1f51a32f40b2::t_6829ba11afd78c 1-7,9,11-14
+packages/storage/package.json
+  s_4a1f51a32f40b2::t_75517169d637b2 35
+  s_4a1f51a32f40b2::t_2daa6fbe763c8b 3-4,6-12,19-26,37
+  s_4a1f51a32f40b2::t_894f9e2462a4f4 36
+packages/git/src/types.ts
+  s_4a1f51a32f40b2::t_fdbd6de4acf061 26-46
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 1
+apps/vscode/src/repository-file.ts
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 2
+scripts/verify-package-consumer.mjs
+  s_4a1f51a32f40b2::t_6b2c4bb08c8d0b 1-31,38-118
+  s_4a1f51a32f40b2::t_02be15dc82ecc4 32-37
+packages/git/src/capture.test.ts
+  s_4a1f51a32f40b2::t_27bbc8ba4274a2 1-2,88-145,156-159
+  s_4a1f51a32f40b2::t_50fee2183bbaab 46-50
+packages/storage/src/store.ts
+  s_4a1f51a32f40b2::t_ee9085d5838323 341-349
+  s_4a1f51a32f40b2::t_7271c16ab120f9 289-297,299-302,306-340,350-392,394-409,417-425,453-463,472
+  s_4a1f51a32f40b2::t_f4740c67bc5dab 3,474,507-508,521-527,536,565-603
+  s_4a1f51a32f40b2::t_deefc9982e7179 4,18-30,58,75,77-79
+  s_4a1f51a32f40b2::t_b90d8b70ae7e42 13-15
+  s_4a1f51a32f40b2::t_4e25dcca17d365 93,95-98,172-174,194
+  s_4a1f51a32f40b2::t_c99dd6dc77075f 207-220,230-262
+  s_4a1f51a32f40b2::t_5d38b280856ea1 2,284,303-305,393,410-416,464-471,561
+  s_4a1f51a32f40b2::t_96193c784671ca 473
+apps/vscode/src/review-groups.test.ts
+  s_4a1f51a32f40b2::t_0c4796e2067e2c 2-3
+apps/vscode/src/presentation.test.ts
+  s_4a1f51a32f40b2::t_0c4796e2067e2c 2,10
+packages/storage/src/store.test.ts
+  s_4a1f51a32f40b2::t_5d38b280856ea1 1,213-244
+  s_4a1f51a32f40b2::t_87dc4b8c01cfae 147-159,161-185,187-212,245-260
+  s_4a1f51a32f40b2::t_745828e97d4608 160,186
+pnpm-lock.yaml
+  s_4a1f51a32f40b2::t_9276c5551d57bd 14-16,32,34,44-46,66,68,72-74,135-150,153-154,170,172-173,175-190,192,197-199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "75b5559f77f926299cc533caf2963fc51bc0a068",
+  "prompts": {},
+  "sessions": {
+    "s_4a1f51a32f40b2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c88a-c379-7711-89ae-f383fcca0dab",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
