@@ -1,0 +1,21 @@
+apps/vscode/src/extension.ts
+  s_59d0267e5d178c::t_569b00a2bf1b14 32-34
+apps/vscode/src/tree.ts
+  s_59d0267e5d178c::t_7de137c839bae2 88,99,116,126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "86dd5c0ac254a4b36361c98b9c8d72249b4e2474",
+  "prompts": {},
+  "sessions": {
+    "s_59d0267e5d178c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a09537-998c-7d22-80c5-05294ca8fd3f",
+        "model": "unknown"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
