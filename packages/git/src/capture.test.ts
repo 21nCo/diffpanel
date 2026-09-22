@@ -1,5 +1,5 @@
 import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { writeFileSync } from "node:fs";
+import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -116,6 +116,34 @@ describe("captureReview", () => {
     expect(captured.files[0]?.afterContent?.toString("utf8")).toContain("alpha = 3");
   });
 
+  it("retries when worktree metadata or skipped-file classification changes", async () => {
+    const repository = await createRepository();
+    await runProcess("git", ["config", "core.filemode", "true"], repository);
+    await writeFile(join(repository, "beta.ts"), "export const beta = 2;\n");
+    await writeFile(join(repository, "changing.dat"), Buffer.from([0, 1, 2]));
+    let changed = false;
+    const captured = await captureReview({ type: "worktree", repository }, {
+      onProgress(progress) {
+        if (progress.phase === "verify" && !changed) {
+          changed = true;
+          writeFileSync(join(repository, "changing.dat"), "now reviewable\n");
+          chmodSync(join(repository, "alpha.ts"), 0o755);
+        }
+      },
+    });
+    expect(captured.files.map((file) => file.filePath)).toContain("changing.dat");
+    expect(captured.files.find((file) => file.filePath === "alpha.ts")?.items[0]?.patch).toContain("new mode 100755");
+  });
+
+  it("counts only captured files against the file limit", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "aaa.dat"), Buffer.from([0, 1, 2]));
+    await writeFile(join(repository, "beta.ts"), "export const beta = 2;\n");
+    const captured = await captureReview({ type: "worktree", repository }, { limits: { maxFiles: 1 } });
+    expect(captured.files.map((file) => file.filePath)).toEqual(["beta.ts"]);
+    expect(captured.skipped).toContainEqual({ filePath: "aaa.dat", reason: "binary file" });
+  });
+
   it("anchors staged captures to an immutable index tree", async () => {
     const repository = await createRepository();
     await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
@@ -123,6 +151,30 @@ describe("captureReview", () => {
     const captured = await captureReview({ type: "staged", repository });
     expect(captured.scope).toMatchObject({ type: "staged", indexSha: expect.stringMatching(/^[a-f0-9]{40}$/) });
     expect(captured.files[0]?.afterContent?.toString("utf8")).toContain("alpha = 2");
+  });
+
+  it("falls back to the live index only for confirmed unmerged entries", async () => {
+    const repository = await createRepository();
+    await runProcess("git", ["checkout", "-b", "side"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'side';\n");
+    await runProcess("git", ["commit", "-am", "side"], repository);
+    await runProcess("git", ["checkout", "main"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'main';\n");
+    await runProcess("git", ["commit", "-am", "main"], repository);
+    await runProcess("git", ["merge", "side"], repository, { acceptedExitCodes: [0, 1] });
+    const captured = await captureReview({ type: "staged", repository });
+    expect(captured.scope).not.toHaveProperty("indexSha");
+    expect(captured.files[0]?.status).toBe("unmerged");
+  });
+
+  it("propagates process output limits instead of treating failures as missing objects", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), `export const alpha = "${"x".repeat(1_000)}";\n`);
+    await runProcess("git", ["add", "alpha.ts"], repository);
+    await expect(captureReview(
+      { type: "staged", repository },
+      { limits: { maxProcessOutputBytes: 200 } },
+    )).rejects.toThrow(/output limit/);
   });
 
   it("enforces aggregate capture budgets", async () => {

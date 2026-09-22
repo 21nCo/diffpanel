@@ -3,7 +3,11 @@ name: Publish tagged package
 on:
   push:
     tags:
-      - '*-v*.*.*'
+      - 'diffpanel-v*.*.*'
+      - 'diffpanel-generation-v*.*.*'
+      - 'diffpanel-git-v*.*.*'
+      - 'diffpanel-presentation-v*.*.*'
+      - 'diffpanel-storage-v*.*.*'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -40,6 +44,12 @@ jobs:
       - name: Resolve publish target
         id: resolve
         run: node ./scripts/resolve-release-tag.mjs "${RELEASE_TAG}"
+
+      - name: Verify checked out tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
 
       - name: Install package dependencies
         working-directory: ${{ steps.resolve.outputs.pkg_path }}
@@ -80,6 +90,6 @@ jobs:
           node --input-type=module --eval 'await import(process.argv[1])' "${{ steps.resolve.outputs.pkg_name }}"
 
       - name: Publish package
-        run: npm publish "${{ steps.pack.outputs.tarball }}" --access public
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --access public --tag "${{ steps.resolve.outputs.npm_tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

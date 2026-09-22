@@ -92,6 +92,16 @@ describe("diffpanel CLI", () => {
       expect(await runCli(["unarchive", receipt.runId], home, repository)).toContain(`Restored ${receipt.runId}`);
       const file = manifest.files[0]!;
       expect(await runCli(["content", receipt.runId, file.id, "after"], home, repository)).toContain("value = 2");
+      for (const invalidLimit of ["10files", "1.5", "300"]) {
+        const result = await runProcess(
+          process.execPath,
+          [resolve("dist/index.js"), "list", "--limit", invalidLimit],
+          repository,
+          { acceptedExitCodes: [0, 1] },
+        );
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr.toString("utf8")).toMatch(/integer|between 1 and 200/);
+      }
     } finally {
       if (previousHome === undefined) delete process.env.DIFFPANEL_HOME;
       else process.env.DIFFPANEL_HOME = previousHome;

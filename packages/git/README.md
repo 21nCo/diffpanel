@@ -7,7 +7,7 @@ commit-range, and repository snapshots.
 import { captureReview } from "@diffpanel/git";
 
 const capture = await captureReview(
-  { kind: "worktree", repoPath: process.cwd() },
+  { type: "worktree", repository: process.cwd() },
   { signal: AbortSignal.timeout(30_000) },
 );
 ```

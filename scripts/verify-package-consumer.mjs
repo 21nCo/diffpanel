@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,7 +20,7 @@ const packagePaths = [
 ];
 
 try {
-  execFileSync("mkdir", ["-p", packDirectory, consumerDirectory, repository]);
+  await Promise.all([packDirectory, consumerDirectory, repository].map((directory) => mkdir(directory, { recursive: true })));
   const tarballs = packagePaths.map((packagePath) => {
     const output = execFileSync(
       "npm",
@@ -107,6 +107,10 @@ try {
     [consumerScriptPath, repository, home],
     { cwd: consumerDirectory, stdio: "inherit" },
   );
+  execFileSync(process.execPath, [join(root, "scripts", "verify-browser-imports.mjs"), consumerDirectory], {
+    cwd: consumerDirectory,
+    stdio: "inherit",
+  });
 
   const packedNames = tarballs.map((tarball) => tarball.slice(tarball.lastIndexOf("/") + 1));
   assert.equal(new Set(packedNames).size, packagePaths.length);

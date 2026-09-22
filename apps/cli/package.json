@@ -16,7 +16,6 @@
   },
   "dependencies": {
     "diffpanel": "workspace:*",
-    "@diffpanel/generation": "workspace:*",
     "@diffpanel/git": "workspace:*",
     "@diffpanel/storage": "workspace:*",
     "commander": "^14.0.0"

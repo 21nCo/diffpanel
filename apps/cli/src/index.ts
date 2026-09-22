@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Command } from "commander";
 import { captureReview, type CaptureRequest } from "@diffpanel/git";
@@ -95,7 +95,7 @@ program
   .description("List generated and prepared review runs.")
   .option("--repository <path>", "Only runs for this repository")
   .option("--include-archived", "Include archived review runs")
-  .option("--limit <count>", "Maximum runs to return (1-200)", parseInteger, 50)
+  .option("--limit <count>", "Maximum runs to return (1-200)", parseRunListLimit, 50)
   .option("--cursor <cursor>", "Continue a prior paginated listing")
   .option("--page", "Return runs with the next cursor")
   .option("--json", "Print JSON")
@@ -103,7 +103,7 @@ program
     const store = await DiffpanelStore.open();
     try {
       const page = store.listRunsPage({
-        repositoryRoot: options.repository ? resolve(options.repository) : undefined,
+        repositoryRoot: options.repository ? await realpath(resolve(options.repository)) : undefined,
         includeArchived: options.includeArchived,
         limit: options.limit,
         cursor: options.cursor,
@@ -213,7 +213,7 @@ program
     const store = await DiffpanelStore.open();
     try {
       const result = await store.applyRetention({
-        repositoryRoot: options.repository ? resolve(options.repository) : undefined,
+        repositoryRoot: options.repository ? await realpath(resolve(options.repository)) : undefined,
         olderThan: new Date(Date.now() - options.olderThanDays * 24 * 60 * 60 * 1_000),
         keepLatest: options.keepLatest,
         archivedOnly: !options.includeActive,
@@ -244,7 +244,7 @@ program
       };
       process.stdout.write(options.json
         ? `${JSON.stringify(report, null, 2)}\n`
-        : Object.entries(report).map(([key, value]) => `${key}: ${value}`).join("\n") + "\n");
+        : Object.entries(report).map(([key, value]) => `${key}: ${typeof value === "object" && value !== null ? JSON.stringify(value) : value}`).join("\n") + "\n");
     } finally {
       store.close();
     }
@@ -257,14 +257,20 @@ program.parseAsync(process.argv).catch((error: unknown) => {
 });
 
 function parseInteger(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`Expected a positive integer, received '${value}'.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`Expected a positive integer, received '${value}'.`);
   return parsed;
 }
 
 function parseNonNegativeInteger(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`Expected a non-negative integer, received '${value}'.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error(`Expected a non-negative integer, received '${value}'.`);
+  return parsed;
+}
+
+function parseRunListLimit(value: string): number {
+  const parsed = parseInteger(value);
+  if (parsed > 200) throw new Error(`Run list limit must be between 1 and 200, received '${value}'.`);
   return parsed;
 }
 

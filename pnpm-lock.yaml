@@ -29,9 +29,6 @@ importers:
 
   apps/cli:
     dependencies:
-      '@diffpanel/generation':
-        specifier: workspace:*
-        version: link:../../packages/generation
       '@diffpanel/git':
         specifier: workspace:*
         version: link:../../packages/git
@@ -135,7 +132,7 @@ importers:
   packages/generation:
     dependencies:
       diffpanel:
-        specifier: ^0.0.2
+        specifier: '>=0.0.2 <0.1.0'
         version: link:../core
     devDependencies:
       tsup:
@@ -151,7 +148,7 @@ importers:
   packages/git:
     dependencies:
       diffpanel:
-        specifier: ^0.0.2
+        specifier: '>=0.0.2 <0.1.0'
         version: link:../core
     devDependencies:
       '@types/node':
@@ -170,7 +167,7 @@ importers:
   packages/presentation:
     dependencies:
       diffpanel:
-        specifier: ^0.0.2
+        specifier: '>=0.0.2 <0.1.0'
         version: link:../core
     devDependencies:
       tsup:
@@ -186,16 +183,16 @@ importers:
   packages/storage:
     dependencies:
       '@diffpanel/generation':
-        specifier: ^0.0.1
+        specifier: '>=0.0.1 <0.1.0'
         version: link:../generation
       '@diffpanel/git':
-        specifier: ^0.0.1
+        specifier: '>=0.0.1 <0.1.0'
         version: link:../git
       better-sqlite3:
         specifier: ^12.2.0
         version: 12.11.1
       diffpanel:
-        specifier: ^0.0.2
+        specifier: '>=0.0.2 <0.1.0'
         version: link:../core
     devDependencies:
       '@types/better-sqlite3':

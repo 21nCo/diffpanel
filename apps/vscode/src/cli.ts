@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import * as vscode from "vscode";
-import type { RunSummary, StoredRun } from "@diffpanel/storage";
+import type { RunPage, RunSummary, StoredRun } from "@diffpanel/storage";
 import { resolveInvocation, type Invocation } from "./invocation.js";
 
 export class DiffpanelCli {
@@ -13,7 +13,19 @@ export class DiffpanelCli {
   }
 
   async list(includeArchived = false): Promise<RunSummary[]> {
-    return JSON.parse(await this.execute(["list", ...(includeArchived ? ["--include-archived"] : []), "--json"])) as RunSummary[];
+    const runs: RunSummary[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = JSON.parse(await this.execute([
+        "list",
+        ...(includeArchived ? ["--include-archived"] : []),
+        "--limit", "200", "--page", "--json",
+        ...(cursor ? ["--cursor", cursor] : []),
+      ])) as RunPage;
+      runs.push(...page.runs);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return runs;
   }
 
   async show(runId: string): Promise<StoredRun> {

@@ -6,7 +6,7 @@ runs.
 ```ts
 import { DiffpanelStore } from "@diffpanel/storage";
 
-const store = DiffpanelStore.open("/path/to/diffpanel-home");
+const store = await DiffpanelStore.open("/path/to/diffpanel-home");
 const page = store.listRunsPage({ limit: 50 });
 store.close();
 ```

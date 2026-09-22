@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import { existsSync, type Dirent } from "node:fs";
-import { mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   assertGeneratedReview,
@@ -28,6 +28,7 @@ import type {
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
+const maintenanceQueues = new Map<string, Promise<void>>();
 
 interface RunRow {
   run_id: string;
@@ -68,15 +69,21 @@ export class DiffpanelStore {
   static async open(home = defaultDiffpanelHome()): Promise<DiffpanelStore> {
     await mkdir(join(home, "blobs"), { recursive: true });
     await mkdir(join(home, "runs"), { recursive: true });
-    const databasePath = resolveDatabasePath(home);
+    const resolvedHome = await realpath(home);
+    const databasePath = resolveDatabasePath(resolvedHome);
     const database = new Database(databasePath);
     database.pragma("journal_mode = WAL");
     database.pragma("foreign_keys = ON");
-    database.pragma("busy_timeout = 5000");
+    database.pragma("busy_timeout = 30000");
     migrate(database);
-    const store = new DiffpanelStore(home, databasePath, database);
-    store.lastRecoveryReport = await store.recover();
-    return store;
+    const store = new DiffpanelStore(resolvedHome, databasePath, database);
+    try {
+      store.lastRecoveryReport = await store.recover();
+      return store;
+    } catch (error) {
+      database.close();
+      throw error;
+    }
   }
 
   close(): void {
@@ -84,6 +91,10 @@ export class DiffpanelStore {
   }
 
   async createPreparedRun(captured: CapturedReview, options: { title?: string } = {}): Promise<PreparedRunReceipt> {
+    return await this.withMaintenanceLock(() => this.createPreparedRunLocked(captured, options));
+  }
+
+  private async createPreparedRunLocked(captured: CapturedReview, options: { title?: string }): Promise<PreparedRunReceipt> {
     const createdAt = new Date().toISOString();
     const runId = createRunId();
     const runDirectory = join(this.runsPath, runId);
@@ -172,52 +183,51 @@ export class DiffpanelStore {
     const insertBlob = this.database.prepare(`
       INSERT OR IGNORE INTO run_blobs (run_id, blob_hash) VALUES (?, ?)
     `);
-    const transaction = this.database.transaction(() => {
-      insertRun.run(
-        runId,
-        captured.repositoryId,
-        captured.repositoryRoot,
-        captured.repositoryName,
-        JSON.stringify(captured.scope),
-        snapshotHash,
-        createdAt,
-        files.length,
-        itemCount,
-        manifestPath,
-        title,
-      );
-      for (const file of files) {
-        for (const item of file.items) {
-          insertItem.run(item.id, runId, file.id, file.filePath, item.ordinal, item.kind);
-        }
+    insertRun.run(
+      runId,
+      captured.repositoryId,
+      captured.repositoryRoot,
+      captured.repositoryName,
+      JSON.stringify(captured.scope),
+      snapshotHash,
+      createdAt,
+      files.length,
+      itemCount,
+      manifestPath,
+      title,
+    );
+    for (const file of files) {
+      for (const item of file.items) {
+        insertItem.run(item.id, runId, file.id, file.filePath, item.ordinal, item.kind);
       }
-      for (const hash of blobHashes) insertBlob.run(runId, hash);
-    });
-    transaction();
+    }
+    for (const hash of blobHashes) insertBlob.run(runId, hash);
     return receipt;
   }
 
   async publish(runId: string, reviewInput: unknown): Promise<GeneratedReview> {
+    return await this.withMaintenanceLock(() => this.publishLocked(runId, reviewInput));
+  }
+
+  private async publishLocked(runId: string, reviewInput: unknown): Promise<GeneratedReview> {
     const run = await this.getRun(runId);
     const review = assertGeneratedReview(run.manifest, reviewInput);
     const reviewPath = join(this.runsPath, runId, "review.json");
     await atomicWrite(reviewPath, `${JSON.stringify(review, null, 2)}\n`);
     const publishedAt = new Date().toISOString();
     const row = this.requireRunRow(runId);
-    this.database.transaction(() => {
-      this.database.prepare(`
-        UPDATE runs
-        SET status = 'ready', generator = ?, published_at = ?, chapter_count = ?, review_path = ?, review_title = ?
-        WHERE run_id = ?
-      `).run(
-        review.generator ?? "agent",
-        publishedAt,
-        review.chapters.length,
-        reviewPath,
-        review.title ?? row.review_title,
-        runId,
-      );
-    })();
+    this.database.prepare(`
+      UPDATE runs
+      SET status = 'ready', generator = ?, published_at = ?, chapter_count = ?, review_path = ?, review_title = ?
+      WHERE run_id = ?
+    `).run(
+      review.generator ?? "agent",
+      publishedAt,
+      review.chapters.length,
+      reviewPath,
+      review.title ?? row.review_title,
+      runId,
+    );
     return review;
   }
 
@@ -227,7 +237,14 @@ export class DiffpanelStore {
   }
 
   listRuns(repositoryRoot?: string, includeArchived = false): RunSummary[] {
-    return this.listRunsPage({ repositoryRoot, includeArchived, limit: MAX_LIST_LIMIT }).runs;
+    const runs: RunSummary[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = this.listRunsPage({ repositoryRoot, includeArchived, limit: MAX_LIST_LIMIT, cursor });
+      runs.push(...page.runs);
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    return runs;
   }
 
   listRunsPage(options: ListRunsOptions = {}): RunPage {
@@ -306,6 +323,10 @@ export class DiffpanelStore {
   }
 
   async applyRetention(policy: RetentionPolicy = {}): Promise<RetentionResult> {
+    return await this.withMaintenanceLock(() => this.applyRetentionLocked(policy));
+  }
+
+  private async applyRetentionLocked(policy: RetentionPolicy): Promise<RetentionResult> {
     const keepLatest = policy.keepLatest ?? 50;
     if (!Number.isSafeInteger(keepLatest) || keepLatest < 0) throw new Error("keepLatest must be a non-negative integer.");
     const olderThan = policy.olderThan ?? new Date(Date.now() - 90 * 24 * 60 * 60 * 1_000);
@@ -325,19 +346,31 @@ export class DiffpanelStore {
       if (Date.parse(row.created_at) >= olderThan.getTime()) continue;
       deletedRunIds.push(row.run_id);
     }
+    const deleting = new Set(deletedRunIds);
+    for (const row of rows) {
+      if (deleting.has(row.run_id)) continue;
+      try {
+        const manifest = reviewManifestSchema.parse(JSON.parse(await readFile(row.manifest_path, "utf8")));
+        this.backfillBlobReferences(row.run_id, manifest);
+      } catch {
+        throw new Error(`Cannot apply retention while retained run ${row.run_id} has an unreadable manifest.`);
+      }
+    }
     if (deletedRunIds.length > 0) {
       const removeRun = this.database.prepare("DELETE FROM runs WHERE run_id = ?");
-      this.database.transaction(() => {
-        for (const runId of deletedRunIds) removeRun.run(runId);
-      })();
+      for (const runId of deletedRunIds) removeRun.run(runId);
       for (const runId of deletedRunIds) await rm(join(this.runsPath, runId), { recursive: true, force: true });
     }
-    const deletedBlobCount = await this.garbageCollectBlobs();
+    const deletedBlobCount = await this.garbageCollectBlobsLocked();
     const retainedRunCount = (this.database.prepare("SELECT COUNT(*) AS count FROM runs").get() as { count: number }).count;
     return { deletedRunIds, deletedBlobCount, retainedRunCount };
   }
 
   async garbageCollectBlobs(): Promise<number> {
+    return await this.withMaintenanceLock(() => this.garbageCollectBlobsLocked());
+  }
+
+  private async garbageCollectBlobsLocked(): Promise<number> {
     const rows = this.database.prepare("SELECT run_id, manifest_path FROM runs").all() as Array<{ run_id: string; manifest_path: string }>;
     for (const row of rows) {
       try {
@@ -367,6 +400,10 @@ export class DiffpanelStore {
   }
 
   async recover(): Promise<RecoveryReport> {
+    return await this.withMaintenanceLock(() => this.recoverLocked());
+  }
+
+  private async recoverLocked(): Promise<RecoveryReport> {
     const report: RecoveryReport = {
       recoveredRunIds: [],
       failedRunIds: [],
@@ -390,7 +427,7 @@ export class DiffpanelStore {
       try {
         const manifest = reviewManifestSchema.parse(JSON.parse(await readFile(row.manifest_path, "utf8")));
         this.backfillBlobReferences(row.run_id, manifest);
-        await this.assertManifestBlobsExist(manifest);
+        await this.assertManifestBlobIntegrity(manifest);
         const candidateReviewPath = row.review_path ?? join(this.runsPath, row.run_id, "review.json");
         if (row.status === "prepared" && existsSync(candidateReviewPath)) {
           const review = assertGeneratedReview(manifest, JSON.parse(await readFile(candidateReviewPath, "utf8")));
@@ -421,7 +458,7 @@ export class DiffpanelStore {
         report.failedRunIds.push(row.run_id);
       }
     }
-    if (safeToCollect) report.deletedBlobCount = await this.garbageCollectBlobs();
+    if (safeToCollect) report.deletedBlobCount = await this.garbageCollectBlobsLocked();
     return report;
   }
 
@@ -453,19 +490,42 @@ export class DiffpanelStore {
 
   private backfillBlobReferences(runId: string, manifest: ReviewManifest): void {
     const insert = this.database.prepare("INSERT OR IGNORE INTO run_blobs (run_id, blob_hash) VALUES (?, ?)");
-    this.database.transaction(() => {
-      for (const file of manifest.files) {
-        if (file.beforeBlob) insert.run(runId, file.beforeBlob);
-        if (file.afterBlob) insert.run(runId, file.afterBlob);
-      }
-    })();
+    for (const file of manifest.files) {
+      if (file.beforeBlob) insert.run(runId, file.beforeBlob);
+      if (file.afterBlob) insert.run(runId, file.afterBlob);
+    }
   }
 
-  private async assertManifestBlobsExist(manifest: ReviewManifest): Promise<void> {
+  private async assertManifestBlobIntegrity(manifest: ReviewManifest): Promise<void> {
     const hashes = new Set(manifest.files.flatMap((file) => [file.beforeBlob, file.afterBlob]).filter((hash): hash is string => hash !== null));
     for (const hash of hashes) {
       if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error(`Invalid content hash in run ${manifest.runId}.`);
-      await stat(this.blobPath(hash));
+      const content = await readFile(this.blobPath(hash));
+      if (sha256(content) !== hash) throw new Error(`Content ${hash} failed its integrity check.`);
+    }
+  }
+
+  private async withMaintenanceLock<T>(operation: () => Promise<T>): Promise<T> {
+    let release!: () => void;
+    const previous = maintenanceQueues.get(this.databasePath) ?? Promise.resolve();
+    const current = new Promise<void>((resolvePromise) => {
+      release = resolvePromise;
+    });
+    maintenanceQueues.set(this.databasePath, current);
+    await previous;
+    try {
+      this.database.exec("BEGIN IMMEDIATE");
+      try {
+        const result = await operation();
+        this.database.exec("COMMIT");
+        return result;
+      } catch (error) {
+        if (this.database.inTransaction) this.database.exec("ROLLBACK");
+        throw error;
+      }
+    } finally {
+      release();
+      if (maintenanceQueues.get(this.databasePath) === current) maintenanceQueues.delete(this.databasePath);
     }
   }
 

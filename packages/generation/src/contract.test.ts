@@ -6,5 +6,8 @@ describe("generation contract", () => {
     expect(generationContract.ownership).toContain("exactly one");
     expect(generationContract.skippedPaths).toContain("not part");
     expect(generationInstructionLines()).toContain(generationContract.diagrams);
+    expect(generationInstructionLines()).toContain(
+      "Line and diagram evidence must reference files and immutable item IDs from the prepared manifest.",
+    );
   });
 });

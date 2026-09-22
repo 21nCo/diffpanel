@@ -10,10 +10,12 @@
     "README.md",
     "LICENSE"
   ],
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "engines": {
@@ -32,9 +34,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@diffpanel/generation": "^0.0.1",
-    "diffpanel": "^0.0.2",
-    "@diffpanel/git": "^0.0.1",
+    "@diffpanel/generation": ">=0.0.1 <0.1.0",
+    "diffpanel": ">=0.0.2 <0.1.0",
+    "@diffpanel/git": ">=0.0.1 <0.1.0",
     "better-sqlite3": "^12.2.0"
   },
   "devDependencies": {

@@ -16,7 +16,7 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "verify:packages": "node scripts/verify-package-consumer.mjs",
-    "validate": "pnpm typecheck && pnpm test && pnpm build && node scripts/verify-browser-imports.mjs && pnpm verify:packages"
+    "validate": "pnpm typecheck && pnpm test && pnpm build && pnpm verify:packages"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

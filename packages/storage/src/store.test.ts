@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -73,7 +73,7 @@ describe("DiffpanelStore", () => {
     await writeFile(legacyDatabase, "");
 
     const store = await DiffpanelStore.open(home);
-    expect(store.databasePath).toBe(legacyDatabase);
+    expect(store.databasePath).toBe(join(await realpath(home), "conductor.sqlite3"));
     store.close();
   });
 
@@ -163,6 +163,18 @@ describe("DiffpanelStore", () => {
     } finally { store.close(); }
   });
 
+  it("keeps the legacy list-all API exhaustive beyond one page", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-list-all-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      for (let index = 0; index < 205; index += 1) {
+        await store.createPreparedRun({ ...capturedReview(), repositoryId: `repo-${index}` });
+      }
+      expect(store.listRuns(undefined, true)).toHaveLength(205);
+    } finally { store.close(); }
+  });
+
   it("authorizes blob reads through a referencing run", async () => {
     const home = await mkdtemp(join(tmpdir(), "diffpanel-blob-auth-"));
     temporaryDirectories.push(home);
@@ -227,6 +239,54 @@ describe("DiffpanelStore", () => {
       expect(recovered.lastRecoveryReport?.failedRunIds).toContain(receipt.runId);
       expect((await recovered.getRun(receipt.runId)).summary.status).toBe("failed");
     } finally { recovered.close(); }
+  });
+
+  it("marks runs failed when immutable content is corrupt on restart", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-corrupt-blob-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    const hash = (await store.getRun(receipt.runId)).manifest.files[0]!.afterBlob!;
+    store.close();
+    await writeFile(join(home, "blobs", hash.slice(0, 2), hash.slice(2)), "tampered\n");
+
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.failedRunIds).toContain(receipt.runId);
+      expect((await recovered.getRun(receipt.runId)).summary.status).toBe("failed");
+    } finally { recovered.close(); }
+  });
+
+  it("serializes maintenance across store instances", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-concurrent-store-"));
+    temporaryDirectories.push(home);
+    const first = await DiffpanelStore.open(home);
+    const second = await DiffpanelStore.open(home);
+    try {
+      const receipts = await Promise.all(Array.from({ length: 12 }, (_, index) =>
+        (index % 2 === 0 ? first : second).createPreparedRun({ ...capturedReview(), repositoryId: `repo-${index}` })));
+      await Promise.all([first.garbageCollectBlobs(), second.recover()]);
+      expect(first.listRuns(undefined, true)).toHaveLength(12);
+      await Promise.all(receipts.map(async ({ runId }) => {
+        expect((await first.getFileContent(runId, "file-1", "after"))?.toString()).toBe("after\n");
+      }));
+    } finally { first.close(); second.close(); }
+  });
+
+  it("preflights retained manifests before deleting expired runs", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-retention-preflight-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const older = await store.createPreparedRun(capturedReview(), { title: "Older" });
+      store.setArchived(older.runId, true);
+      const retained = await store.createPreparedRun(capturedReview(), { title: "Retained" });
+      store.setArchived(retained.runId, true);
+      await writeFile(retained.manifestPath, "not json\n");
+      await expect(store.applyRetention({ keepLatest: 1, olderThan: new Date(Date.now() + 60_000) })).rejects.toThrow(/retained run/);
+      expect(store.listRuns(undefined, true).map((run) => run.runId)).toEqual(expect.arrayContaining([older.runId, retained.runId]));
+      await access(older.manifestPath);
+    } finally { store.close(); }
   });
 
   it("marks ready runs failed when their review is corrupt", async () => {

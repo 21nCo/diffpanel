@@ -1,11 +1,12 @@
+import { constants } from "node:fs";
 import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
-import { lstat, readFile, readlink, realpath } from "node:fs/promises";
+import { lstat, open, readlink, realpath } from "node:fs/promises";
 import {
   type ReviewItem,
   type ReviewScope,
 } from "diffpanel";
 import { sha256, stableId } from "diffpanel/node";
-import { gitBuffer, gitText, type ProcessOptions } from "./process.js";
+import { gitBuffer, gitText, runProcess, type ProcessOptions } from "./process.js";
 import type { CaptureLimits, CaptureOptions, CaptureRequest, CapturedFile, CapturedReview } from "./types.js";
 
 interface ChangedPath {
@@ -53,7 +54,11 @@ export async function captureReview(request: CaptureRequest, options: CaptureOpt
   for (let attempt = 1; attempt <= MAX_CAPTURE_ATTEMPTS; attempt += 1) {
     const captured = await captureChangedScope(repositoryRoot, scope, limits, options, processOptions);
     options.onProgress?.({ phase: "verify", current: attempt, total: MAX_CAPTURE_ATTEMPTS });
-    if (scope.type !== "worktree" || await worktreeSnapshotMatches(repositoryRoot, scope, captured.files, captured.changedPaths, processOptions)) {
+    if (scope.type !== "worktree") {
+      return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
+    }
+    const verified = await captureChangedScope(repositoryRoot, scope, limits, {}, processOptions);
+    if (captureFingerprint(captured) === captureFingerprint(verified)) {
       return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
     }
     if (attempt === MAX_CAPTURE_ATTEMPTS) {
@@ -104,8 +109,14 @@ async function resolveScope(
     validateRef(baseRef);
     const baseSha = await gitText(repositoryRoot, ["rev-parse", "--verify", baseRef], processOptions);
     if (request.type === "staged") {
-      const indexSha = await gitText(repositoryRoot, ["write-tree"], processOptions);
-      return { type: request.type, baseRef, baseSha, indexSha };
+      try {
+        const indexSha = await gitText(repositoryRoot, ["write-tree"], processOptions);
+        return { type: request.type, baseRef, baseSha, indexSha };
+      } catch (error) {
+        const unmerged = await gitBuffer(repositoryRoot, ["ls-files", "-u", "-z"], processOptions);
+        if (unmerged.length === 0) throw error;
+        return { type: request.type, baseRef, baseSha };
+      }
     }
     return { type: request.type, baseRef, baseSha };
   }
@@ -172,7 +183,7 @@ async function captureChangedScope(
   for (const [index, changedPath] of changedPaths.entries()) {
     if (options.signal?.aborted) throw new Error("Diffpanel capture was cancelled.");
     options.onProgress?.({ phase: "capture", current: index + 1, total: changedPaths.length, filePath: changedPath.filePath });
-    if (index >= limits.maxFiles) {
+    if (files.length >= limits.maxFiles) {
       skipped.push({ filePath: changedPath.filePath, reason: `capture file limit ${limits.maxFiles} reached` });
       continue;
     }
@@ -197,29 +208,16 @@ async function captureChangedScope(
   return { files, skipped, changedPaths };
 }
 
-async function worktreeSnapshotMatches(
-  repositoryRoot: string,
-  scope: Extract<ChangedScope, { type: "worktree" }>,
-  files: CapturedFile[],
-  expectedPaths: ChangedPath[],
-  processOptions: ProcessOptions,
-): Promise<boolean> {
-  const currentPaths = await listChangedPaths(repositoryRoot, scope, processOptions);
-  if (JSON.stringify(currentPaths) !== JSON.stringify(expectedPaths)) return false;
-  for (const file of files) {
-    let current: Buffer | null;
-    try {
-      current = await readAfterContent(repositoryRoot, scope, file.filePath, file.status, processOptions);
-    } catch {
-      return false;
-    }
-    if (current === null || file.afterContent === null) {
-      if (current !== file.afterContent) return false;
-    } else if (!current.equals(file.afterContent)) {
-      return false;
-    }
-  }
-  return true;
+function captureFingerprint(captured: Awaited<ReturnType<typeof captureChangedScope>>): string {
+  return sha256(JSON.stringify({
+    changedPaths: captured.changedPaths,
+    skipped: captured.skipped,
+    files: captured.files.map((file) => ({
+      ...file,
+      beforeContent: file.beforeContent?.toString("base64") ?? null,
+      afterContent: file.afterContent?.toString("base64") ?? null,
+    })),
+  }));
 }
 
 export function parseNameStatus(buffer: Buffer): ChangedPath[] {
@@ -338,7 +336,14 @@ async function readWorktreeContent(repositoryRoot: string, filePath: string): Pr
   const metadata = await lstat(absolute);
   if (metadata.isSymbolicLink()) return Buffer.from(await readlink(absolute), "utf8");
   if (!metadata.isFile()) throw new Error(`Review path is not a regular file: ${filePath}`);
-  return await readFile(absolute);
+  const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const openedMetadata = await handle.stat();
+    if (!openedMetadata.isFile()) throw new Error(`Review path is not a regular file: ${filePath}`);
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
 }
 
 async function readGitObject(
@@ -349,11 +354,14 @@ async function readGitObject(
   processOptions: ProcessOptions,
 ): Promise<Buffer | null> {
   const spec = index ? `:${filePath}` : `${ref}:${filePath}`;
-  try {
-    return await gitBuffer(repositoryRoot, ["show", spec], processOptions);
-  } catch {
-    return null;
-  }
+  const result = await runProcess("git", ["show", spec], repositoryRoot, {
+    ...processOptions,
+    acceptedExitCodes: [0, 128],
+  });
+  if (result.exitCode === 0) return result.stdout;
+  const stderr = result.stderr.toString("utf8");
+  if (/does not exist in|exists on disk, but not in|path .* is in the index, but not at stage 0|invalid object name/.test(stderr)) return null;
+  throw new Error(`git show ${spec} failed (${result.exitCode}): ${stderr.trim()}`);
 }
 
 async function readPatch(

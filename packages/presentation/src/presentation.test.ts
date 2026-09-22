@@ -67,6 +67,10 @@ describe("shared presentation contracts", () => {
     expect(result.transformations).toHaveLength(1);
     expect(result.individual).toEqual([mixed]);
     expect(groupFiles([first, first])).toHaveLength(1);
+    expect(partitionChanges([match("one", "old", "new"), match("two", "source", "target")])).toEqual({
+      transformations: [],
+      individual: expect.any(Array),
+    });
   });
 
   it("rejects active Mermaid content while allowing plain diagrams", () => {

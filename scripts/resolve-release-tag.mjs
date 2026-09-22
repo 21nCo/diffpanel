@@ -104,6 +104,7 @@ await writeOutputs({
   pkg_name: target.name,
   pkg_version: packageJson.version,
   pkg_path: target.path,
+  npm_tag: version.includes('-') ? 'next' : 'latest',
 });
 
 console.log(
@@ -114,6 +115,7 @@ console.log(
       name: target.name,
       version: packageJson.version,
       path: target.path,
+      npmTag: version.includes('-') ? 'next' : 'latest',
     },
     null,
     2,
