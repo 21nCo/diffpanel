@@ -1,0 +1,49 @@
+{
+  "cli_version": "0.10.6",
+  "checkpoint_id": "01M34S9732GXZTM65R5EKRZKMK",
+  "strategy": "manual-commit",
+  "branch": "aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/publish-tag.yml",
+    "apps/cli/package.json",
+    "apps/cli/src/e2e.test.ts",
+    "apps/cli/src/index.ts",
+    "apps/vscode/package.json",
+    "apps/vscode/scripts/package-extension.mjs",
+    "apps/vscode/src/cli.ts",
+    "package.json",
+    "packages/core/package.json",
+    "packages/generation/package.json",
+    "packages/generation/src/contract.test.ts",
+    "packages/git/README.md",
+    "packages/git/package.json",
+    "packages/git/src/capture.test.ts",
+    "packages/git/src/capture.ts",
+    "packages/presentation/package.json",
+    "packages/presentation/src/presentation.test.ts",
+    "packages/storage/README.md",
+    "packages/storage/package.json",
+    "packages/storage/src/store.test.ts",
+    "packages/storage/src/store.ts",
+    "scripts/resolve-release-tag.mjs",
+    "scripts/verify-browser-imports.mjs",
+    "scripts/verify-package-consumer.mjs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 177827,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6036352,
+    "output_tokens": 31276,
+    "api_call_count": 59
+  }
+}

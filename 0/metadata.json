@@ -1,0 +1,72 @@
+{
+  "cli_version": "0.10.6",
+  "checkpoint_id": "01M34S9732GXZTM65R5EKRZKMK",
+  "session_id": "01a0c88a-c379-7711-89ae-f383fcca0dab",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-22T14:45:56.724265Z",
+  "branch": "aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/publish-tag.yml",
+    "apps/cli/package.json",
+    "apps/cli/src/e2e.test.ts",
+    "apps/cli/src/index.ts",
+    "apps/vscode/package.json",
+    "apps/vscode/scripts/package-extension.mjs",
+    "apps/vscode/src/cli.ts",
+    "package.json",
+    "packages/core/package.json",
+    "packages/generation/package.json",
+    "packages/generation/src/contract.test.ts",
+    "packages/git/README.md",
+    "packages/git/package.json",
+    "packages/git/src/capture.test.ts",
+    "packages/git/src/capture.ts",
+    "packages/presentation/package.json",
+    "packages/presentation/src/presentation.test.ts",
+    "packages/storage/README.md",
+    "packages/storage/package.json",
+    "packages/storage/src/store.test.ts",
+    "packages/storage/src/store.ts",
+    "scripts/resolve-release-tag.mjs",
+    "scripts/verify-browser-imports.mjs",
+    "scripts/verify-package-consumer.mjs"
+  ],
+  "agent": "Codex",
+  "model": "gpt-5.6-sol",
+  "turn_id": "229e15b491e1",
+  "checkpoint_transcript_start": 1378,
+  "transcript_lines_at_start": 1378,
+  "compact_transcript_start": 181,
+  "token_usage": {
+    "input_tokens": 177827,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 6036352,
+    "output_tokens": 31276,
+    "api_call_count": 59
+  },
+  "session_metrics": {
+    "turn_count": 5
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-22T14:45:56.388896Z",
+    "agent_lines": 380,
+    "agent_removed": 133,
+    "human_added": 6,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 386,
+    "total_lines_changed": 528,
+    "agent_percentage": 97.1590909090909,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
