@@ -29,7 +29,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     diagrams,
     treeView,
     vscode.workspace.registerTextDocumentContentProvider("diffpanel", content),
-    vscode.window.registerWebviewViewProvider("diffpanel.details", details),
+    vscode.window.registerWebviewViewProvider("diffpanel.details", details, {
+      webviewOptions: { retainContextWhenHidden: true },
+    }),
     vscode.commands.registerCommand("diffpanel.refresh", async () => {
       content.clear();
       await tree.refresh();

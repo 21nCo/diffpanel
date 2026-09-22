@@ -85,6 +85,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNod
   getTreeItem(element: ReviewTreeNode): vscode.TreeItem {
     if (element.type === "repository") {
       const item = new vscode.TreeItem(element.repositoryName, vscode.TreeItemCollapsibleState.Expanded);
+      item.id = `repository:${element.repositoryId}`;
       item.description = `${element.runs.length} review${element.runs.length === 1 ? "" : "s"}`;
       item.tooltip = element.repositoryRoot;
       item.iconPath = new vscode.ThemeIcon("repo");
@@ -95,6 +96,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNod
         element.run.reviewTitle,
         element.run.status === "ready" ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
       );
+      item.id = `run:${element.run.runId}`;
       item.description = element.run.status === "ready"
         ? `${element.run.archivedAt ? "archived · " : ""}${element.run.chapterCount} chapters`
         : "awaiting generation";
@@ -111,6 +113,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNod
         `${element.displayLabel}. ${element.chapter.title}`,
         vscode.TreeItemCollapsibleState.Collapsed,
       );
+      item.id = `chapter:${element.run.runId}:${element.chapter.id}`;
       item.description = `${element.itemCount} item${element.itemCount === 1 ? "" : "s"}`
         + (element.subtopicCount > 0 ? ` · ${element.subtopicCount} subtopic${element.subtopicCount === 1 ? "" : "s"}` : "");
       item.tooltip = element.chapter.summary;
@@ -120,6 +123,7 @@ export class ReviewTreeProvider implements vscode.TreeDataProvider<ReviewTreeNod
       return item;
     }
     const item = new vscode.TreeItem(element.file.filePath, vscode.TreeItemCollapsibleState.None);
+    item.id = `item:${element.run.runId}:${element.item.id}`;
     item.description = lineDescription(element.item);
     item.tooltip = element.item.patch;
     item.resourceUri = vscode.Uri.file(repositoryFilePath(element.run.repositoryRoot, element.file.filePath));
