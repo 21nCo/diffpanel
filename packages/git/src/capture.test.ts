@@ -1,5 +1,6 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { chmodSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -172,6 +173,24 @@ describe("captureReview", () => {
     expect(captured.skipped).toContainEqual({ filePath: "aaa.dat", reason: "binary file" });
   });
 
+  it("rejects oversized worktree files before reading their contents", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    const oversized = join(repository, "oversized.txt");
+    await writeFile(oversized, "x".repeat(1_024));
+    await chmod(oversized, 0o000);
+    try {
+      const captured = await captureReview(
+        { type: "worktree", repository },
+        { limits: { maxFileBytes: 64 } },
+      );
+      expect(captured.files.map((file) => file.filePath)).toEqual(["alpha.ts"]);
+      expect(captured.skipped).toContainEqual({ filePath: "oversized.txt", reason: "file exceeds 64 bytes" });
+    } finally {
+      await chmod(oversized, 0o600);
+    }
+  });
+
   it("anchors staged captures to an immutable index tree", async () => {
     const repository = await createRepository();
     await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
@@ -193,6 +212,43 @@ describe("captureReview", () => {
     const captured = await captureReview({ type: "staged", repository });
     expect(captured.scope).not.toHaveProperty("indexSha");
     expect(captured.files[0]?.status).toBe("unmerged");
+  });
+
+  it.skipIf(process.platform === "win32")("checks for unmerged entries before attempting write-tree", async () => {
+    const repository = await createRepository();
+    await runProcess("git", ["checkout", "-b", "side"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'side';\n");
+    await runProcess("git", ["commit", "-am", "side"], repository);
+    await runProcess("git", ["checkout", "main"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'main';\n");
+    await runProcess("git", ["commit", "-am", "main"], repository);
+    await runProcess("git", ["merge", "side"], repository, { acceptedExitCodes: [0, 1] });
+
+    const wrapperDirectory = await mkdtemp(join(tmpdir(), "diffpanel-git-wrapper-"));
+    temporaryDirectories.push(wrapperDirectory);
+    const marker = join(wrapperDirectory, "write-tree-invoked");
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const wrapper = join(wrapperDirectory, "git");
+    await writeFile(wrapper, [
+      "#!/usr/bin/env node",
+      "const { spawnSync } = require('node:child_process');",
+      "const { writeFileSync } = require('node:fs');",
+      `if (process.argv[2] === 'write-tree') { writeFileSync(${JSON.stringify(marker)}, ''); process.exit(1); }`,
+      `const result = spawnSync(${JSON.stringify(realGit)}, process.argv.slice(2), { stdio: 'inherit' });`,
+      "process.exit(result.status ?? 1);",
+    ].join("\n"));
+    await chmod(wrapper, 0o755);
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${wrapperDirectory}:${previousPath ?? ""}`;
+    try {
+      const captured = await captureReview({ type: "staged", repository });
+      expect(captured.files[0]?.status).toBe("unmerged");
+      await expect(access(marker)).rejects.toThrow();
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
   });
 
   it("propagates process output limits instead of treating failures as missing objects", async () => {
@@ -222,6 +278,18 @@ describe("captureReview", () => {
     const controller = new AbortController();
     controller.abort();
     await expect(captureReview({ type: "worktree", repository }, { signal: controller.signal })).rejects.toThrow(/cancelled/);
+  });
+
+  it("honors cancellation before the verification capture", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "untracked.ts"), "export const untracked = true;\n");
+    const controller = new AbortController();
+    await expect(captureReview({ type: "worktree", repository }, {
+      signal: controller.signal,
+      onProgress(progress) {
+        if (progress.phase === "verify") controller.abort();
+      },
+    })).rejects.toThrow(/cancelled/);
   });
 });
 

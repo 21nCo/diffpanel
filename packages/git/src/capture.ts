@@ -1,12 +1,12 @@
-import { constants } from "node:fs";
-import { basename, extname, isAbsolute, join, relative, resolve } from "node:path";
-import { lstat, open, readlink, realpath } from "node:fs/promises";
+import { basename, extname, isAbsolute, join, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
 import {
   type ReviewItem,
   type ReviewScope,
 } from "diffpanel";
 import { sha256, stableId } from "diffpanel/node";
 import { gitBuffer, gitText, runProcess, type ProcessOptions } from "./process.js";
+import { readWorktreeFile, WorktreeFileTooLargeError } from "./worktree-file.js";
 import type { CaptureLimits, CaptureOptions, CaptureRequest, CapturedFile, CapturedReview } from "./types.js";
 
 interface ChangedPath {
@@ -57,7 +57,7 @@ export async function captureReview(request: CaptureRequest, options: CaptureOpt
     if (scope.type !== "worktree") {
       return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
     }
-    const verified = await captureChangedScope(repositoryRoot, scope, limits, {}, processOptions);
+    const verified = await captureChangedScope(repositoryRoot, scope, limits, { signal: options.signal }, processOptions);
     if (captureFingerprint(captured) === captureFingerprint(verified)) {
       return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
     }
@@ -109,14 +109,10 @@ async function resolveScope(
     validateRef(baseRef);
     const baseSha = await gitText(repositoryRoot, ["rev-parse", "--verify", baseRef], processOptions);
     if (request.type === "staged") {
-      try {
-        const indexSha = await gitText(repositoryRoot, ["write-tree"], processOptions);
-        return { type: request.type, baseRef, baseSha, indexSha };
-      } catch (error) {
-        const unmerged = await gitBuffer(repositoryRoot, ["ls-files", "-u", "-z"], processOptions);
-        if (unmerged.length === 0) throw error;
-        return { type: request.type, baseRef, baseSha };
-      }
+      const unmerged = await gitBuffer(repositoryRoot, ["ls-files", "-u", "-z"], processOptions);
+      if (unmerged.length > 0) return { type: request.type, baseRef, baseSha };
+      const indexSha = await gitText(repositoryRoot, ["write-tree"], processOptions);
+      return { type: request.type, baseRef, baseSha, indexSha };
     }
     return { type: request.type, baseRef, baseSha };
   }
@@ -266,7 +262,20 @@ async function captureChangedFile(
 ): Promise<CapturedFile | { reason: string }> {
   const beforePath = changedPath.oldPath ?? changedPath.filePath;
   const beforeContent = await readBeforeContent(repositoryRoot, scope, beforePath, changedPath.status, processOptions);
-  const afterContent = await readAfterContent(repositoryRoot, scope, changedPath.filePath, changedPath.status, processOptions);
+  let afterContent: Buffer | null;
+  try {
+    afterContent = await readAfterContent(
+      repositoryRoot,
+      scope,
+      changedPath.filePath,
+      changedPath.status,
+      limits.maxFileBytes,
+      processOptions,
+    );
+  } catch (error) {
+    if (error instanceof WorktreeFileTooLargeError) return { reason: `file exceeds ${limits.maxFileBytes} bytes` };
+    throw error;
+  }
   const largest = Math.max(beforeContent?.length ?? 0, afterContent?.length ?? 0);
   if (largest > limits.maxFileBytes) return { reason: `file exceeds ${limits.maxFileBytes} bytes` };
   if (isBinary(beforeContent) || isBinary(afterContent)) return { reason: "binary file" };
@@ -318,10 +327,11 @@ async function readAfterContent(
   scope: ChangedScope,
   filePath: string,
   status: CapturedFile["status"],
+  maxFileBytes: number,
   processOptions: ProcessOptions,
 ): Promise<Buffer | null> {
   if (status === "deleted") return null;
-  if (scope.type === "worktree") return await readWorktreeContent(repositoryRoot, filePath);
+  if (scope.type === "worktree") return await readWorktreeFile(repositoryRoot, filePath, maxFileBytes);
   if (scope.type === "staged") {
     return scope.indexSha
       ? await readGitObject(repositoryRoot, scope.indexSha, filePath, false, processOptions)
@@ -329,37 +339,6 @@ async function readAfterContent(
   }
   if (scope.type === "range") return await readGitObject(repositoryRoot, scope.compareSha, filePath, false, processOptions);
   return null;
-}
-
-async function readWorktreeContent(repositoryRoot: string, filePath: string): Promise<Buffer> {
-  const absolute = safeRepositoryPath(repositoryRoot, filePath);
-  await assertNoIntermediateSymlinks(repositoryRoot, filePath);
-  const metadata = await lstat(absolute);
-  if (metadata.isSymbolicLink()) return Buffer.from(await readlink(absolute), "utf8");
-  if (!metadata.isFile()) throw new Error(`Review path is not a regular file: ${filePath}`);
-  const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const openedMetadata = await handle.stat();
-    if (!openedMetadata.isFile()) throw new Error(`Review path is not a regular file: ${filePath}`);
-    return await handle.readFile();
-  } finally {
-    await handle.close();
-  }
-}
-
-async function assertNoIntermediateSymlinks(repositoryRoot: string, filePath: string): Promise<void> {
-  const segments = filePath.split("/");
-  let current = repositoryRoot;
-  for (const segment of segments.slice(0, -1)) {
-    current = join(current, segment);
-    const metadata = await lstat(current);
-    if (metadata.isSymbolicLink()) {
-      throw new Error(`Review path has a symbolic-link parent: ${filePath}`);
-    }
-    if (!metadata.isDirectory()) {
-      throw new Error(`Review path parent is not a directory: ${filePath}`);
-    }
-  }
 }
 
 async function readGitObject(
@@ -599,16 +578,6 @@ function assertSafeRepositoryPath(filePath: string): void {
   if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
     throw new Error(`Unsafe repository path: ${JSON.stringify(filePath)}`);
   }
-}
-
-function safeRepositoryPath(repositoryRoot: string, filePath: string): string {
-  assertSafeRepositoryPath(filePath);
-  const absolute = resolve(repositoryRoot, filePath);
-  const fromRoot = relative(repositoryRoot, absolute);
-  if (!fromRoot || fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
-    throw new Error(`Repository path escapes its root: ${JSON.stringify(filePath)}`);
-  }
-  return absolute;
 }
 
 async function buildCapturedReview(

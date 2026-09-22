@@ -2,6 +2,7 @@ import { access, mkdir, mkdtemp, readFile, realpath, rm, unlink, writeFile } fro
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 import type { CapturedReview } from "@diffpanel/git";
 import { DiffpanelStore } from "./store.js";
 
@@ -188,6 +189,35 @@ describe("DiffpanelStore", () => {
       await expect(store.getRunBlob("missing-run", hash)).rejects.toThrow(/not referenced/);
       expect((await store.getFileContent(second.runId, "file-1", "before"))?.toString("utf8")).toBe("before\n");
     } finally { store.close(); }
+  });
+
+  it("backfills version-4 blob references during migration without full recovery", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-v4-blob-migration-"));
+    temporaryDirectories.push(home);
+    const initial = await DiffpanelStore.open(home);
+    const receipt = await initial.createPreparedRun(capturedReview());
+    const stored = await initial.getRun(receipt.runId);
+    const hash = stored.manifest.files[0]!.afterBlob!;
+    const databasePath = initial.databasePath;
+    initial.close();
+
+    const legacy = new Database(databasePath);
+    legacy.exec("DROP TABLE run_blobs; UPDATE schema_version SET version = 4;");
+    legacy.close();
+
+    const [first, second] = await Promise.all([
+      DiffpanelStore.open(home, { recover: false }),
+      DiffpanelStore.open(home, { recover: false }),
+    ]);
+    try {
+      expect(first.lastRecoveryReport).toBeNull();
+      expect(second.lastRecoveryReport).toBeNull();
+      expect((await first.getRunBlob(receipt.runId, hash)).toString("utf8")).toBe("after\n");
+      expect((await second.getRunBlob(receipt.runId, hash)).toString("utf8")).toBe("after\n");
+    } finally {
+      first.close();
+      second.close();
+    }
   });
 
   it("keeps shared blobs referenced by retained runs during retention", async () => {

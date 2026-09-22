@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { runProcess } from "./process.js";
 
@@ -15,6 +16,20 @@ async function workingDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "diffpanel-process-"));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+      throw error;
+    }
+    await delay(10);
+  }
+  throw new Error(`Process ${pid} remained visible after ${timeoutMs}ms.`);
 }
 
 describe("runProcess", () => {
@@ -66,7 +81,7 @@ describe("runProcess", () => {
       await expect(runProcess(process.execPath, ["--eval", script, pidFile], directory, { timeoutMs: 250 })).rejects.toThrow(/timed out/);
       expect(Date.now() - startedAt).toBeLessThan(1_000);
       const descendantPid = Number(readFileSync(pidFile, "utf8"));
-      expect(() => process.kill(descendantPid, 0)).toThrow();
+      await waitForProcessExit(descendantPid, 500);
     } finally {
       clearTimeout(cleanup);
     }

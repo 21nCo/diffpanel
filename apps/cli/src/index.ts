@@ -176,7 +176,7 @@ program
   .argument("<run-id>", "Review run ID")
   .option("--json", "Print JSON", true)
   .action(async (runId: string) => {
-    const store = await DiffpanelStore.open(undefined, { recover: false });
+    const store = await DiffpanelStore.open();
     try {
       process.stdout.write(`${JSON.stringify(await store.getRun(runId), null, 2)}\n`);
     } finally {

@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { existsSync, type Dirent } from "node:fs";
+import { existsSync, readFileSync, type Dirent } from "node:fs";
 import { mkdir, readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
@@ -73,12 +73,12 @@ export class DiffpanelStore {
     const resolvedHome = await realpath(home);
     const databasePath = resolveDatabasePath(resolvedHome);
     const database = new Database(databasePath);
-    database.pragma("journal_mode = WAL");
-    database.pragma("foreign_keys = ON");
-    database.pragma("busy_timeout = 30000");
-    migrate(database);
-    const store = new DiffpanelStore(resolvedHome, databasePath, database);
     try {
+      database.pragma("busy_timeout = 30000");
+      database.pragma("journal_mode = WAL");
+      database.pragma("foreign_keys = ON");
+      migrate(database);
+      const store = new DiffpanelStore(resolvedHome, databasePath, database);
       if (options.recover ?? true) store.lastRecoveryReport = await store.recover();
       return store;
     } catch (error) {
@@ -545,59 +545,83 @@ function resolveDatabasePath(home: string): string {
 }
 
 function migrate(database: Database.Database): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS schema_version (
-      version INTEGER NOT NULL
-    );
-    INSERT INTO schema_version(version)
-    SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
+  const applyMigration = database.transaction(() => {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS schema_version (
+        version INTEGER NOT NULL
+      );
+      INSERT INTO schema_version(version)
+      SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM schema_version);
 
-    CREATE TABLE IF NOT EXISTS runs (
-      run_id TEXT PRIMARY KEY,
-      repository_id TEXT NOT NULL,
-      root_path TEXT NOT NULL,
-      repository_name TEXT NOT NULL,
-      scope_json TEXT NOT NULL,
-      snapshot_hash TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('prepared', 'ready', 'failed')),
-      generator TEXT,
-      created_at TEXT NOT NULL,
-      published_at TEXT,
-      archived_at TEXT,
-      file_count INTEGER NOT NULL,
-      item_count INTEGER NOT NULL,
-      chapter_count INTEGER NOT NULL DEFAULT 0,
-      manifest_path TEXT NOT NULL,
-      review_path TEXT,
-      review_title TEXT
-    );
-    CREATE INDEX IF NOT EXISTS runs_root_created ON runs(root_path, created_at DESC);
+      CREATE TABLE IF NOT EXISTS runs (
+        run_id TEXT PRIMARY KEY,
+        repository_id TEXT NOT NULL,
+        root_path TEXT NOT NULL,
+        repository_name TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        snapshot_hash TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('prepared', 'ready', 'failed')),
+        generator TEXT,
+        created_at TEXT NOT NULL,
+        published_at TEXT,
+        archived_at TEXT,
+        file_count INTEGER NOT NULL,
+        item_count INTEGER NOT NULL,
+        chapter_count INTEGER NOT NULL DEFAULT 0,
+        manifest_path TEXT NOT NULL,
+        review_path TEXT,
+        review_title TEXT
+      );
+      CREATE INDEX IF NOT EXISTS runs_root_created ON runs(root_path, created_at DESC);
 
-    CREATE TABLE IF NOT EXISTS items (
-      item_id TEXT NOT NULL,
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      file_id TEXT NOT NULL,
-      file_path TEXT NOT NULL,
-      ordinal INTEGER NOT NULL,
-      kind TEXT NOT NULL,
-      PRIMARY KEY (run_id, item_id)
-    );
+      CREATE TABLE IF NOT EXISTS items (
+        item_id TEXT NOT NULL,
+        run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+        file_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        ordinal INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        PRIMARY KEY (run_id, item_id)
+      );
+    `);
+    const version = (database.prepare("SELECT version FROM schema_version LIMIT 1").get() as { version: number }).version;
+    const columns = database.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === "archived_at")) {
+      database.exec("ALTER TABLE runs ADD COLUMN archived_at TEXT");
+    }
+    if (!columns.some((column) => column.name === "review_title")) {
+      database.exec("ALTER TABLE runs ADD COLUMN review_title TEXT");
+    }
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS run_blobs (
+        run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+        blob_hash TEXT NOT NULL,
+        PRIMARY KEY (run_id, blob_hash)
+      );
+      CREATE INDEX IF NOT EXISTS run_blobs_hash ON run_blobs(blob_hash);
+    `);
+    if (version < 5) backfillMigratedBlobReferences(database);
+    database.exec("UPDATE schema_version SET version = 5");
+  });
+  applyMigration.immediate();
+}
 
-    CREATE TABLE IF NOT EXISTS run_blobs (
-      run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-      blob_hash TEXT NOT NULL,
-      PRIMARY KEY (run_id, blob_hash)
-    );
-    CREATE INDEX IF NOT EXISTS run_blobs_hash ON run_blobs(blob_hash);
-  `);
-  const columns = database.prepare("PRAGMA table_info(runs)").all() as Array<{ name: string }>;
-  if (!columns.some((column) => column.name === "archived_at")) {
-    database.exec("ALTER TABLE runs ADD COLUMN archived_at TEXT");
+function backfillMigratedBlobReferences(database: Database.Database): void {
+  const rows = database.prepare("SELECT run_id, manifest_path FROM runs").all() as Array<{ run_id: string; manifest_path: string }>;
+  const insert = database.prepare("INSERT OR IGNORE INTO run_blobs (run_id, blob_hash) VALUES (?, ?)");
+  for (const row of rows) {
+    let manifest: ReviewManifest;
+    try {
+      manifest = reviewManifestSchema.parse(JSON.parse(readFileSync(row.manifest_path, "utf8")));
+    } catch {
+      // Recovery remains responsible for classifying unreadable legacy runs.
+      continue;
+    }
+    for (const file of manifest.files) {
+      if (file.beforeBlob) insert.run(row.run_id, file.beforeBlob);
+      if (file.afterBlob) insert.run(row.run_id, file.afterBlob);
+    }
   }
-  if (!columns.some((column) => column.name === "review_title")) {
-    database.exec("ALTER TABLE runs ADD COLUMN review_title TEXT");
-  }
-  database.exec("UPDATE schema_version SET version = 4");
 }
 
 function toRunSummary(row: RunRow): RunSummary {

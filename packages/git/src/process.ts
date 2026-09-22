@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { windowsTaskkillPath } from "./windows-process.js";
 
 export interface ProcessResult {
   stdout: Buffer;
@@ -62,9 +63,11 @@ export async function runProcess(
     const terminate = (error: Error): void => {
       if (terminalError) return;
       terminalError = error;
-      terminateProcess(child, processGroupId, "SIGTERM");
-      forceTimer = setTimeout(() => terminateProcess(child, processGroupId, "SIGKILL"), 1_000);
-      forceTimer.unref();
+      void terminateProcess(child, processGroupId, "SIGTERM").finally(() => {
+        if (settled) return;
+        forceTimer = setTimeout(() => void terminateProcess(child, processGroupId, "SIGKILL"), 1_000);
+        forceTimer.unref();
+      });
     };
 
     const collect = (target: Buffer[], chunk: Buffer): void => {
@@ -113,7 +116,7 @@ function abortError(command: string): Error {
   return new Error(`${command} was cancelled.`);
 }
 
-function terminateProcess(child: ChildProcess, processGroupId: number | undefined, signal: NodeJS.Signals): void {
+async function terminateProcess(child: ChildProcess, processGroupId: number | undefined, signal: NodeJS.Signals): Promise<void> {
   if (process.platform !== "win32" && processGroupId) {
     try {
       process.kill(-processGroupId, signal);
@@ -124,14 +127,28 @@ function terminateProcess(child: ChildProcess, processGroupId: number | undefine
   }
   if (process.platform === "win32" && processGroupId) {
     const args = ["/PID", String(processGroupId), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])];
-    try {
-      const killer = spawn("taskkill.exe", args, { stdio: "ignore", windowsHide: true });
-      killer.unref();
-    } catch {
-      // Fall through to the direct-child fallback.
-    }
+    const executable = windowsTaskkillPath();
+    if (executable && await runTaskkill(executable, args)) return;
   }
   if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+}
+
+async function runTaskkill(executable: string, args: string[]): Promise<boolean> {
+  return await new Promise((resolvePromise) => {
+    let settled = false;
+    const finish = (succeeded: boolean): void => {
+      if (settled) return;
+      settled = true;
+      resolvePromise(succeeded);
+    };
+    try {
+      const killer = spawn(executable, args, { stdio: "ignore", windowsHide: true });
+      killer.once("error", () => finish(false));
+      killer.once("close", (code) => finish(code === 0));
+    } catch {
+      finish(false);
+    }
+  });
 }
 
 export async function gitBuffer(
