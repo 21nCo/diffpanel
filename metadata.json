@@ -3,8 +3,14 @@
   "checkpoint_id": "01M37S7Q032M05AQ05Q0D4AK37",
   "strategy": "manual-commit",
   "branch": "aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review",
-  "checkpoints_count": 3,
-  "files_touched": null,
+  "checkpoints_count": 4,
+  "files_touched": [
+    "apps/cli/src/e2e.test.ts",
+    "apps/cli/src/index.ts",
+    "packages/storage/README.md",
+    "packages/storage/src/store.test.ts",
+    "packages/storage/src/store.ts"
+  ],
   "sessions": [
     {
       "metadata": "/0/metadata.json",
@@ -12,13 +18,20 @@
       "compact_transcript": "/0/transcript.jsonl",
       "content_hash": "/0/content_hash.txt",
       "prompt": "/0/prompt.txt"
+    },
+    {
+      "metadata": "/1/metadata.json",
+      "transcript": "/1/full.jsonl",
+      "compact_transcript": "/1/transcript.jsonl",
+      "content_hash": "/1/content_hash.txt",
+      "prompt": "/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 1746353,
+    "input_tokens": 1844324,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 94987648,
-    "output_tokens": 359354,
-    "api_call_count": 725
+    "cache_read_tokens": 102317568,
+    "output_tokens": 388965,
+    "api_call_count": 770
   }
 }
