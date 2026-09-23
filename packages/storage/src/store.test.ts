@@ -449,20 +449,78 @@ describe("DiffpanelStore", () => {
     } finally { store.close(); }
   });
 
-  it("marks ready runs failed when their review is corrupt", async () => {
+  it("defers ready-run verification until explicitly requested", async () => {
     const home = await mkdtemp(join(tmpdir(), "diffpanel-corrupt-review-"));
     temporaryDirectories.push(home);
     const store = await DiffpanelStore.open(home);
     const receipt = await store.createPreparedRun(capturedReview());
     await store.publish(receipt.runId, generatedReview(receipt.runId));
+    const incomplete = await store.createPreparedRun(capturedReview());
+    await writeFile(join(home, "runs", incomplete.runId, "review.json"), `${JSON.stringify(generatedReview(incomplete.runId))}\n`);
     store.close();
     await writeFile(join(home, "runs", receipt.runId, "review.json"), "{}\n");
 
     const recovered = await DiffpanelStore.open(home);
     try {
-      expect(recovered.lastRecoveryReport?.failedRunIds).toContain(receipt.runId);
+      expect(recovered.lastRecoveryReport?.failedRunIds).not.toContain(receipt.runId);
+      expect(recovered.lastRecoveryReport?.recoveredRunIds).toContain(incomplete.runId);
+      expect(recovered.listRuns().find((run) => run.runId === receipt.runId)?.status).toBe("ready");
+      expect((await recovered.getRun(incomplete.runId)).summary.status).toBe("ready");
+      await expect(recovered.getRun(receipt.runId)).rejects.toThrow();
+      const report = await recovered.recoverRun(receipt.runId);
+      expect(report.failedRunIds).toContain(receipt.runId);
       expect((await recovered.getRun(receipt.runId)).summary.status).toBe("failed");
     } finally { recovered.close(); }
+  });
+
+  it("leaves ready blobs and unrelated garbage for targeted or explicit verification", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-ready-integrity-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    await store.publish(receipt.runId, generatedReview(receipt.runId));
+    const hash = (await store.getRun(receipt.runId)).manifest.files[0]!.afterBlob!;
+    const blob = join(home, "blobs", hash.slice(0, 2), hash.slice(2));
+    const orphanHash = "a".repeat(64);
+    const orphan = join(home, "blobs", orphanHash.slice(0, 2), orphanHash.slice(2));
+    await mkdir(join(home, "blobs", orphanHash.slice(0, 2)), { recursive: true });
+    await writeFile(orphan, "orphan\n");
+    store.close();
+    await writeFile(blob, "tampered\n");
+
+    const reopened = await DiffpanelStore.open(home);
+    try {
+      expect(reopened.listRuns()[0]?.status).toBe("ready");
+      expect(reopened.lastRecoveryReport?.failedRunIds).toEqual([]);
+      await access(orphan);
+      await expect(reopened.getRunBlob(receipt.runId, hash)).rejects.toThrow(/integrity/);
+      expect((await reopened.recoverRun(receipt.runId)).failedRunIds).toEqual([]);
+      expect(reopened.listRuns()[0]?.status).toBe("ready");
+      const report = await reopened.recover();
+      expect(report.failedRunIds).toContain(receipt.runId);
+      expect(report.deletedBlobCount).toBe(0);
+      await access(orphan);
+      expect((await reopened.getRun(receipt.runId)).summary.status).toBe("failed");
+    } finally { reopened.close(); }
+  });
+
+  it("collects unrelated blobs only during explicit maintenance", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-explicit-gc-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    store.close();
+    const orphanHash = "b".repeat(64);
+    const orphan = join(home, "blobs", orphanHash.slice(0, 2), orphanHash.slice(2));
+    await mkdir(join(home, "blobs", orphanHash.slice(0, 2)), { recursive: true });
+    await writeFile(orphan, "orphan\n");
+
+    const reopened = await DiffpanelStore.open(home);
+    try {
+      await access(orphan);
+      expect(reopened.lastRecoveryReport?.deletedBlobCount).toBe(0);
+      expect(await reopened.garbageCollectBlobs()).toBe(1);
+      await expect(access(orphan)).rejects.toThrow();
+    } finally { reopened.close(); }
   });
 
   it("removes orphan run directories and interrupted temporary writes on restart", async () => {

@@ -81,7 +81,7 @@ export class DiffpanelStore {
         migrate(database);
       });
       const store = new DiffpanelStore(resolvedHome, databasePath, database);
-      if (options.recover ?? true) store.lastRecoveryReport = await store.recover();
+      if (options.recover ?? true) store.lastRecoveryReport = await store.recoverStartup();
       return store;
     } catch (error) {
       database.close();
@@ -409,11 +409,19 @@ export class DiffpanelStore {
     return deleted;
   }
 
-  async recover(): Promise<RecoveryReport> {
-    return await this.withMaintenanceLock(() => this.recoverLocked());
+  private async recoverStartup(): Promise<RecoveryReport> {
+    return await this.withMaintenanceLock(() => this.recoverLocked(false));
   }
 
-  private async recoverLocked(): Promise<RecoveryReport> {
+  async recover(): Promise<RecoveryReport> {
+    return await this.withMaintenanceLock(() => this.recoverLocked(true));
+  }
+
+  async recoverRun(runId: string): Promise<RecoveryReport> {
+    return await this.withMaintenanceLock(() => this.recoverLocked(false, runId));
+  }
+
+  private async recoverLocked(verifyAll: boolean, targetRunId?: string): Promise<RecoveryReport> {
     const report: RecoveryReport = {
       recoveredRunIds: [],
       failedRunIds: [],
@@ -421,55 +429,80 @@ export class DiffpanelStore {
       removedTemporaryFiles: 0,
       deletedBlobCount: 0,
     };
-    report.removedTemporaryFiles += await removeTemporaryFiles(this.runsPath);
-    report.removedTemporaryFiles += await removeTemporaryFiles(this.blobsPath);
-    const rows = this.database.prepare("SELECT * FROM runs").all() as RunRow[];
-    const knownRuns = new Set(rows.map((row) => row.run_id));
+    const rows = await this.prepareRecovery(verifyAll, targetRunId, report);
+    let safeToCollect = true;
+    for (const row of rows) {
+      if (!await this.recoverRowLocked(row, verifyAll, report)) safeToCollect = false;
+    }
+    if (verifyAll && safeToCollect) report.deletedBlobCount = await this.garbageCollectBlobsLocked();
+    return report;
+  }
 
+  private async prepareRecovery(
+    verifyAll: boolean,
+    targetRunId: string | undefined,
+    report: RecoveryReport,
+  ): Promise<RunRow[]> {
+    if (verifyAll) {
+      report.removedTemporaryFiles += await removeTemporaryFiles(this.runsPath);
+      report.removedTemporaryFiles += await removeTemporaryFiles(this.blobsPath);
+    }
+    const rows = targetRunId
+      ? [this.requireRunRow(targetRunId)]
+      : this.database.prepare(verifyAll ? "SELECT * FROM runs" : "SELECT * FROM runs WHERE status = 'prepared'").all() as RunRow[];
+    if (!verifyAll && !targetRunId) {
+      for (const row of rows) report.removedTemporaryFiles += await removeTemporaryFiles(join(this.runsPath, row.run_id));
+    }
+    if (!targetRunId) await this.removeOrphanRuns(report);
+    return rows;
+  }
+
+  private async removeOrphanRuns(report: RecoveryReport): Promise<void> {
+    const knownRuns = new Set(
+      (this.database.prepare("SELECT run_id FROM runs").all() as Array<{ run_id: string }>).map((row) => row.run_id),
+    );
     for (const entry of await safeReadDirectory(this.runsPath)) {
       if (!entry.isDirectory() || knownRuns.has(entry.name)) continue;
       await rm(join(this.runsPath, entry.name), { recursive: true, force: true });
       report.removedOrphanRunIds.push(entry.name);
     }
+  }
 
-    let safeToCollect = true;
-    for (const row of rows) {
-      try {
-        const manifest = reviewManifestSchema.parse(JSON.parse(await readFile(row.manifest_path, "utf8")));
-        this.backfillBlobReferences(row.run_id, manifest);
-        await this.assertManifestBlobIntegrity(manifest);
-        const candidateReviewPath = row.review_path ?? join(this.runsPath, row.run_id, "review.json");
-        if (row.status === "prepared" && existsSync(candidateReviewPath)) {
-          const review = assertGeneratedReview(manifest, JSON.parse(await readFile(candidateReviewPath, "utf8")));
-          this.database.prepare(`
-            UPDATE runs
-            SET status = 'ready', generator = ?, published_at = ?, chapter_count = ?, review_path = ?, review_title = ?
-            WHERE run_id = ?
-          `).run(
-            review.generator ?? "agent",
-            new Date().toISOString(),
-            review.chapters.length,
-            candidateReviewPath,
-            review.title ?? row.review_title,
-            row.run_id,
-          );
-          report.recoveredRunIds.push(row.run_id);
-        } else if (row.status === "ready") {
-          if (!existsSync(candidateReviewPath)) {
-            this.markRunFailed(row.run_id);
-            report.failedRunIds.push(row.run_id);
-          } else {
-            assertGeneratedReview(manifest, JSON.parse(await readFile(candidateReviewPath, "utf8")));
-          }
+  private async recoverRowLocked(row: RunRow, verifyAll: boolean, report: RecoveryReport): Promise<boolean> {
+    try {
+      const manifest = reviewManifestSchema.parse(JSON.parse(await readFile(row.manifest_path, "utf8")));
+      this.backfillBlobReferences(row.run_id, manifest);
+      if (verifyAll || row.status === "prepared") await this.assertManifestBlobIntegrity(manifest);
+      const candidateReviewPath = row.review_path ?? join(this.runsPath, row.run_id, "review.json");
+      if (row.status === "prepared" && existsSync(candidateReviewPath)) {
+        const review = assertGeneratedReview(manifest, JSON.parse(await readFile(candidateReviewPath, "utf8")));
+        this.database.prepare(`
+          UPDATE runs
+          SET status = 'ready', generator = ?, published_at = ?, chapter_count = ?, review_path = ?, review_title = ?
+          WHERE run_id = ?
+        `).run(
+          review.generator ?? "agent",
+          new Date().toISOString(),
+          review.chapters.length,
+          candidateReviewPath,
+          review.title ?? row.review_title,
+          row.run_id,
+        );
+        report.recoveredRunIds.push(row.run_id);
+      } else if (row.status === "ready") {
+        if (!existsSync(candidateReviewPath)) {
+          this.markRunFailed(row.run_id);
+          report.failedRunIds.push(row.run_id);
+        } else {
+          assertGeneratedReview(manifest, JSON.parse(await readFile(candidateReviewPath, "utf8")));
         }
-      } catch {
-        safeToCollect = false;
-        this.markRunFailed(row.run_id);
-        report.failedRunIds.push(row.run_id);
       }
+      return true;
+    } catch {
+      this.markRunFailed(row.run_id);
+      report.failedRunIds.push(row.run_id);
+      return false;
     }
-    if (safeToCollect) report.deletedBlobCount = await this.garbageCollectBlobsLocked();
-    return report;
   }
 
   async modifiedAt(): Promise<number> {

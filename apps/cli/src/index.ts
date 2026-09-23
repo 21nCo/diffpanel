@@ -176,8 +176,9 @@ program
   .argument("<run-id>", "Review run ID")
   .option("--json", "Print JSON", true)
   .action(async (runId: string) => {
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
+      await store.recoverRun(runId);
       process.stdout.write(`${JSON.stringify(await store.getRun(runId), null, 2)}\n`);
     } finally {
       store.close();
@@ -229,10 +230,12 @@ program
 program
   .command("doctor")
   .description("Print the local Diffpanel installation and storage configuration.")
+  .option("--verify", "Verify saved runs and collect unreferenced blobs")
   .option("--json", "Print JSON")
   .action(async (options) => {
-    const store = await DiffpanelStore.open();
+    const store = await DiffpanelStore.open(undefined, { recover: !options.verify });
     try {
+      const recovery = options.verify ? await store.recover() : store.lastRecoveryReport;
       const report = {
         ok: true,
         node: process.version,
@@ -240,7 +243,7 @@ program
         home: defaultDiffpanelHome(),
         databasePath: store.databasePath,
         runs: store.listRuns(undefined, true).length,
-        recovery: store.lastRecoveryReport,
+        recovery,
       };
       process.stdout.write(options.json
         ? `${JSON.stringify(report, null, 2)}\n`

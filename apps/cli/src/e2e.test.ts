@@ -95,6 +95,10 @@ describe("diffpanel CLI", () => {
       expect(await runCli(["unarchive", receipt.runId], home, repository)).toContain(`Restored ${receipt.runId}`);
       const file = manifest.files[0]!;
       expect(await runCli(["content", receipt.runId, file.id, "after"], home, repository)).toContain("value = 2");
+      expect(JSON.parse(await runCli(["doctor", "--verify", "--json"], home, repository))).toMatchObject({
+        ok: true,
+        recovery: { failedRunIds: [], deletedBlobCount: 0 },
+      });
       await writeFile(join(home, "runs", receipt.runId, "review.json"), "not json\n");
       const recovered = JSON.parse(await runCli(["show", receipt.runId, "--json"], home, repository)) as {
         summary: { status: string };
