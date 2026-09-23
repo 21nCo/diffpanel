@@ -1,0 +1,39 @@
+packages/git/src/capture.ts
+  s_4a1f51a32f40b2::t_c49a515bc89258 66,82,610,668-679
+  s_4a1f51a32f40b2::t_b0dbb71d46bc5e 16,177-184,216-219,282-302,526-534,539,541-545
+  s_dbeaf6beea25e6::t_4a8296efdce99e 680
+packages/storage/src/store.ts
+  s_4a1f51a32f40b2::t_9c36efe6036b6a 78-82,519,529,537
+  s_4a1f51a32f40b2::t_637ad14bfb5e9a 538-550
+  s_dbeaf6beea25e6::t_2ff9217a25a331 551-552
+packages/storage/src/store.test.ts
+  s_4a1f51a32f40b2::t_258117703344cd 183-214
+packages/git/src/capture.test.ts
+  s_4a1f51a32f40b2::t_1155ccfcc074ca 53-64,86-88,413-424,430
+  s_4a1f51a32f40b2::t_0ec99864291252 52,65-85
+  s_4a1f51a32f40b2::t_5f92cfecff9529 425-429
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b3af21f998b0541f511bf97fedf0c14c7827464d",
+  "prompts": {},
+  "sessions": {
+    "s_4a1f51a32f40b2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c88a-c379-7711-89ae-f383fcca0dab",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    },
+    "s_dbeaf6beea25e6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c886-73ef-72c2-b7ee-54bc7cc84533",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
