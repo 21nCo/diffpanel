@@ -75,9 +75,11 @@ export class DiffpanelStore {
     const database = new Database(databasePath);
     try {
       database.pragma("busy_timeout = 30000");
-      database.pragma("journal_mode = WAL");
-      database.pragma("foreign_keys = ON");
-      migrate(database);
+      await withDatabaseQueue(databasePath, async () => {
+        database.pragma("journal_mode = WAL");
+        database.pragma("foreign_keys = ON");
+        migrate(database);
+      });
       const store = new DiffpanelStore(resolvedHome, databasePath, database);
       if (options.recover ?? true) store.lastRecoveryReport = await store.recover();
       return store;
@@ -514,14 +516,7 @@ export class DiffpanelStore {
   }
 
   private async withMaintenanceLock<T>(operation: () => Promise<T>): Promise<T> {
-    let release!: () => void;
-    const previous = maintenanceQueues.get(this.databasePath) ?? Promise.resolve();
-    const current = new Promise<void>((resolvePromise) => {
-      release = resolvePromise;
-    });
-    maintenanceQueues.set(this.databasePath, current);
-    await previous;
-    try {
+    return await withDatabaseQueue(this.databasePath, async () => {
       this.database.exec("BEGIN IMMEDIATE");
       try {
         const result = await operation();
@@ -531,14 +526,27 @@ export class DiffpanelStore {
         if (this.database.inTransaction) this.database.exec("ROLLBACK");
         throw error;
       }
-    } finally {
-      release();
-      if (maintenanceQueues.get(this.databasePath) === current) maintenanceQueues.delete(this.databasePath);
-    }
+    });
   }
 
   private markRunFailed(runId: string): void {
     this.database.prepare("UPDATE runs SET status = 'failed', review_path = NULL WHERE run_id = ?").run(runId);
+  }
+}
+
+async function withDatabaseQueue<T>(databasePath: string, operation: () => Promise<T>): Promise<T> {
+  let release!: () => void;
+  const previous = maintenanceQueues.get(databasePath) ?? Promise.resolve();
+  const current = new Promise<void>((resolvePromise) => {
+    release = resolvePromise;
+  });
+  maintenanceQueues.set(databasePath, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (maintenanceQueues.get(databasePath) === current) maintenanceQueues.delete(databasePath);
   }
 }
 

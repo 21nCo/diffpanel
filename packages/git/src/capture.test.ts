@@ -49,6 +49,43 @@ describe("captureReview", () => {
     expect(captured.files[0]?.items[0]?.kind).toBe("file");
   });
 
+  it.each(["repository", "staged", "range"] as const)("skips gitlinks without losing reviewable %s content", async (type) => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await runProcess("git", ["add", "alpha.ts"], repository);
+    await runProcess("git", ["update-index", "--add", "--cacheinfo", `160000,${"a".repeat(40)},deps/lib`], repository);
+    if (type === "repository" || type === "range") await runProcess("git", ["commit", "-m", "change with gitlink"], repository);
+    const request = type === "range"
+      ? { type, repository, expression: "HEAD~1..HEAD" }
+      : { type, repository };
+
+    const captured = await captureReview(request);
+    expect(captured.files.map((file) => file.filePath)).toContain("alpha.ts");
+    expect(captured.files.map((file) => file.filePath)).not.toContain("deps/lib");
+    expect(captured.skipped).toContainEqual({ filePath: "deps/lib", reason: "git submodule (gitlink)" });
+  });
+
+  it("skips a changed worktree submodule without opening its directory", async () => {
+    const repository = await createRepository();
+    const submodule = join(repository, "deps", "lib");
+    await mkdir(submodule, { recursive: true });
+    await runProcess("git", ["init", "-b", "main"], submodule);
+    await runProcess("git", ["config", "user.email", "diffpanel@example.com"], submodule);
+    await runProcess("git", ["config", "user.name", "Diffpanel Test"], submodule);
+    await writeFile(join(submodule, "value.ts"), "export const value = 1;\n");
+    await runProcess("git", ["add", "value.ts"], submodule);
+    await runProcess("git", ["commit", "-m", "submodule initial"], submodule);
+    await runProcess("git", ["add", "deps/lib"], repository);
+    await runProcess("git", ["commit", "-m", "add gitlink"], repository);
+    await writeFile(join(submodule, "value.ts"), "export const value = 2;\n");
+    await runProcess("git", ["commit", "-am", "submodule change"], submodule);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+
+    const captured = await captureReview({ type: "worktree", repository });
+    expect(captured.files.map((file) => file.filePath)).toEqual(["alpha.ts"]);
+    expect(captured.skipped).toContainEqual({ filePath: "deps/lib", reason: "git submodule (gitlink)" });
+  });
+
   it("rejects invalid repository snapshot limits", async () => {
     const repository = await createRepository();
     await expect(captureReview({ type: "repository", repository, maxFiles: 0 })).rejects.toThrow(/positive integer/);
@@ -367,6 +404,24 @@ describe("captureReview", () => {
     await writeFile(join(repository, "untracked.ts"), "export const untracked = true;\n");
     const controller = new AbortController();
     await expect(captureReview({ type: "worktree", repository }, {
+      signal: controller.signal,
+      onProgress(progress) {
+        if (progress.phase === "verify") controller.abort();
+      },
+    })).rejects.toThrow(/cancelled/);
+  });
+
+  it.each(["staged", "range"] as const)("honors cancellation at the immutable %s capture return boundary", async (type) => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await runProcess("git", ["add", "alpha.ts"], repository);
+    if (type === "range") await runProcess("git", ["commit", "-m", "change"], repository);
+    const request = type === "range"
+      ? { type, repository, expression: "HEAD~1..HEAD" }
+      : { type, repository };
+    const controller = new AbortController();
+
+    await expect(captureReview(request, {
       signal: controller.signal,
       onProgress(progress) {
         if (progress.phase === "verify") controller.abort();

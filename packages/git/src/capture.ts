@@ -13,6 +13,7 @@ interface ChangedPath {
   status: CapturedFile["status"];
   filePath: string;
   oldPath: string | null;
+  gitlink?: boolean;
 }
 
 type ChangedScope = Exclude<ReviewScope, { type: "repository" }>;
@@ -62,7 +63,7 @@ export async function captureReview(request: CaptureRequest, options: CaptureOpt
       captured = await captureChangedScope(repositoryRoot, scope, limits, options, processOptions);
       options.onProgress?.({ phase: "verify", current: attempt, total: MAX_CAPTURE_ATTEMPTS });
       if (scope.type === "range" || (scope.type === "staged" && scope.indexSha)) {
-        return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
+        return await finishCapturedReview(repositoryRoot, scope, captured.files, captured.skipped, options.signal);
       }
       verified = await captureChangedScope(repositoryRoot, scope, limits, { signal: options.signal }, processOptions);
     } catch (error) {
@@ -78,7 +79,7 @@ export async function captureReview(request: CaptureRequest, options: CaptureOpt
       : null;
     if (captureFingerprint(captured) === captureFingerprint(verified)
       && (indexBefore === null || indexBefore === indexAfter)) {
-      return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
+      return await finishCapturedReview(repositoryRoot, scope, captured.files, captured.skipped, options.signal);
     }
     if (attempt === MAX_CAPTURE_ATTEMPTS) {
       throw new Error("Repository files or index changed during capture. Retry after the working tree is stable.");
@@ -173,6 +174,14 @@ async function listChangedPaths(repositoryRoot: string, scope: ChangedScope, pro
   else if (scope.type === "range") args.push(scope.baseSha, scope.compareSha);
 
   const records = parseNameStatus(await gitBuffer(repositoryRoot, args, processOptions));
+  const rawArgs = [...args];
+  rawArgs[1] = "--raw";
+  const gitlinks = parseRawGitlinks(await gitBuffer(repositoryRoot, rawArgs, processOptions));
+  for (const record of records) {
+    if (gitlinks.has(record.filePath) || (record.oldPath !== null && gitlinks.has(record.oldPath))) {
+      record.gitlink = true;
+    }
+  }
   if (scope.type === "worktree") {
     const untracked = splitNull(await gitBuffer(repositoryRoot, ["ls-files", "--others", "--exclude-standard", "-z"], processOptions));
     const existing = new Set(records.map((record) => record.filePath));
@@ -204,6 +213,10 @@ async function captureChangedScope(
   for (const [index, changedPath] of changedPaths.entries()) {
     if (options.signal?.aborted) throw new Error("Diffpanel capture was cancelled.");
     options.onProgress?.({ phase: "capture", current: index + 1, total: changedPaths.length, filePath: changedPath.filePath });
+    if (changedPath.gitlink) {
+      skipped.push({ filePath: changedPath.filePath, reason: "git submodule (gitlink)" });
+      continue;
+    }
     if (files.length >= limits.maxFiles) {
       skipped.push({ filePath: changedPath.filePath, reason: `capture file limit ${limits.maxFiles} reached` });
       continue;
@@ -264,6 +277,27 @@ export function parseNameStatus(buffer: Buffer): ChangedPath[] {
     records.push({ status: mapStatus(code), oldPath: null, filePath });
   }
   return records;
+}
+
+function parseRawGitlinks(buffer: Buffer): Set<string> {
+  const fields = splitNull(buffer);
+  const gitlinks = new Set<string>();
+  let index = 0;
+  while (index < fields.length) {
+    const header = fields[index++];
+    const match = header?.match(/^:(\d{6}) (\d{6}) \S+ \S+ ([A-Z])\d*$/);
+    if (!match) throw new Error("Malformed raw path record from Git.");
+    const oldPath = fields[index++];
+    const filePath = match[3] === "R" || match[3] === "C" ? fields[index++] : oldPath;
+    if (!oldPath || !filePath) throw new Error("Malformed raw path record from Git.");
+    assertSafeRepositoryPath(oldPath);
+    assertSafeRepositoryPath(filePath);
+    if (match[1] === "160000" || match[2] === "160000") {
+      gitlinks.add(oldPath);
+      gitlinks.add(filePath);
+    }
+  }
+  return gitlinks;
 }
 
 function splitNull(buffer: Buffer): string[] {
@@ -489,15 +523,26 @@ async function captureRepositorySnapshot(
 ): Promise<CapturedReview> {
   validateRef(ref);
   const sha = await gitText(repositoryRoot, ["rev-parse", "--verify", ref], processOptions);
-  const allPaths = splitNull(await gitBuffer(repositoryRoot, ["ls-tree", "-r", "--name-only", "-z", sha], processOptions));
+  const entries = splitNull(await gitBuffer(repositoryRoot, ["ls-tree", "-r", "-z", sha], processOptions)).map((record) => {
+    const separator = record.indexOf("\t");
+    if (separator < 0) throw new Error("Malformed tree entry from Git.");
+    const [mode, type] = record.slice(0, separator).split(" ");
+    const filePath = record.slice(separator + 1);
+    if (!mode || !type) throw new Error("Malformed tree entry from Git.");
+    assertSafeRepositoryPath(filePath);
+    return { mode, type, filePath };
+  });
   const files: CapturedFile[] = [];
   const skipped: Array<{ filePath: string; reason: string }> = [];
   let totalBytes = 0;
 
-  for (const [index, filePath] of allPaths.entries()) {
+  for (const [index, { mode, type, filePath }] of entries.entries()) {
     if (options.signal?.aborted) throw new Error("Diffpanel capture was cancelled.");
-    assertSafeRepositoryPath(filePath);
-    options.onProgress?.({ phase: "capture", current: index + 1, total: allPaths.length, filePath });
+    options.onProgress?.({ phase: "capture", current: index + 1, total: entries.length, filePath });
+    if (mode === "160000" || type === "commit") {
+      skipped.push({ filePath, reason: "git submodule (gitlink)" });
+      continue;
+    }
     if (files.length >= maxFiles) {
       skipped.push({ filePath, reason: `repository file limit ${maxFiles} reached` });
       continue;
@@ -562,7 +607,7 @@ async function captureRepositorySnapshot(
 
   if (files.length === 0) throw new Error("The repository snapshot contains no reviewable text files.");
   const scope: ReviewScope = { type: "repository", ref, sha, maxFiles };
-  return await buildCapturedReview(repositoryRoot, scope, files, skipped);
+  return await finishCapturedReview(repositoryRoot, scope, files, skipped, options.signal);
 }
 
 function isGeneratedOrVendorPath(filePath: string): boolean {
@@ -619,4 +664,17 @@ async function buildCapturedReview(
     files,
     skipped,
   };
+}
+
+async function finishCapturedReview(
+  repositoryRoot: string,
+  scope: ReviewScope,
+  files: CapturedFile[],
+  skipped: Array<{ filePath: string; reason: string }>,
+  signal: AbortSignal | undefined,
+): Promise<CapturedReview> {
+  if (signal?.aborted) throw new Error("Diffpanel capture was cancelled.");
+  const captured = await buildCapturedReview(repositoryRoot, scope, files, skipped);
+  if (signal?.aborted) throw new Error("Diffpanel capture was cancelled.");
+  return captured;
 }

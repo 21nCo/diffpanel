@@ -180,6 +180,38 @@ describe("DiffpanelStore", () => {
     } finally { first.close(); second.close(); }
   });
 
+  it("queues a new store open behind in-process maintenance", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-open-queue-"));
+    temporaryDirectories.push(home);
+    const first = await DiffpanelStore.open(home);
+    let second: DiffpanelStore | undefined;
+    let release!: () => void;
+    let entered!: () => void;
+    const transactionEntered = new Promise<void>((resolvePromise) => { entered = resolvePromise; });
+    const holdTransaction = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+    const maintenance = first as unknown as {
+      withMaintenanceLock<T>(operation: () => Promise<T>): Promise<T>;
+    };
+    const pending = maintenance.withMaintenanceLock(async () => {
+      entered();
+      await holdTransaction;
+    });
+    await transactionEntered;
+    const releaseTimer = setTimeout(release, 250);
+    try {
+      second = await DiffpanelStore.open(home, { recover: false });
+      await pending;
+      const receipt = await second.createPreparedRun(capturedReview());
+      expect(first.listRuns()[0]?.runId).toBe(receipt.runId);
+    } finally {
+      clearTimeout(releaseTimer);
+      release();
+      await pending;
+      second?.close();
+      first.close();
+    }
+  });
+
   it("persists empty-file move evidence and its zero-byte content hashes", async () => {
     const home = await mkdtemp(join(tmpdir(), "diffpanel-empty-move-"));
     temporaryDirectories.push(home);
