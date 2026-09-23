@@ -1,0 +1,60 @@
+{
+  "cli_version": "0.10.6",
+  "checkpoint_id": "01M376FFMT67X24745F8QS07X6",
+  "session_id": "01a0c88a-c379-7711-89ae-f383fcca0dab",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-23T13:15:03.293493Z",
+  "branch": "aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "apps/cli/src/index.ts",
+    "packages/git/src/capture.test.ts",
+    "packages/git/src/capture.ts",
+    "packages/git/src/process.test.ts",
+    "packages/git/src/windows-process.ts",
+    "packages/storage/src/store.test.ts",
+    "packages/storage/src/store.ts"
+  ],
+  "agent": "Codex",
+  "model": "gpt-6-sol",
+  "turn_id": "3459214d69e0",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 1402950,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 62323072,
+    "output_tokens": 289537,
+    "api_call_count": 521
+  },
+  "session_metrics": {
+    "turn_count": 11
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-23T13:15:02.682696Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 129,
+    "human_modified": 44,
+    "human_removed": 0,
+    "total_committed": 129,
+    "total_lines_changed": 173,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 3,
+      "user_lines_removed": 2,
+      "agent_lines_added": 89,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        ".conduct/pr-1-remediation-ledger.md": 3
+      },
+      "user_removed_per_file": {
+        ".conduct/pr-1-remediation-ledger.md": 2
+      }
+    }
+  ]
+}
