@@ -31,6 +31,28 @@ async function createRepository(): Promise<string> {
 }
 
 describe("captureReview", () => {
+  it.skipIf(process.platform === "win32")("captures legal POSIX filenames in every scope", async () => {
+    const repository = await createRepository();
+    const filePath = "odd\\name\r\n.ts";
+    await writeFile(join(repository, filePath), "export const value = 1;\n");
+    await runProcess("git", ["add", "--", filePath], repository);
+    await runProcess("git", ["commit", "-m", "add unusual path"], repository);
+    await writeFile(join(repository, filePath), "export const value = 2;\n");
+
+    const worktree = await captureReview({ type: "worktree", repository });
+    await runProcess("git", ["add", "--", filePath], repository);
+    const staged = await captureReview({ type: "staged", repository });
+    await runProcess("git", ["commit", "-m", "change unusual path"], repository);
+    const range = await captureReview({ type: "range", repository, expression: "HEAD~1..HEAD" });
+    const snapshot = await captureReview({ type: "repository", repository, ref: "HEAD" });
+
+    for (const captured of [worktree, staged, range, snapshot]) {
+      const file = captured.files.find((item) => item.filePath === filePath);
+      expect(file?.afterContent?.toString("utf8")).toBe("export const value = 2;\n");
+      expect(file?.items.length).toBeGreaterThan(0);
+    }
+  });
+
   it("captures tracked and untracked worktree changes", async () => {
     const repository = await createRepository();
     await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");

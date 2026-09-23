@@ -197,16 +197,30 @@ describe("DiffpanelStore", () => {
       await holdTransaction;
     });
     await transactionEntered;
-    const releaseTimer = setTimeout(release, 250);
+    let openState: "pending" | "opened" | "failed" = "pending";
+    const opening = DiffpanelStore.open(home, { recover: false }).then(
+      (store) => { openState = "opened"; return { ok: true as const, store }; },
+      (error: unknown) => { openState = "failed"; return { ok: false as const, error }; },
+    );
+    const releaseTimer = setTimeout(release, 1_000);
     try {
-      second = await DiffpanelStore.open(home, { recover: false });
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+      expect(openState).toBe("pending");
+      release();
       await pending;
+      const result = await opening;
+      if (!result.ok) throw result.error;
+      second = result.store;
       const receipt = await second.createPreparedRun(capturedReview());
       expect(first.listRuns()[0]?.runId).toBe(receipt.runId);
     } finally {
       clearTimeout(releaseTimer);
       release();
       await pending;
+      if (!second) {
+        const result = await opening;
+        if (result.ok) result.store.close();
+      }
       second?.close();
       first.close();
     }

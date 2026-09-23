@@ -1,4 +1,4 @@
-import { basename, extname, isAbsolute, resolve } from "node:path";
+import { basename, extname, isAbsolute, resolve, sep } from "node:path";
 import { realpath } from "node:fs/promises";
 import {
   type ReviewItem,
@@ -641,7 +641,7 @@ function validateRef(ref: string): void {
 }
 
 function assertSafeRepositoryPath(filePath: string): void {
-  if (!filePath || isAbsolute(filePath) || filePath.includes("\\") || /[\0\r\n]/.test(filePath)) {
+  if (!filePath || isAbsolute(filePath) || filePath.includes("\0") || (sep === "\\" && filePath.includes("\\"))) {
     throw new Error(`Unsafe repository path: ${JSON.stringify(filePath)}`);
   }
   const segments = filePath.split("/");
