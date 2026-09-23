@@ -1,0 +1,25 @@
+packages/git/src/capture.ts
+  s_36647e141eaee6::t_fc8a92396ed378 1,644
+packages/storage/src/store.test.ts
+  s_36647e141eaee6::t_685f26d178c1a7 200-204,220-223
+  s_36647e141eaee6::t_a51de9735cb186 205,207-209,211,213
+  s_36647e141eaee6::t_ea4c7174a4206d 212
+packages/git/src/capture.test.ts
+  s_36647e141eaee6::t_a51de9735cb186 34-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "bfd905acfd9f654c14ef50a4fb0ad620d9dd610b",
+  "prompts": {},
+  "sessions": {
+    "s_36647e141eaee6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0cf1a-f300-7be0-a59e-0cdd239e38f0",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
