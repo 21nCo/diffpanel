@@ -17,7 +17,7 @@ export async function readWorktreeFile(
 ): Promise<Buffer> {
   const absolute = containedPath(repositoryRoot, filePath);
   const initial = await lstat(absolute);
-  if (initial.isSymbolicLink()) return await readStableSymlink(repositoryRoot, filePath, absolute, initial);
+  if (initial.isSymbolicLink()) return await readStableSymlink(repositoryRoot, filePath, absolute, initial, maxBytes);
   if (!initial.isFile()) throw new Error(`Review path is not a regular file: ${filePath}`);
   if (initial.size > maxBytes) throw new WorktreeFileTooLargeError();
 
@@ -40,8 +40,10 @@ async function readStableSymlink(
   filePath: string,
   absolute: string,
   initial: Stats,
+  maxBytes: number,
 ): Promise<Buffer> {
   const target = await readlink(absolute);
+  if (Buffer.byteLength(target, "utf8") > maxBytes) throw new WorktreeFileTooLargeError();
   await assertNoIntermediateSymlinks(repositoryRoot, filePath);
   const current = await lstat(absolute);
   if (!current.isSymbolicLink() || !sameFile(initial, current) || await readlink(absolute) !== target) {

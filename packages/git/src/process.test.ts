@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { runProcess } from "./process.js";
+import { runTaskkill } from "./windows-process.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -33,6 +34,23 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void>
 }
 
 describe("runProcess", () => {
+  it("bounds a hung tree-kill helper and terminates that helper", async () => {
+    const directory = await workingDirectory();
+    const pidFile = join(directory, "helper.pid");
+    const script = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    const startedAt = Date.now();
+    try {
+      expect(await runTaskkill(process.execPath, ["--eval", script, pidFile], 1_000)).toBe(false);
+      expect(Date.now() - startedAt).toBeLessThan(2_500);
+      const helperPid = Number(readFileSync(pidFile, "utf8"));
+      await waitForProcessExit(helperPid, 500);
+    } finally {
+      if (existsSync(pidFile)) {
+        try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); } catch { /* Already terminated. */ }
+      }
+    }
+  });
+
   it("bounds combined process output", async () => {
     await expect(runProcess(
       process.execPath,

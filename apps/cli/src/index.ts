@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFile, realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { Command } from "commander";
 import { captureReview, type CaptureRequest } from "@diffpanel/git";
 import { DiffpanelStore, defaultDiffpanelHome } from "@diffpanel/storage";
@@ -103,7 +103,7 @@ program
     const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       const page = store.listRunsPage({
-        repositoryRoot: options.repository ? await realpath(resolve(options.repository)) : undefined,
+        repositoryRoot: options.repository ? await resolveStoredRepositoryPath(options.repository) : undefined,
         includeArchived: options.includeArchived,
         limit: options.limit,
         cursor: options.cursor,
@@ -213,7 +213,7 @@ program
     const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
       const result = await store.applyRetention({
-        repositoryRoot: options.repository ? await realpath(resolve(options.repository)) : undefined,
+        repositoryRoot: options.repository ? await resolveStoredRepositoryPath(options.repository) : undefined,
         olderThan: new Date(Date.now() - options.olderThanDays * 24 * 60 * 60 * 1_000),
         keepLatest: options.keepLatest,
         archivedOnly: !options.includeActive,
@@ -272,6 +272,21 @@ function parseRunListLimit(value: string): number {
   const parsed = parseInteger(value);
   if (parsed > 200) throw new Error(`Run list limit must be between 1 and 200, received '${value}'.`);
   return parsed;
+}
+
+async function resolveStoredRepositoryPath(path: string): Promise<string> {
+  const absolute = resolve(path);
+  let existing = absolute;
+  for (;;) {
+    try {
+      return resolve(await realpath(existing), relative(existing, absolute));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = dirname(existing);
+      if (parent === existing) return absolute;
+      existing = parent;
+    }
+  }
 }
 
 function toCaptureRequest(range: string | undefined, options: {

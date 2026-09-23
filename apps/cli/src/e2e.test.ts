@@ -112,6 +112,13 @@ describe("diffpanel CLI", () => {
         expect(result.exitCode).toBe(1);
         expect(result.stderr.toString("utf8")).toMatch(/integer|between 1 and 200/);
       }
+      await rm(repository, { recursive: true, force: true });
+      expect(JSON.parse(await runCli(["list", "--repository", repository, "--json"], home, home))).toEqual([
+        expect.objectContaining({ runId: receipt.runId }),
+      ]);
+      expect(JSON.parse(await runCli([
+        "prune", "--repository", repository, "--keep-latest", "1", "--json",
+      ], home, home))).toMatchObject({ deletedRunIds: [], retainedRunCount: 1 });
     } finally {
       if (previousHome === undefined) delete process.env.DIFFPANEL_HOME;
       else process.env.DIFFPANEL_HOME = previousHome;

@@ -173,7 +173,7 @@ describe("captureReview", () => {
     expect(captured.skipped).toContainEqual({ filePath: "aaa.dat", reason: "binary file" });
   });
 
-  it("rejects oversized worktree files before reading their contents", async () => {
+  it.skipIf(process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0))("rejects oversized worktree files before reading their contents", async () => {
     const repository = await createRepository();
     await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
     const oversized = join(repository, "oversized.txt");
@@ -189,6 +189,16 @@ describe("captureReview", () => {
     } finally {
       await chmod(oversized, 0o600);
     }
+  });
+
+  it.skipIf(process.platform === "win32")("skips oversized symlink targets while retaining reviewable files", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await symlink("é".repeat(40), join(repository, "link.ts"));
+
+    const captured = await captureReview({ type: "worktree", repository }, { limits: { maxFileBytes: 64 } });
+    expect(captured.files.map((file) => file.filePath)).toEqual(["alpha.ts"]);
+    expect(captured.skipped).toContainEqual({ filePath: "link.ts", reason: "file exceeds 64 bytes" });
   });
 
   it("anchors staged captures to an immutable index tree", async () => {
@@ -212,6 +222,32 @@ describe("captureReview", () => {
     const captured = await captureReview({ type: "staged", repository });
     expect(captured.scope).not.toHaveProperty("indexSha");
     expect(captured.files[0]?.status).toBe("unmerged");
+  });
+
+  it("retries when a conflicted index is resolved during capture", async () => {
+    const repository = await createRepository();
+    await runProcess("git", ["checkout", "-b", "side"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'side';\n");
+    await runProcess("git", ["commit", "-am", "side"], repository);
+    await runProcess("git", ["checkout", "main"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'main';\n");
+    await runProcess("git", ["commit", "-am", "main"], repository);
+    await runProcess("git", ["merge", "side"], repository, { acceptedExitCodes: [0, 1] });
+    let resolved = false;
+
+    const captured = await captureReview({ type: "staged", repository }, {
+      onProgress(progress) {
+        if (progress.phase !== "verify" || resolved) return;
+        resolved = true;
+        writeFileSync(join(repository, "alpha.ts"), "export const alpha = 'resolved';\n");
+        execFileSync("git", ["add", "alpha.ts"], { cwd: repository });
+      },
+    });
+
+    expect(captured.scope).toMatchObject({ type: "staged", indexSha: expect.stringMatching(/^[a-f0-9]{40}$/) });
+    expect(captured.files[0]).toMatchObject({ status: "modified" });
+    expect(captured.files[0]?.afterContent?.toString("utf8")).toContain("alpha = 'resolved'");
+    expect(captured.files[0]?.items[0]?.patch).toContain("+export const alpha = 'resolved'");
   });
 
   it.skipIf(process.platform === "win32")("checks for unmerged entries before attempting write-tree", async () => {

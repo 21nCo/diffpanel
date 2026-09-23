@@ -11,7 +11,7 @@ afterEach(async () => {
 });
 
 describe("readWorktreeFile", () => {
-  it("rejects a parent replacement between metadata inspection and descriptor open", async () => {
+  it.skipIf(process.platform === "win32")("rejects a parent replacement between metadata inspection and descriptor open", async () => {
     const repository = await mkdtemp(join(tmpdir(), "diffpanel-descriptor-repo-"));
     const outside = await mkdtemp(join(tmpdir(), "diffpanel-descriptor-outside-"));
     temporaryDirectories.push(repository, outside);
@@ -38,5 +38,13 @@ describe("readWorktreeFile", () => {
         await writeFile(file, "x".repeat(1_024));
       },
     })).rejects.toBeInstanceOf(WorktreeFileTooLargeError);
+  });
+
+  it.skipIf(process.platform === "win32")("bounds the UTF-8 bytes of a symlink target", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "diffpanel-bounded-link-"));
+    temporaryDirectories.push(repository);
+    await symlink("é".repeat(40), join(repository, "link.ts"));
+
+    await expect(readWorktreeFile(repository, "link.ts", 64)).rejects.toBeInstanceOf(WorktreeFileTooLargeError);
   });
 });

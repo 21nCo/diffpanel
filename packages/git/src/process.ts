@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { windowsTaskkillPath } from "./windows-process.js";
+import { runTaskkill, windowsTaskkillPath } from "./windows-process.js";
 
 export interface ProcessResult {
   stdout: Buffer;
@@ -16,6 +16,7 @@ export interface ProcessOptions {
 
 export const DEFAULT_PROCESS_TIMEOUT_MS = 30_000;
 export const DEFAULT_MAX_PROCESS_OUTPUT_BYTES = 16 * 1024 * 1024;
+const TERMINATION_DEADLINE_MS = 3_000;
 
 export async function runProcess(
   command: string,
@@ -49,12 +50,14 @@ export async function runProcess(
     let settled = false;
     let timeout: NodeJS.Timeout | undefined;
     let forceTimer: NodeJS.Timeout | undefined;
+    let terminationDeadline: NodeJS.Timeout | undefined;
 
     const finish = (error: Error | null, result?: ProcessResult): void => {
       if (settled) return;
       settled = true;
       if (timeout) clearTimeout(timeout);
       if (forceTimer) clearTimeout(forceTimer);
+      if (terminationDeadline) clearTimeout(terminationDeadline);
       options.signal?.removeEventListener("abort", onAbort);
       if (error) reject(error);
       else resolve(result!);
@@ -63,11 +66,25 @@ export async function runProcess(
     const terminate = (error: Error): void => {
       if (terminalError) return;
       terminalError = error;
-      void terminateProcess(child, processGroupId, "SIGTERM").finally(() => {
-        if (settled) return;
-        forceTimer = setTimeout(() => void terminateProcess(child, processGroupId, "SIGKILL"), 1_000);
-        forceTimer.unref();
+      void terminateProcess(child, processGroupId, "SIGTERM").catch(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
       });
+      forceTimer = setTimeout(() => {
+        void terminateProcess(child, processGroupId, "SIGKILL").catch(() => {
+          if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        });
+      }, 1_000);
+      forceTimer.unref();
+      terminationDeadline = setTimeout(() => {
+        if (process.platform !== "win32" && processGroupId) {
+          try { process.kill(-processGroupId, "SIGKILL"); } catch { /* The group already exited. */ }
+        }
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+        child.stdout.destroy();
+        child.stderr.destroy();
+        finish(terminalError);
+      }, TERMINATION_DEADLINE_MS);
+      terminationDeadline.unref();
     };
 
     const collect = (target: Buffer[], chunk: Buffer): void => {
@@ -131,24 +148,6 @@ async function terminateProcess(child: ChildProcess, processGroupId: number | un
     if (executable && await runTaskkill(executable, args)) return;
   }
   if (child.exitCode === null && child.signalCode === null) child.kill(signal);
-}
-
-async function runTaskkill(executable: string, args: string[]): Promise<boolean> {
-  return await new Promise((resolvePromise) => {
-    let settled = false;
-    const finish = (succeeded: boolean): void => {
-      if (settled) return;
-      settled = true;
-      resolvePromise(succeeded);
-    };
-    try {
-      const killer = spawn(executable, args, { stdio: "ignore", windowsHide: true });
-      killer.once("error", () => finish(false));
-      killer.once("close", (code) => finish(code === 0));
-    } catch {
-      finish(false);
-    }
-  });
 }
 
 export async function gitBuffer(
