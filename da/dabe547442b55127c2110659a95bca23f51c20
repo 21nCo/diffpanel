@@ -1,0 +1,36 @@
+apps/cli/src/index.ts
+  s_4a1f51a32f40b2::t_243e2ca81ca2a0 136,152,166
+packages/git/src/capture.ts
+  s_4a1f51a32f40b2::t_964f54337e5ab9 57,59-74,77,80,91-95,383
+  s_4a1f51a32f40b2::t_d6ca177ba0baf7 1
+packages/storage/src/store.test.ts
+  s_4a1f51a32f40b2::t_fac0ade9b5931b 98,102,122-123,287,368,370,385,387
+  s_4a1f51a32f40b2::t_3f9525ea43c3a2 127-182
+packages/storage/src/store.ts
+  s_4a1f51a32f40b2::t_243e2ca81ca2a0 283-289,292-298
+packages/git/src/process.test.ts
+  s_4a1f51a32f40b2::t_648665a82af536 38-39,42,44-45,47-48
+packages/git/src/windows-process.ts
+  s_4a1f51a32f40b2::t_648665a82af536 13-18
+  s_4a1f51a32f40b2::t_6f16b60d4a6de7 1,20,31,37,42,44
+packages/git/src/capture.test.ts
+  s_4a1f51a32f40b2::t_fd957a60364152 292
+  s_4a1f51a32f40b2::t_86f6576a4b9f74 279-283,296
+  s_4a1f51a32f40b2::t_7cfcaa3bac3aaa 253-278,284-291,293-295,297-298
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dadabe547442b55127c2110659a95bca23f51c20",
+  "prompts": {},
+  "sessions": {
+    "s_4a1f51a32f40b2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c88a-c379-7711-89ae-f383fcca0dab",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
