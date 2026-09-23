@@ -1,0 +1,34 @@
+packages/storage/README.md
+  s_36647e141eaee6::t_bea00f2fd9ba11 18-20
+  s_36647e141eaee6::t_7846492a88db7d 15-16
+  s_36647e141eaee6::t_24c28b404eca9a 17
+packages/storage/src/store.ts
+  s_36647e141eaee6::t_8b54a3f382c3d2 432-445,456-458,460-463,469,471-497,500-504
+  s_36647e141eaee6::t_7846492a88db7d 84,412-415,417-421,424,446-455
+packages/storage/src/store.test.ts
+  s_36647e141eaee6::t_bea00f2fd9ba11 458-459,466-468
+  s_36647e141eaee6::t_d746f87c093b29 452,465,469-471,476-496,499-524
+  s_36647e141eaee6::t_24c28b404eca9a 497-498
+  s_36647e141eaee6::t_e7ed54e5d8d19f 525
+apps/cli/src/index.ts
+  s_36647e141eaee6::t_c54fc0cbd6aff3 179,236
+  s_36647e141eaee6::t_7846492a88db7d 181,233,238,246
+apps/cli/src/e2e.test.ts
+  s_36647e141eaee6::t_7846492a88db7d 98-101
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "06ec612cc2b88f5a68389af7602bc544620e293f",
+  "prompts": {},
+  "sessions": {
+    "s_36647e141eaee6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0cf1a-f300-7be0-a59e-0cdd239e38f0",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
