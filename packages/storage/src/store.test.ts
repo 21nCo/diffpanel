@@ -95,11 +95,11 @@ describe("DiffpanelStore", () => {
     expect(stored.summary.reviewTitle).toBe("Working tree");
     expect(stored.review?.chapters[0]?.itemRefs).toEqual(["item-1"]);
 
-    const archived = store.setArchived(receipt.runId, true);
+    const archived = await store.setArchived(receipt.runId, true);
     expect(archived.archivedAt).not.toBeNull();
     expect(store.listRuns()).toEqual([]);
     expect(store.listRuns(undefined, true)).toHaveLength(1);
-    expect(store.setArchived(receipt.runId, false).archivedAt).toBeNull();
+    expect((await store.setArchived(receipt.runId, false)).archivedAt).toBeNull();
     expect(store.listRuns()).toHaveLength(1);
     store.close();
   });
@@ -119,9 +119,65 @@ describe("DiffpanelStore", () => {
     });
     expect((await store.getRun(receipt.runId)).summary.reviewTitle).toBe("AuthFn account runtime");
 
-    expect(store.setReviewTitle(receipt.runId, "PR 569 account runtime").reviewTitle).toBe("PR 569 account runtime");
-    expect(store.setReviewTitle(receipt.runId, null).reviewTitle).toBe("Working tree");
+    expect((await store.setReviewTitle(receipt.runId, "PR 569 account runtime")).reviewTitle).toBe("PR 569 account runtime");
+    expect((await store.setReviewTitle(receipt.runId, null)).reviewTitle).toBe("Working tree");
     store.close();
+  });
+
+  it("does not report a setter update committed when another operation rolls back", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-setter-rollback-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const receipt = await store.createPreparedRun(capturedReview());
+      let entered!: () => void;
+      let release!: () => void;
+      const transactionEntered = new Promise<void>((resolvePromise) => { entered = resolvePromise; });
+      const holdTransaction = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+      const maintenance = store as unknown as {
+        withMaintenanceLock<T>(operation: () => Promise<T>): Promise<T>;
+      };
+      const failedOperation = maintenance.withMaintenanceLock(async () => {
+        entered();
+        await holdTransaction;
+        throw new Error("simulated maintenance failure");
+      });
+      const failedAssertion = expect(failedOperation).rejects.toThrow(/simulated maintenance failure/);
+      await transactionEntered;
+      const setter = store.setArchived(receipt.runId, true);
+      release();
+      await failedAssertion;
+      expect((await setter).archivedAt).not.toBeNull();
+      expect(store.listRuns()).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  it("queues a second connection's setter behind in-process maintenance", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-setter-queue-"));
+    temporaryDirectories.push(home);
+    const first = await DiffpanelStore.open(home);
+    const second = await DiffpanelStore.open(home, { recover: false });
+    try {
+      const receipt = await first.createPreparedRun(capturedReview());
+      let entered!: () => void;
+      let release!: () => void;
+      const transactionEntered = new Promise<void>((resolvePromise) => { entered = resolvePromise; });
+      const holdTransaction = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+      const maintenance = first as unknown as {
+        withMaintenanceLock<T>(operation: () => Promise<T>): Promise<T>;
+      };
+      const pending = maintenance.withMaintenanceLock(async () => {
+        entered();
+        await holdTransaction;
+      });
+      await transactionEntered;
+      (second as unknown as { database: Database.Database }).database.pragma("busy_timeout = 100");
+      const setter = second.setReviewTitle(receipt.runId, "Queued title");
+      release();
+      await pending;
+      expect((await setter).reviewTitle).toBe("Queued title");
+      expect(first.listRuns()[0]?.reviewTitle).toBe("Queued title");
+    } finally { first.close(); second.close(); }
   });
 
   it("persists empty-file move evidence and its zero-byte content hashes", async () => {
@@ -228,7 +284,7 @@ describe("DiffpanelStore", () => {
       const receipts: Array<{ runId: string }> = [];
       for (let index = 0; index < 3; index += 1) {
         const receipt = await store.createPreparedRun(capturedReview(), { title: `Run ${index}` });
-        store.setArchived(receipt.runId, true);
+        await store.setArchived(receipt.runId, true);
         receipts.push(receipt);
       }
       const retainedHash = (await store.getRun(receipts[2]!.runId)).manifest.files[0]!.afterBlob!;
@@ -309,9 +365,9 @@ describe("DiffpanelStore", () => {
     const store = await DiffpanelStore.open(home);
     try {
       const older = await store.createPreparedRun(capturedReview(), { title: "Older" });
-      store.setArchived(older.runId, true);
+      await store.setArchived(older.runId, true);
       const retained = await store.createPreparedRun(capturedReview(), { title: "Retained" });
-      store.setArchived(retained.runId, true);
+      await store.setArchived(retained.runId, true);
       await writeFile(retained.manifestPath, "not json\n");
       await expect(store.applyRetention({ keepLatest: 1, olderThan: new Date(Date.now() + 60_000) })).rejects.toThrow(/retained run/);
       expect(store.listRuns(undefined, true).map((run) => run.runId)).toEqual(expect.arrayContaining([older.runId, retained.runId]));
@@ -326,9 +382,9 @@ describe("DiffpanelStore", () => {
     try {
       const scoped = { ...capturedReview(), repositoryId: "repo-scoped", repositoryRoot: "/tmp/scoped" };
       const older = await store.createPreparedRun(scoped, { title: "Scoped older" });
-      store.setArchived(older.runId, true);
+      await store.setArchived(older.runId, true);
       const newest = await store.createPreparedRun(scoped, { title: "Scoped newest" });
-      store.setArchived(newest.runId, true);
+      await store.setArchived(newest.runId, true);
       const unrelated = await store.createPreparedRun({
         ...capturedReview(),
         repositoryId: "repo-unrelated",

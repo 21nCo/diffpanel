@@ -250,6 +250,52 @@ describe("captureReview", () => {
     expect(captured.files[0]?.items[0]?.patch).toContain("+export const alpha = 'resolved'");
   });
 
+  it("retries when a conflicted path is resolved by deletion during capture", async () => {
+    const repository = await createRepository();
+    await runProcess("git", ["checkout", "-b", "side"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'side';\n");
+    await runProcess("git", ["commit", "-am", "side"], repository);
+    await runProcess("git", ["checkout", "main"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'main';\n");
+    await runProcess("git", ["commit", "-am", "main"], repository);
+    await runProcess("git", ["merge", "side"], repository, { acceptedExitCodes: [0, 1] });
+    let resolved = false;
+
+    const captured = await captureReview({ type: "staged", repository }, {
+      onProgress(progress) {
+        if (progress.phase !== "capture" || resolved) return;
+        resolved = true;
+        execFileSync("git", ["rm", "alpha.ts"], { cwd: repository });
+      },
+    });
+
+    expect(captured.scope).toMatchObject({ type: "staged", indexSha: expect.stringMatching(/^[a-f0-9]{40}$/) });
+    expect(captured.files[0]).toMatchObject({ status: "deleted", filePath: "alpha.ts", afterContent: null });
+    expect(captured.files[0]?.items[0]?.patch).toContain("-export const alpha = 'main'");
+  });
+
+  it("captures a small conflict without serializing unrelated index entries into the process output budget", async () => {
+    const repository = await createRepository();
+    for (let index = 0; index < 40; index += 1) {
+      await writeFile(join(repository, `unrelated-${index}.ts`), `export const value = ${index};\n`);
+    }
+    await runProcess("git", ["add", "--", ...Array.from({ length: 40 }, (_, index) => `unrelated-${index}.ts`)], repository);
+    await runProcess("git", ["commit", "-m", "unrelated files"], repository);
+    await runProcess("git", ["checkout", "-b", "side"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'side';\n");
+    await runProcess("git", ["commit", "-am", "side"], repository);
+    await runProcess("git", ["checkout", "main"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 'main';\n");
+    await runProcess("git", ["commit", "-am", "main"], repository);
+    await runProcess("git", ["merge", "side"], repository, { acceptedExitCodes: [0, 1] });
+
+    expect((await runProcess("git", ["ls-files", "--stage", "-z"], repository)).stdout.length).toBeGreaterThan(1_024);
+    const captured = await captureReview({ type: "staged", repository }, { limits: { maxProcessOutputBytes: 1_024 } });
+    expect(captured.scope).not.toHaveProperty("indexSha");
+    expect(captured.files.find((file) => file.filePath === "alpha.ts")?.status).toBe("unmerged");
+    expect(captured.files).toHaveLength(1);
+  });
+
   it.skipIf(process.platform === "win32")("checks for unmerged entries before attempting write-tree", async () => {
     const repository = await createRepository();
     await runProcess("git", ["checkout", "-b", "side"], repository);

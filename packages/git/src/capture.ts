@@ -1,4 +1,4 @@
-import { basename, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, extname, isAbsolute, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import {
   type ReviewItem,
@@ -54,19 +54,30 @@ export async function captureReview(request: CaptureRequest, options: CaptureOpt
   for (let attempt = 1; attempt <= MAX_CAPTURE_ATTEMPTS; attempt += 1) {
     const liveIndex = scope.type === "staged" && !scope.indexSha;
     const indexBefore = liveIndex
-      ? await gitBuffer(repositoryRoot, ["ls-files", "--stage", "-z"], processOptions)
+      ? await indexSignature(repositoryRoot, processOptions)
       : null;
-    const captured = await captureChangedScope(repositoryRoot, scope, limits, options, processOptions);
-    options.onProgress?.({ phase: "verify", current: attempt, total: MAX_CAPTURE_ATTEMPTS });
-    if (scope.type === "range" || (scope.type === "staged" && scope.indexSha)) {
-      return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
+    let captured: Awaited<ReturnType<typeof captureChangedScope>>;
+    let verified: Awaited<ReturnType<typeof captureChangedScope>>;
+    try {
+      captured = await captureChangedScope(repositoryRoot, scope, limits, options, processOptions);
+      options.onProgress?.({ phase: "verify", current: attempt, total: MAX_CAPTURE_ATTEMPTS });
+      if (scope.type === "range" || (scope.type === "staged" && scope.indexSha)) {
+        return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
+      }
+      verified = await captureChangedScope(repositoryRoot, scope, limits, { signal: options.signal }, processOptions);
+    } catch (error) {
+      if (liveIndex && attempt < MAX_CAPTURE_ATTEMPTS && !options.signal?.aborted
+        && indexBefore !== await indexSignature(repositoryRoot, processOptions)) {
+        scope = await resolveScope(repositoryRoot, normalized, processOptions);
+        continue;
+      }
+      throw error;
     }
-    const verified = await captureChangedScope(repositoryRoot, scope, limits, { signal: options.signal }, processOptions);
     const indexAfter = liveIndex
-      ? await gitBuffer(repositoryRoot, ["ls-files", "--stage", "-z"], processOptions)
+      ? await indexSignature(repositoryRoot, processOptions)
       : null;
     if (captureFingerprint(captured) === captureFingerprint(verified)
-      && (indexBefore === null || (indexAfter !== null && indexBefore.equals(indexAfter)))) {
+      && (indexBefore === null || indexBefore === indexAfter)) {
       return await buildCapturedReview(repositoryRoot, scope, captured.files, captured.skipped);
     }
     if (attempt === MAX_CAPTURE_ATTEMPTS) {
@@ -75,6 +86,11 @@ export async function captureReview(request: CaptureRequest, options: CaptureOpt
     if (liveIndex) scope = await resolveScope(repositoryRoot, normalized, processOptions);
   }
   throw new Error("Capture failed before producing a stable snapshot.");
+}
+
+async function indexSignature(repositoryRoot: string, processOptions: ProcessOptions): Promise<string> {
+  const indexPath = await gitText(repositoryRoot, ["rev-parse", "--git-path", "index"], processOptions);
+  return await gitText(repositoryRoot, ["hash-object", "--no-filters", "--", indexPath], processOptions);
 }
 
 async function resolveRepositoryRoot(start: string, processOptions: ProcessOptions): Promise<string> {
@@ -364,7 +380,7 @@ async function readGitObject(
   });
   if (result.exitCode === 0) return result.stdout;
   const stderr = result.stderr.toString("utf8");
-  if (/does not exist in|exists on disk, but not in|path .* is in the index, but not at stage 0|invalid object name/.test(stderr)) return null;
+  if (/does not exist in|does not exist \(neither on disk nor in the index\)|exists on disk, but not in|path .* is in the index, but not at stage 0|invalid object name/.test(stderr)) return null;
   throw new Error(`git show ${spec} failed (${result.exitCode}): ${stderr.trim()}`);
 }
 

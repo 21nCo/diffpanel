@@ -133,7 +133,7 @@ program
     }
     const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
-      const summary = store.setReviewTitle(runId, options.clear ? null : title!);
+      const summary = await store.setReviewTitle(runId, options.clear ? null : title!);
       process.stdout.write(options.clear
         ? `Cleared title for ${runId}; now ${summary.reviewTitle}.\n`
         : `Renamed ${runId} to ${summary.reviewTitle}.\n`);
@@ -149,7 +149,7 @@ program
   .action(async (runId: string) => {
     const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
-      store.setArchived(runId, true);
+      await store.setArchived(runId, true);
       process.stdout.write(`Archived ${runId}.\n`);
     } finally {
       store.close();
@@ -163,7 +163,7 @@ program
   .action(async (runId: string) => {
     const store = await DiffpanelStore.open(undefined, { recover: false });
     try {
-      store.setArchived(runId, false);
+      await store.setArchived(runId, false);
       process.stdout.write(`Restored ${runId}.\n`);
     } finally {
       store.close();

@@ -35,18 +35,17 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void>
 
 describe("runProcess", () => {
   it("bounds a hung tree-kill helper and terminates that helper", async () => {
-    const directory = await workingDirectory();
-    const pidFile = join(directory, "helper.pid");
-    const script = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)";
+    const script = "setInterval(() => {}, 1000)";
+    let helperPid: number | undefined;
     const startedAt = Date.now();
     try {
-      expect(await runTaskkill(process.execPath, ["--eval", script, pidFile], 1_000)).toBe(false);
+      expect(await runTaskkill(process.execPath, ["--eval", script], 25, (pid) => { helperPid = pid; })).toBe(false);
       expect(Date.now() - startedAt).toBeLessThan(2_500);
-      const helperPid = Number(readFileSync(pidFile, "utf8"));
-      await waitForProcessExit(helperPid, 500);
+      expect(helperPid).toBeTypeOf("number");
+      await waitForProcessExit(helperPid!, 500);
     } finally {
-      if (existsSync(pidFile)) {
-        try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); } catch { /* Already terminated. */ }
+      if (helperPid !== undefined) {
+        try { process.kill(helperPid, "SIGKILL"); } catch { /* Already terminated. */ }
       }
     }
   });

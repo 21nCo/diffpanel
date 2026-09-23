@@ -280,18 +280,22 @@ export class DiffpanelStore {
     };
   }
 
-  setArchived(runId: string, archived: boolean): RunSummary {
-    const archivedAt = archived ? new Date().toISOString() : null;
-    const result = this.database.prepare("UPDATE runs SET archived_at = ? WHERE run_id = ?").run(archivedAt, runId);
-    if (result.changes === 0) throw new Error(`Unknown Diffpanel run: ${runId}`);
-    return toRunSummary(this.requireRunRow(runId));
+  async setArchived(runId: string, archived: boolean): Promise<RunSummary> {
+    return await this.withMaintenanceLock(async () => {
+      const archivedAt = archived ? new Date().toISOString() : null;
+      const result = this.database.prepare("UPDATE runs SET archived_at = ? WHERE run_id = ?").run(archivedAt, runId);
+      if (result.changes === 0) throw new Error(`Unknown Diffpanel run: ${runId}`);
+      return toRunSummary(this.requireRunRow(runId));
+    });
   }
 
-  setReviewTitle(runId: string, title: string | null): RunSummary {
-    this.requireRunRow(runId);
-    const reviewTitle = title === null ? null : parseReviewTitle(title);
-    this.database.prepare("UPDATE runs SET review_title = ? WHERE run_id = ?").run(reviewTitle, runId);
-    return toRunSummary(this.requireRunRow(runId));
+  async setReviewTitle(runId: string, title: string | null): Promise<RunSummary> {
+    return await this.withMaintenanceLock(async () => {
+      this.requireRunRow(runId);
+      const reviewTitle = title === null ? null : parseReviewTitle(title);
+      this.database.prepare("UPDATE runs SET review_title = ? WHERE run_id = ?").run(reviewTitle, runId);
+      return toRunSummary(this.requireRunRow(runId));
+    });
   }
 
   async getRun(runId: string): Promise<StoredRun> {
