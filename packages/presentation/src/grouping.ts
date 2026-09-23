@@ -28,9 +28,10 @@ export function groupFiles(matches: ItemMatch[]): FileGroup[] {
     group.deletions += counts.deletions;
     groups.set(file.id, group);
   }
-  return [...groups.values()].map((group) => ({
-    ...group, items: group.items.sort((a, b) => a.ordinal - b.ordinal),
-  }));
+  return [...groups.values()].map((group) => {
+    group.items.sort((a, b) => a.ordinal - b.ordinal);
+    return group;
+  });
 }
 
 export function otherFileChapters(file: ReviewFile, chapters: Chapter[], currentId?: string): Chapter[] {
@@ -39,9 +40,34 @@ export function otherFileChapters(file: ReviewFile, chapters: Chapter[], current
 }
 
 function importLine(line: string): { source: string; shape: string } | null {
-  const match = /^(\s*(?:import\s+(?:type\s+)?[\w$*{},\s]+\s+from\s*|export\s+(?:type\s+)?(?:\*|\{[\w$,\s]*\})\s+from\s*|import\s*))(["'])([^"'\\\r\n]+)\2(\s*;?\s*)$/.exec(line);
-  if (!match) return null;
-  return { source: match[3]!, shape: `${match[1]}${match[2]}SOURCE${match[2]}${match[4]}` };
+  const quoteAt = line.search(/["']/u);
+  if (quoteAt < 0) return null;
+  const quote = line[quoteAt]!;
+  const endQuoteAt = line.indexOf(quote, quoteAt + 1);
+  if (endQuoteAt < 0) return null;
+  const source = line.slice(quoteAt + 1, endQuoteAt);
+  const suffix = line.slice(endQuoteAt + 1);
+  if (!source || /["'\\\r\n]/u.test(source) || !["", ";"].includes(suffix.trim())) return null;
+
+  const prefix = line.slice(0, quoteAt);
+  const declaration = prefix.trim();
+  if (declaration !== "import") {
+    if (!declaration.endsWith("from")) return null;
+    const beforeFrom = declaration.slice(0, -4);
+    if (!/\s/u.test(beforeFrom.at(-1) ?? "")) return null;
+    const head = beforeFrom.trim();
+    const isImport = /^import\s/u.test(head);
+    const isExport = /^export\s/u.test(head);
+    if (!isImport && !isExport) return null;
+    let binding = head.slice(6).trimStart();
+    if (/^type\s/u.test(binding)) binding = binding.slice(4).trimStart();
+    if (isImport) {
+      if (!binding || !/^[\w$*{},\s]+$/u.test(binding)) return null;
+    } else if (binding !== "*" && !/^\{[\w$,\s]*\}$/u.test(binding)) {
+      return null;
+    }
+  }
+  return { source, shape: `${prefix}${quote}SOURCE${quote}${suffix}` };
 }
 
 export function importRewrite(item: ReviewItem): Transformation["mappings"] | null {

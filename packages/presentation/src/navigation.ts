@@ -78,7 +78,7 @@ function alphabetic(index: number): string {
   let label = "";
   while (value > 0) {
     value -= 1;
-    label = String.fromCharCode(97 + (value % 26)) + label;
+    label = String.fromCodePoint(97 + (value % 26)) + label;
     value = Math.floor(value / 26);
   }
   return label;

@@ -33,6 +33,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
@@ -40,6 +41,9 @@ jobs:
         with:
           node-version: 22.13.0
           registry-url: https://registry.npmjs.org
+
+      - name: Enable pinned package manager
+        run: corepack enable
 
       - name: Resolve publish target
         id: resolve
@@ -51,17 +55,25 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
 
-      - name: Install package dependencies
-        working-directory: ${{ steps.resolve.outputs.pkg_path }}
-        run: npm install --workspaces=false --package-lock=false
+      - name: Install locked dependencies without lifecycle scripts
+        run: corepack pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Build audited native dependencies
+        run: corepack pnpm rebuild esbuild
+
+      - name: Build storage native dependency
+        if: steps.resolve.outputs.pkg_name == '@diffpanel/storage'
+        run: corepack pnpm --filter @diffpanel/storage rebuild better-sqlite3
 
       - name: Build package
-        working-directory: ${{ steps.resolve.outputs.pkg_path }}
-        run: npm run build
+        env:
+          PACKAGE_NAME: ${{ steps.resolve.outputs.pkg_name }}
+        run: corepack pnpm --filter "${PACKAGE_NAME}..." build
 
       - name: Test package
-        working-directory: ${{ steps.resolve.outputs.pkg_path }}
-        run: npm test
+        env:
+          PACKAGE_NAME: ${{ steps.resolve.outputs.pkg_name }}
+        run: corepack pnpm --filter "${PACKAGE_NAME}" test
 
       - name: Pack package
         id: pack
@@ -86,7 +98,10 @@ jobs:
           fixture_dir="$(mktemp -d)"
           cd "${fixture_dir}"
           npm init --yes >/dev/null
-          npm install --package-lock=false "${{ steps.pack.outputs.tarball }}"
+          npm install --ignore-scripts --package-lock=false "${{ steps.pack.outputs.tarball }}"
+          if [[ "${{ steps.resolve.outputs.pkg_name }}" == "@diffpanel/storage" ]]; then
+            npm rebuild better-sqlite3
+          fi
           node --input-type=module --eval 'await import(process.argv[1])' "${{ steps.resolve.outputs.pkg_name }}"
 
       - name: Publish package

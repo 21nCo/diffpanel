@@ -73,8 +73,25 @@ describe("shared presentation contracts", () => {
     });
   });
 
+  it("parses static module sources without backtracking through long malformed lines", () => {
+    const sideEffect = match("side-effect");
+    sideEffect.item.patch = '@@ -1 +1 @@\n-import "@/old";\n+import "@/new";';
+    expect(importRewrite(sideEffect.item)).toEqual([{ before: "@/old", after: "@/new" }]);
+
+    const reexport = match("reexport");
+    reexport.item.patch = '@@ -1 +1 @@\n-export { value } from "@/old";\n+export { value } from "@/new";';
+    expect(importRewrite(reexport.item)).toEqual([{ before: "@/old", after: "@/new" }]);
+
+    const malformed = match("malformed");
+    malformed.item.patch = `@@ -1 +1 @@\n-import { ${" ".repeat(20_000)} value } from "@/old";\n+import { value } from "@/new";`;
+    expect(importRewrite(malformed.item)).toBeNull();
+  });
+
   it("rejects active Mermaid content while allowing plain diagrams", () => {
     expect(diagramSourceError('graph LR\nclick A "https://example.com"')).not.toBeNull();
+    expect(diagramSourceError(`${" ".repeat(19_000)}\n\t---\nA-->B`)).not.toBeNull();
+    expect(diagramSourceError("A-->B\u2028\t---\nC-->D")).not.toBeNull();
+    expect(diagramSourceError(`${" ".repeat(19_000)}\nA-->B`)).toBeNull();
     expect(diagramSourceError("sequenceDiagram\nA->>B: Review")).toBeNull();
   });
 });

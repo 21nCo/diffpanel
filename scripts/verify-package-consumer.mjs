@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
+const npmCli = resolve(dirname(process.execPath), process.platform === "win32"
+  ? "node_modules/npm/bin/npm-cli.js"
+  : "../lib/node_modules/npm/bin/npm-cli.js");
+assert(existsSync(npmCli), `npm CLI is unavailable beside Node: ${npmCli}`);
 const temporaryRoot = await mkdtemp(join(tmpdir(), "diffpanel-consumer-"));
 const packDirectory = join(temporaryRoot, "packs");
 const consumerDirectory = join(temporaryRoot, "consumer");
@@ -23,8 +27,8 @@ try {
   await Promise.all([packDirectory, consumerDirectory, repository].map((directory) => mkdir(directory, { recursive: true })));
   const tarballs = packagePaths.map((packagePath) => {
     const output = execFileSync(
-      "npm",
-      ["pack", "--json", "--pack-destination", packDirectory],
+      process.execPath,
+      [npmCli, "pack", "--json", "--pack-destination", packDirectory],
       { cwd: join(root, packagePath), encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
     );
     const result = JSON.parse(output);
@@ -44,8 +48,8 @@ try {
     type: "module",
   }, null, 2));
   execFileSync(
-    "npm",
-    ["install", "--package-lock=false", "--no-audit", "--no-fund", ...tarballs],
+    process.execPath,
+    [npmCli, "install", "--package-lock=false", "--no-audit", "--no-fund", ...tarballs],
     { cwd: consumerDirectory, stdio: "inherit" },
   );
 
