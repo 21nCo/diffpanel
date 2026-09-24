@@ -1,0 +1,27 @@
+.github/workflows/publish-tag.yml
+  s_36647e141eaee6::t_50c1a607c11b27 73-74,78-79
+  s_36647e141eaee6::t_cc5e4568cd59de 33,40
+.github/workflows/windows-process.yml
+  s_36647e141eaee6::t_cc5e4568cd59de 26-27
+eslint.config.mjs
+  s_36647e141eaee6::t_c8c3f47fcc7b39 8-17
+packages/git/src/capture.ts
+  s_36647e141eaee6::t_ee6e2ceee662f4 67-69,74-105
+  s_36647e141eaee6::t_78136d44306e1d 106-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "16db6b98d219394a96bd090eed3d7707cd0fd548",
+  "prompts": {},
+  "sessions": {
+    "s_36647e141eaee6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0cf1a-f300-7be0-a59e-0cdd239e38f0",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
