@@ -16,9 +16,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.13.0
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.16.0
       - name: Install locked dependencies
-        run: corepack pnpm install --frozen-lockfile --ignore-scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Build esbuild native binary
-        run: corepack pnpm rebuild esbuild
+        run: pnpm rebuild esbuild
       - name: Test Windows process lifecycle
-        run: corepack pnpm --filter @diffpanel/git exec vitest run src/process.test.ts src/windows-process.test.ts
+        run: pnpm --filter @diffpanel/git exec vitest run src/process.test.ts src/windows-process.test.ts
