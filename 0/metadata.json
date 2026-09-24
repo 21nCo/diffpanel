@@ -1,0 +1,39 @@
+{
+  "cli_version": "0.10.6",
+  "checkpoint_id": "01M38RN0KF0S6BD5VZSBMBEGQG",
+  "session_id": "01a0c88a-c379-7711-89ae-f383fcca0dab",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-24T03:51:54.276436Z",
+  "branch": "aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review",
+  "checkpoints_count": 3,
+  "save_step_count": 1,
+  "files_touched": [
+    ".github/workflows/windows-process.yml"
+  ],
+  "agent": "Codex",
+  "model": "gpt-6-sol",
+  "turn_id": "2b584817900e",
+  "compact_transcript_start": 0,
+  "token_usage": {
+    "input_tokens": 2200445,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 101679616,
+    "output_tokens": 380217,
+    "api_call_count": 796
+  },
+  "session_metrics": {
+    "turn_count": 19
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-24T03:51:53.239933Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 3,
+    "human_modified": 3,
+    "human_removed": 0,
+    "total_committed": 3,
+    "total_lines_changed": 6,
+    "agent_percentage": 0,
+    "metric_version": 2
+  }
+}
