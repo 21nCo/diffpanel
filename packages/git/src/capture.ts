@@ -165,13 +165,9 @@ async function detectDefaultRequest(repositoryRoot: string, processOptions: Proc
 }
 
 async function detectBaseRef(repositoryRoot: string, processOptions: ProcessOptions): Promise<string> {
-  for (const candidate of ["main", "master", "origin/main", "origin/master"]) {
-    try {
-      await gitText(repositoryRoot, ["rev-parse", "--verify", candidate], processOptions);
-      return candidate;
-    } catch {
-      // Continue to the next conventional base ref.
-    }
+  for (const ref of ["refs/heads/main", "refs/heads/master", "refs/remotes/origin/main", "refs/remotes/origin/master"]) {
+    const found = await gitText(repositoryRoot, ["for-each-ref", "--format=%(refname)", "--count=1", ref], processOptions);
+    if (found === ref) return ref;
   }
   return "HEAD";
 }

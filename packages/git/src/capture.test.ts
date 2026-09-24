@@ -31,6 +31,58 @@ async function createRepository(): Promise<string> {
 }
 
 describe("captureReview", () => {
+  it.skipIf(process.platform === "win32")("propagates a timed-out automatic base-ref probe", async () => {
+    const repository = await createRepository();
+    await runProcess("git", ["checkout", "-b", "feature"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await runProcess("git", ["commit", "-am", "feature"], repository);
+
+    const wrapperDirectory = await mkdtemp(join(tmpdir(), "diffpanel-base-probe-"));
+    temporaryDirectories.push(wrapperDirectory);
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    const wrapper = join(wrapperDirectory, "git");
+    await writeFile(wrapper, [
+      "#!/usr/bin/env node",
+      "const { spawnSync } = require('node:child_process');",
+      "const args = process.argv.slice(2);",
+      "const baseProbe = (args[0] === 'rev-parse' && args[1] === '--verify' && args[2] === 'main')",
+      "  || (args[0] === 'for-each-ref' && args.includes('refs/heads/main'));",
+      "if (baseProbe) setTimeout(() => process.exit(0), 1500);",
+      `else { const result = spawnSync(${JSON.stringify(realGit)}, args, { stdio: 'inherit' }); process.exit(result.status ?? 1); }`,
+    ].join("\n"));
+    await chmod(wrapper, 0o755);
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${wrapperDirectory}:${previousPath ?? ""}`;
+    try {
+      await expect(captureReview({ type: "auto", repository }, {
+        limits: { processTimeoutMs: 500 },
+      })).rejects.toThrow(/git timed out after 500ms/);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
+  it("selects an exact local or remote base branch for automatic capture", async () => {
+    const repository = await createRepository();
+    const baseSha = (await runProcess("git", ["rev-parse", "HEAD"], repository)).stdout.toString("utf8").trim();
+    await runProcess("git", ["checkout", "-b", "feature"], repository);
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await runProcess("git", ["commit", "-am", "feature"], repository);
+    await runProcess("git", ["tag", "main"], repository);
+
+    const local = await captureReview({ type: "auto", repository });
+    expect(local.scope).toMatchObject({ type: "range", baseSha });
+    expect(local.files.map((file) => file.filePath)).toEqual(["alpha.ts"]);
+
+    await runProcess("git", ["update-ref", "refs/remotes/origin/main", baseSha], repository);
+    await runProcess("git", ["branch", "-D", "main"], repository);
+    const remote = await captureReview({ type: "auto", repository });
+    expect(remote.scope).toMatchObject({ type: "range", baseSha, baseRef: "refs/remotes/origin/main" });
+    expect(remote.files.map((file) => file.filePath)).toEqual(["alpha.ts"]);
+  });
+
   it.skipIf(process.platform === "win32")("captures legal POSIX filenames in every scope", async () => {
     const repository = await createRepository();
     const filePath = "odd\\name\r\n.ts";
