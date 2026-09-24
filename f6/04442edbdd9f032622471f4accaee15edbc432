@@ -1,0 +1,19 @@
+.github/workflows/windows-process.yml
+  s_4a1f51a32f40b2::t_7f9aadff130c7f 19-21,23,25,27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f604442edbdd9f032622471f4accaee15edbc432",
+  "prompts": {},
+  "sessions": {
+    "s_4a1f51a32f40b2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0c88a-c379-7711-89ae-f383fcca0dab",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
