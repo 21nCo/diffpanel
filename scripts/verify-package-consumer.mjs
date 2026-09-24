@@ -9,7 +9,9 @@ const root = resolve(import.meta.dirname, "..");
 const npmCli = resolve(dirname(process.execPath), process.platform === "win32"
   ? "node_modules/npm/bin/npm-cli.js"
   : "../lib/node_modules/npm/bin/npm-cli.js");
-assert(existsSync(npmCli), `npm CLI is unavailable beside Node: ${npmCli}`);
+const npmCommand = existsSync(npmCli)
+  ? { executable: process.execPath, prefix: [npmCli] }
+  : { executable: "npm", prefix: [] };
 const temporaryRoot = await mkdtemp(join(tmpdir(), "diffpanel-consumer-"));
 const packDirectory = join(temporaryRoot, "packs");
 const consumerDirectory = join(temporaryRoot, "consumer");
@@ -27,8 +29,8 @@ try {
   await Promise.all([packDirectory, consumerDirectory, repository].map((directory) => mkdir(directory, { recursive: true })));
   const tarballs = packagePaths.map((packagePath) => {
     const output = execFileSync(
-      process.execPath,
-      [npmCli, "pack", "--json", "--pack-destination", packDirectory],
+      npmCommand.executable,
+      [...npmCommand.prefix, "pack", "--json", "--pack-destination", packDirectory],
       { cwd: join(root, packagePath), encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
     );
     const result = JSON.parse(output);
@@ -48,12 +50,12 @@ try {
     type: "module",
   }, null, 2));
   execFileSync(
-    process.execPath,
-    [npmCli, "install", "--package-lock=false", "--no-audit", "--no-fund", ...tarballs],
+    npmCommand.executable,
+    [...npmCommand.prefix, "install", "--package-lock=false", "--no-audit", "--no-fund", ...tarballs],
     { cwd: consumerDirectory, stdio: "inherit" },
   );
 
-  const consumerScript = `
+  const consumerScript = String.raw`
     import assert from "node:assert/strict";
     import { execFileSync } from "node:child_process";
     import { readFile, writeFile } from "node:fs/promises";
@@ -71,11 +73,11 @@ try {
     git("init", "-b", "main");
     git("config", "user.email", "consumer@example.com");
     git("config", "user.name", "External Consumer");
-    await writeFile(join(repository, "example.ts"), "export const value = 1;\\n");
+    await writeFile(join(repository, "example.ts"), "export const value = 1;\n");
     git("add", "example.ts");
     git("commit", "-m", "initial");
 
-    await writeFile(join(repository, "example.ts"), "export const value = 2;\\n");
+    await writeFile(join(repository, "example.ts"), "export const value = 2;\n");
     const worktree = await captureReview({ type: "worktree", repository });
     assert.equal(worktree.files.length, 1);
     git("add", "example.ts");
@@ -94,7 +96,7 @@ try {
       reviewManifestSchema.parse(stored.manifest);
       assert.match(formatGenerationInput(stored.manifest), /Provider-neutral generation contract/);
       assert.equal(generationContract.version, 1);
-      assert.equal((await store.getFileContent(receipt.runId, stored.manifest.files[0].id, "after")).toString(), "export const value = 2;\\n");
+      assert.equal((await store.getFileContent(receipt.runId, stored.manifest.files[0].id, "after")).toString(), "export const value = 2;\n");
       assert.equal(store.listRunsPage({ limit: 1 }).runs.length, 1);
     } finally {
       store.close();

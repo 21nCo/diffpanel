@@ -473,6 +473,31 @@ describe("DiffpanelStore", () => {
     } finally { recovered.close(); }
   });
 
+  it("refuses to publish a failed run whose immutable blob is corrupt", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-publish-integrity-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const receipt = await store.createPreparedRun(capturedReview());
+      const hash = (await store.getRun(receipt.runId)).manifest.files[0]!.afterBlob!;
+      await writeFile(join(home, "blobs", hash.slice(0, 2), hash.slice(2)), "tampered\n");
+      expect((await store.recoverRun(receipt.runId)).failedRunIds).toContain(receipt.runId);
+      await expect(store.publish(receipt.runId, generatedReview(receipt.runId))).rejects.toThrow(/integrity/);
+      expect(store.listRuns(undefined, true).find((run) => run.runId === receipt.runId)?.status).toBe("failed");
+    } finally { store.close(); }
+  });
+
+  it("rejects an empty targeted recovery without recovering other runs", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-empty-recovery-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home, { recover: false });
+    try {
+      const receipt = await store.createPreparedRun(capturedReview());
+      await expect(store.recoverRun("")).rejects.toThrow(/Unknown Diffpanel run/);
+      expect(store.listRuns(undefined, true).find((run) => run.runId === receipt.runId)?.status).toBe("prepared");
+    } finally { store.close(); }
+  });
+
   it("leaves ready blobs and unrelated garbage for targeted or explicit verification", async () => {
     const home = await mkdtemp(join(tmpdir(), "diffpanel-ready-integrity-"));
     temporaryDirectories.push(home);

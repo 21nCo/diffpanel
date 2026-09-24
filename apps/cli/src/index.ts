@@ -236,18 +236,22 @@ program
     const store = await DiffpanelStore.open(undefined, { recover: !options.verify });
     try {
       const recovery = options.verify ? await store.recover() : store.lastRecoveryReport;
+      const runs = store.listRuns(undefined, true);
+      const failedRunIds = runs.filter((run) => run.status === "failed").map((run) => run.runId);
       const report = {
-        ok: true,
+        ok: failedRunIds.length === 0 && (recovery?.failedRunIds.length ?? 0) === 0,
         node: process.version,
         platform: process.platform,
         home: defaultDiffpanelHome(),
         databasePath: store.databasePath,
-        runs: store.listRuns(undefined, true).length,
+        runs: runs.length,
+        failedRunIds,
         recovery,
       };
       process.stdout.write(options.json
         ? `${JSON.stringify(report, null, 2)}\n`
         : Object.entries(report).map(([key, value]) => `${key}: ${typeof value === "object" && value !== null ? JSON.stringify(value) : value}`).join("\n") + "\n");
+      if (!report.ok) process.exitCode = 1;
     } finally {
       store.close();
     }

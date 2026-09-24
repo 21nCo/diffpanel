@@ -51,23 +51,22 @@ function importLine(line: string): { source: string; shape: string } | null {
 
   const prefix = line.slice(0, quoteAt);
   const declaration = prefix.trim();
-  if (declaration !== "import") {
-    if (!declaration.endsWith("from")) return null;
-    const beforeFrom = declaration.slice(0, -4);
-    if (!/\s/u.test(beforeFrom.at(-1) ?? "")) return null;
-    const head = beforeFrom.trim();
-    const isImport = /^import\s/u.test(head);
-    const isExport = /^export\s/u.test(head);
-    if (!isImport && !isExport) return null;
-    let binding = head.slice(6).trimStart();
-    if (/^type\s/u.test(binding)) binding = binding.slice(4).trimStart();
-    if (isImport) {
-      if (!binding || !/^[\w$*{},\s]+$/u.test(binding)) return null;
-    } else if (binding !== "*" && !/^\{[\w$,\s]*\}$/u.test(binding)) {
-      return null;
-    }
-  }
+  if (declaration !== "import" && !validModuleDeclaration(declaration)) return null;
   return { source, shape: `${prefix}${quote}SOURCE${quote}${suffix}` };
+}
+
+function validModuleDeclaration(declaration: string): boolean {
+  if (!declaration.endsWith("from")) return false;
+  const beforeFrom = declaration.slice(0, -4);
+  if (!/\s/u.test(beforeFrom.at(-1) ?? "")) return false;
+  const head = beforeFrom.trim();
+  const isImport = /^import\s/u.test(head);
+  const isExport = /^export\s/u.test(head);
+  if (!isImport && !isExport) return false;
+  let binding = head.slice(6).trimStart();
+  if (/^type\s/u.test(binding)) binding = binding.slice(4).trimStart();
+  if (isImport) return !!binding && /^[\w$*{},\s]+$/u.test(binding);
+  return binding === "*" || /^\{[\w$,\s]*\}$/u.test(binding);
 }
 
 export function importRewrite(item: ReviewItem): Transformation["mappings"] | null {

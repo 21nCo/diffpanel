@@ -67,7 +67,11 @@ export function diffCounts(file: ReviewFile, item: ReviewItem): { additions: num
 }
 
 export function itemLocationLabel(item: ReviewItem): string {
-  if (item.kind === "file") return item.status === "snapshot" ? "snapshot" : item.status === "renamed" ? "path change" : "file change";
+  if (item.kind === "file") {
+    if (item.status === "snapshot") return "snapshot";
+    if (item.status === "renamed") return "path change";
+    return "file change";
+  }
   if (item.status === "deleted") return "deleted";
   const line = item.newStart && item.newStart > 0 ? item.newStart : item.oldStart ?? 1;
   return `line ${line}`;

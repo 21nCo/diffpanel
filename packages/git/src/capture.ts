@@ -27,6 +27,7 @@ export const DEFAULT_CAPTURE_LIMITS: Readonly<CaptureLimits> = {
 };
 
 const MAX_CAPTURE_ATTEMPTS = 2;
+class GitObjectTooLargeError extends Error {}
 
 export async function captureReview(request: CaptureRequest, options: CaptureOptions = {}): Promise<CapturedReview> {
   const limits = resolveLimits(options.limits);
@@ -51,29 +52,34 @@ export async function captureReview(request: CaptureRequest, options: CaptureOpt
     );
   }
 
-  let scope = await resolveScope(repositoryRoot, normalized, processOptions);
+  return await captureChangedReview(repositoryRoot, normalized, limits, options, processOptions);
+}
+
+async function captureChangedReview(
+  repositoryRoot: string,
+  request: Exclude<CaptureRequest, { type: "auto" | "repository" }>,
+  limits: CaptureLimits,
+  options: CaptureOptions,
+  processOptions: ProcessOptions,
+): Promise<CapturedReview> {
+  let scope = await resolveScope(repositoryRoot, request, processOptions);
   for (let attempt = 1; attempt <= MAX_CAPTURE_ATTEMPTS; attempt += 1) {
     const liveIndex = scope.type === "staged" && !scope.indexSha;
     const indexBefore = liveIndex
       ? await indexSignature(repositoryRoot, processOptions)
       : null;
-    let captured: Awaited<ReturnType<typeof captureChangedScope>>;
-    let verified: Awaited<ReturnType<typeof captureChangedScope>>;
+    let result: Awaited<ReturnType<typeof captureAttempt>>;
     try {
-      captured = await captureChangedScope(repositoryRoot, scope, limits, options, processOptions);
-      options.onProgress?.({ phase: "verify", current: attempt, total: MAX_CAPTURE_ATTEMPTS });
-      if (scope.type === "range" || (scope.type === "staged" && scope.indexSha)) {
-        return await finishCapturedReview(repositoryRoot, scope, captured.files, captured.skipped, options.signal);
-      }
-      verified = await captureChangedScope(repositoryRoot, scope, limits, { signal: options.signal }, processOptions);
+      result = await captureAttempt(repositoryRoot, scope, limits, options, processOptions, attempt);
     } catch (error) {
-      if (liveIndex && attempt < MAX_CAPTURE_ATTEMPTS && !options.signal?.aborted
-        && indexBefore !== await indexSignature(repositoryRoot, processOptions)) {
-        scope = await resolveScope(repositoryRoot, normalized, processOptions);
+      if (await shouldRetryCaptureError(repositoryRoot, scope, attempt, indexBefore, error, options, processOptions)) {
+        scope = await resolveScope(repositoryRoot, request, processOptions);
         continue;
       }
       throw error;
     }
+    const { captured, verified } = result;
+    if (!verified) return await finishCapturedReview(repositoryRoot, scope, captured.files, captured.skipped, options.signal);
     const indexAfter = liveIndex
       ? await indexSignature(repositoryRoot, processOptions)
       : null;
@@ -84,9 +90,44 @@ export async function captureReview(request: CaptureRequest, options: CaptureOpt
     if (attempt === MAX_CAPTURE_ATTEMPTS) {
       throw new Error("Repository files or index changed during capture. Retry after the working tree is stable.");
     }
-    if (liveIndex) scope = await resolveScope(repositoryRoot, normalized, processOptions);
+    if (liveIndex) scope = await resolveScope(repositoryRoot, request, processOptions);
   }
   throw new Error("Capture failed before producing a stable snapshot.");
+}
+
+async function captureAttempt(
+  repositoryRoot: string,
+  scope: ChangedScope,
+  limits: CaptureLimits,
+  options: CaptureOptions,
+  processOptions: ProcessOptions,
+  attempt: number,
+): Promise<{ captured: Awaited<ReturnType<typeof captureChangedScope>>; verified: Awaited<ReturnType<typeof captureChangedScope>> | null }> {
+  const captured = await captureChangedScope(repositoryRoot, scope, limits, options, processOptions);
+  options.onProgress?.({ phase: "verify", current: attempt, total: MAX_CAPTURE_ATTEMPTS });
+  if (scope.type === "range" || (scope.type === "staged" && scope.indexSha)) return { captured, verified: null };
+  const verified = await captureChangedScope(repositoryRoot, scope, limits, { signal: options.signal }, processOptions);
+  return { captured, verified };
+}
+
+async function shouldRetryCaptureError(
+  repositoryRoot: string,
+  scope: ChangedScope,
+  attempt: number,
+  indexBefore: string | null,
+  error: unknown,
+  options: CaptureOptions,
+  processOptions: ProcessOptions,
+): Promise<boolean> {
+  if (attempt >= MAX_CAPTURE_ATTEMPTS || options.signal?.aborted) return false;
+  if (indexBefore !== null) return indexBefore !== await indexSignature(repositoryRoot, processOptions);
+  return scope.type === "worktree" && isTransientWorktreeReadFailure(error);
+}
+
+function isTransientWorktreeReadFailure(error: unknown): boolean {
+  return error instanceof Error && (
+    ("code" in error && error.code === "ENOENT") || error.message.startsWith("Review path changed during capture:")
+  );
 }
 
 async function indexSignature(repositoryRoot: string, processOptions: ProcessOptions): Promise<string> {
@@ -182,15 +223,17 @@ async function listChangedPaths(repositoryRoot: string, scope: ChangedScope, pro
       record.gitlink = true;
     }
   }
-  if (scope.type === "worktree") {
-    const untracked = splitNull(await gitBuffer(repositoryRoot, ["ls-files", "--others", "--exclude-standard", "-z"], processOptions));
-    const existing = new Set(records.map((record) => record.filePath));
-    for (const filePath of untracked) {
-      assertSafeRepositoryPath(filePath);
-      if (!existing.has(filePath)) records.push({ status: "added", filePath, oldPath: null });
-    }
-  }
+  if (scope.type === "worktree") await addUntrackedPaths(repositoryRoot, records, processOptions);
   return records;
+}
+
+async function addUntrackedPaths(repositoryRoot: string, records: ChangedPath[], processOptions: ProcessOptions): Promise<void> {
+  const untracked = splitNull(await gitBuffer(repositoryRoot, ["ls-files", "--others", "--exclude-standard", "-z"], processOptions));
+  const existing = new Set(records.map((record) => record.filePath));
+  for (const filePath of untracked) {
+    assertSafeRepositoryPath(filePath);
+    if (!existing.has(filePath)) records.push({ status: "added", filePath, oldPath: null });
+  }
 }
 
 async function captureChangedScope(
@@ -221,7 +264,7 @@ async function captureChangedScope(
       skipped.push({ filePath: changedPath.filePath, reason: `capture file limit ${limits.maxFiles} reached` });
       continue;
     }
-    const captured = await captureChangedFile(repositoryRoot, scope, changedPath, limits, processOptions);
+    const captured = await captureChangedFileWithSizeSkip(repositoryRoot, scope, changedPath, limits, processOptions);
     if ("reason" in captured) {
       skipped.push({ filePath: changedPath.filePath, reason: captured.reason });
       continue;
@@ -240,6 +283,21 @@ async function captureChangedScope(
     throw new Error(`No reviewable changes found${detail}. Use --repo for a repository snapshot.`);
   }
   return { files, skipped, changedPaths };
+}
+
+async function captureChangedFileWithSizeSkip(
+  repositoryRoot: string,
+  scope: ChangedScope,
+  changedPath: ChangedPath,
+  limits: CaptureLimits,
+  processOptions: ProcessOptions,
+): Promise<CapturedFile | { reason: string }> {
+  try {
+    return await captureChangedFile(repositoryRoot, scope, changedPath, limits, processOptions);
+  } catch (error) {
+    if (error instanceof GitObjectTooLargeError) return { reason: `file exceeds ${limits.maxFileBytes} bytes` };
+    throw error;
+  }
 }
 
 function captureFingerprint(captured: Awaited<ReturnType<typeof captureChangedScope>>): string {
@@ -320,7 +378,7 @@ async function captureChangedFile(
   processOptions: ProcessOptions,
 ): Promise<CapturedFile | { reason: string }> {
   const beforePath = changedPath.oldPath ?? changedPath.filePath;
-  const beforeContent = await readBeforeContent(repositoryRoot, scope, beforePath, changedPath.status, processOptions);
+  const beforeContent = await readBeforeContent(repositoryRoot, scope, beforePath, changedPath.status, limits.maxFileBytes, processOptions);
   let afterContent: Buffer | null;
   try {
     afterContent = await readAfterContent(
@@ -375,10 +433,11 @@ async function readBeforeContent(
   scope: ChangedScope,
   filePath: string,
   status: CapturedFile["status"],
+  maxFileBytes: number,
   processOptions: ProcessOptions,
 ): Promise<Buffer | null> {
   if (status === "added") return null;
-  return await readGitObject(repositoryRoot, scope.baseSha, filePath, false, processOptions);
+  return await readGitObject(repositoryRoot, scope.baseSha, filePath, false, maxFileBytes, processOptions);
 }
 
 async function readAfterContent(
@@ -393,10 +452,10 @@ async function readAfterContent(
   if (scope.type === "worktree") return await readWorktreeFile(repositoryRoot, filePath, maxFileBytes);
   if (scope.type === "staged") {
     return scope.indexSha
-      ? await readGitObject(repositoryRoot, scope.indexSha, filePath, false, processOptions)
-      : await readGitObject(repositoryRoot, "", filePath, true, processOptions);
+      ? await readGitObject(repositoryRoot, scope.indexSha, filePath, false, maxFileBytes, processOptions)
+      : await readGitObject(repositoryRoot, "", filePath, true, maxFileBytes, processOptions);
   }
-  if (scope.type === "range") return await readGitObject(repositoryRoot, scope.compareSha, filePath, false, processOptions);
+  if (scope.type === "range") return await readGitObject(repositoryRoot, scope.compareSha, filePath, false, maxFileBytes, processOptions);
   return null;
 }
 
@@ -405,17 +464,45 @@ async function readGitObject(
   ref: string,
   filePath: string,
   index: boolean,
+  maxFileBytes: number,
   processOptions: ProcessOptions,
 ): Promise<Buffer | null> {
   const spec = index ? `:${filePath}` : `${ref}:${filePath}`;
+  const sizeResult = await runProcess("git", ["cat-file", "-s", spec], repositoryRoot, {
+    ...processOptions,
+    acceptedExitCodes: [0, 128],
+  });
+  if (sizeResult.exitCode !== 0) {
+    if (!await gitPathExists(repositoryRoot, ref, filePath, index, processOptions)) return null;
+    throw new Error(`git cat-file -s ${spec} failed (${sizeResult.exitCode}): ${sizeResult.stderr.toString("utf8").trim()}`);
+  }
+  const size = Number(sizeResult.stdout.toString("utf8").trim());
+  if (!Number.isSafeInteger(size) || size < 0) throw new Error(`Invalid Git object size for ${spec}.`);
+  if (size > maxFileBytes) throw new GitObjectTooLargeError();
   const result = await runProcess("git", ["show", spec], repositoryRoot, {
     ...processOptions,
     acceptedExitCodes: [0, 128],
   });
   if (result.exitCode === 0) return result.stdout;
-  const stderr = result.stderr.toString("utf8");
-  if (/does not exist in|does not exist \(neither on disk nor in the index\)|exists on disk, but not in|path .* is in the index, but not at stage 0|invalid object name/.test(stderr)) return null;
-  throw new Error(`git show ${spec} failed (${result.exitCode}): ${stderr.trim()}`);
+  if (!await gitPathExists(repositoryRoot, ref, filePath, index, processOptions)) return null;
+  throw new Error(`git show ${spec} failed (${result.exitCode}): ${result.stderr.toString("utf8").trim()}`);
+}
+
+async function gitPathExists(
+  repositoryRoot: string,
+  ref: string,
+  filePath: string,
+  index: boolean,
+  processOptions: ProcessOptions,
+): Promise<boolean> {
+  const records = splitNull(await gitBuffer(repositoryRoot, index
+    ? ["ls-files", "--stage", "-z", "--", filePath]
+    : ["ls-tree", "-z", ref, "--", filePath], processOptions));
+  return records.some((record) => {
+    const tab = record.indexOf("\t");
+    if (tab < 0 || record.slice(tab + 1) !== filePath) return false;
+    return !index || /\s0$/u.test(record.slice(0, tab));
+  });
 }
 
 async function readPatch(
@@ -551,7 +638,11 @@ async function captureRepositorySnapshot(
       skipped.push({ filePath, reason: "generated, vendored, or lock file" });
       continue;
     }
-    const content = await readGitObject(repositoryRoot, sha, filePath, false, processOptions);
+    const content = await readSnapshotContent(repositoryRoot, sha, filePath, limits.maxFileBytes, processOptions);
+    if (content instanceof GitObjectTooLargeError) {
+      skipped.push({ filePath, reason: `file exceeds ${limits.maxFileBytes} bytes` });
+      continue;
+    }
     if (content === null) {
       skipped.push({ filePath, reason: "could not read Git object" });
       continue;
@@ -608,6 +699,21 @@ async function captureRepositorySnapshot(
   if (files.length === 0) throw new Error("The repository snapshot contains no reviewable text files.");
   const scope: ReviewScope = { type: "repository", ref, sha, maxFiles };
   return await finishCapturedReview(repositoryRoot, scope, files, skipped, options.signal);
+}
+
+async function readSnapshotContent(
+  repositoryRoot: string,
+  sha: string,
+  filePath: string,
+  maxFileBytes: number,
+  processOptions: ProcessOptions,
+): Promise<Buffer | null | GitObjectTooLargeError> {
+  try {
+    return await readGitObject(repositoryRoot, sha, filePath, false, maxFileBytes, processOptions);
+  } catch (error) {
+    if (error instanceof GitObjectTooLargeError) return error;
+    throw error;
+  }
 }
 
 function isGeneratedOrVendorPath(filePath: string): boolean {

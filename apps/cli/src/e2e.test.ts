@@ -106,6 +106,17 @@ describe("diffpanel CLI", () => {
       };
       expect(recovered.summary.status).toBe("failed");
       expect(recovered.review).toBeNull();
+      const doctor = await runProcess(
+        process.execPath,
+        [resolve("dist/index.js"), "doctor", "--verify", "--json"],
+        repository,
+        { acceptedExitCodes: [0, 1] },
+      );
+      expect(doctor.exitCode).toBe(1);
+      expect(JSON.parse(doctor.stdout.toString("utf8"))).toMatchObject({
+        ok: false,
+        failedRunIds: [receipt.runId],
+      });
       for (const invalidLimit of ["10files", "1.5", "300"]) {
         const result = await runProcess(
           process.execPath,

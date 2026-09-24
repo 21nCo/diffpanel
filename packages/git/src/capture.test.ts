@@ -402,6 +402,45 @@ describe("captureReview", () => {
     )).rejects.toThrow(/output limit/);
   });
 
+  it("skips oversized Git blobs before the process output cap in repository, staged, and range captures", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "large.ts"), "x".repeat(1_000));
+    await runProcess("git", ["add", "large.ts"], repository);
+    await runProcess("git", ["commit", "-m", "add large file"], repository);
+    const limits = { maxFileBytes: 64, maxProcessOutputBytes: 300 };
+    const snapshot = await captureReview({ type: "repository", repository }, { limits });
+    expect(snapshot.files.map((file) => file.filePath)).toContain("alpha.ts");
+    expect(snapshot.skipped).toContainEqual({ filePath: "large.ts", reason: "file exceeds 64 bytes" });
+
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await runProcess("git", ["rm", "large.ts"], repository);
+    await runProcess("git", ["add", "alpha.ts"], repository);
+    const staged = await captureReview({ type: "staged", repository }, { limits });
+    expect(staged.files.map((file) => file.filePath)).toContain("alpha.ts");
+    expect(staged.skipped).toContainEqual({ filePath: "large.ts", reason: "file exceeds 64 bytes" });
+
+    await runProcess("git", ["commit", "-m", "remove large file"], repository);
+    const range = await captureReview({ type: "range", repository, expression: "HEAD~1..HEAD" }, { limits });
+    expect(range.files.map((file) => file.filePath)).toContain("alpha.ts");
+    expect(range.skipped).toContainEqual({ filePath: "large.ts", reason: "file exceeds 64 bytes" });
+  });
+
+  it("retries a worktree file removed after discovery", async () => {
+    const repository = await createRepository();
+    await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");
+    await writeFile(join(repository, "added.ts"), "export const added = true;\n");
+    let removed = false;
+    const captured = await captureReview({ type: "worktree", repository }, {
+      onProgress(progress) {
+        if (progress.phase === "capture" && progress.filePath === "added.ts" && !removed) {
+          removed = true;
+          rmSync(join(repository, "added.ts"));
+        }
+      },
+    });
+    expect(captured.files.map((file) => file.filePath)).toEqual(["alpha.ts"]);
+  });
+
   it("enforces aggregate capture budgets", async () => {
     const repository = await createRepository();
     await writeFile(join(repository, "alpha.ts"), "export const alpha = 2;\n");

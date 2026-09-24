@@ -214,6 +214,7 @@ export class DiffpanelStore {
 
   private async publishLocked(runId: string, reviewInput: unknown): Promise<GeneratedReview> {
     const run = await this.getRun(runId);
+    await this.assertManifestBlobIntegrity(run.manifest);
     const review = assertGeneratedReview(run.manifest, reviewInput);
     const reviewPath = join(this.runsPath, runId, "review.json");
     await atomicWrite(reviewPath, `${JSON.stringify(review, null, 2)}\n`);
@@ -346,18 +347,7 @@ export class DiffpanelStore {
     const rows = policy.repositoryRoot
       ? allRows.filter((row) => row.root_path === policy.repositoryRoot)
       : allRows;
-    const retainedPerRepository = new Map<string, number>();
-    const deletedRunIds: string[] = [];
-    for (const row of rows) {
-      const retained = retainedPerRepository.get(row.repository_id) ?? 0;
-      if (retained < keepLatest) {
-        retainedPerRepository.set(row.repository_id, retained + 1);
-        continue;
-      }
-      if ((policy.archivedOnly ?? true) && !row.archived_at) continue;
-      if (Date.parse(row.created_at) >= olderThan.getTime()) continue;
-      deletedRunIds.push(row.run_id);
-    }
+    const deletedRunIds = selectRetentionCandidates(rows, keepLatest, olderThan, policy.archivedOnly ?? true);
     const deleting = new Set(deletedRunIds);
     for (const row of allRows) {
       if (deleting.has(row.run_id)) continue;
@@ -447,13 +437,15 @@ export class DiffpanelStore {
       report.removedTemporaryFiles += await removeTemporaryFiles(this.runsPath);
       report.removedTemporaryFiles += await removeTemporaryFiles(this.blobsPath);
     }
-    const rows = targetRunId
-      ? [this.requireRunRow(targetRunId)]
-      : this.database.prepare(verifyAll ? "SELECT * FROM runs" : "SELECT * FROM runs WHERE status = 'prepared'").all() as RunRow[];
-    if (!verifyAll && !targetRunId) {
+    const targeted = targetRunId !== undefined;
+    let rows: RunRow[];
+    if (targetRunId !== undefined) rows = [this.requireRunRow(targetRunId)];
+    else if (verifyAll) rows = this.database.prepare("SELECT * FROM runs").all() as RunRow[];
+    else rows = this.database.prepare("SELECT * FROM runs WHERE status = 'prepared'").all() as RunRow[];
+    if (!verifyAll && !targeted) {
       for (const row of rows) report.removedTemporaryFiles += await removeTemporaryFiles(join(this.runsPath, row.run_id));
     }
-    if (!targetRunId) await this.removeOrphanRuns(report);
+    if (!targeted) await this.removeOrphanRuns(report);
     return rows;
   }
 
@@ -565,6 +557,22 @@ export class DiffpanelStore {
   private markRunFailed(runId: string): void {
     this.database.prepare("UPDATE runs SET status = 'failed', review_path = NULL WHERE run_id = ?").run(runId);
   }
+}
+
+function selectRetentionCandidates(rows: RunRow[], keepLatest: number, olderThan: Date, archivedOnly: boolean): string[] {
+  const retainedPerRepository = new Map<string, number>();
+  const deletedRunIds: string[] = [];
+  for (const row of rows) {
+    const retained = retainedPerRepository.get(row.repository_id) ?? 0;
+    if (retained < keepLatest) {
+      retainedPerRepository.set(row.repository_id, retained + 1);
+      continue;
+    }
+    if (archivedOnly && !row.archived_at) continue;
+    if (Date.parse(row.created_at) >= olderThan.getTime()) continue;
+    deletedRunIds.push(row.run_id);
+  }
+  return deletedRunIds;
 }
 
 async function withDatabaseQueue<T>(databasePath: string, operation: () => Promise<T>): Promise<T> {

@@ -2,10 +2,21 @@ name: Windows process lifecycle
 
 on:
   pull_request:
+    paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig*.json'
+      - '.github/workflows/windows-process.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: windows-process-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   process-tree:
@@ -16,9 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.13.0
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 11.16.0
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Build esbuild native binary
