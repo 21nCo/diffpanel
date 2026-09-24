@@ -1,0 +1,37 @@
+{
+  "cli_version": "0.10.6",
+  "checkpoint_id": "01M38MWGJE524W4SW91873KCE2",
+  "strategy": "manual-commit",
+  "branch": "aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review",
+  "checkpoints_count": 1,
+  "files_touched": [
+    ".github/workflows/publish-tag.yml",
+    "apps/cli/package.json",
+    "apps/vscode/package.json",
+    "apps/vscode/src/cli-list.ts",
+    "eslint.config.mjs",
+    "package.json",
+    "packages/core/package.json",
+    "packages/generation/package.json",
+    "packages/git/package.json",
+    "packages/git/src/process.ts",
+    "packages/presentation/package.json",
+    "packages/storage/package.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2030265,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 98595712,
+    "output_tokens": 368709,
+    "api_call_count": 763
+  }
+}
