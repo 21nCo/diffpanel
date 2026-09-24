@@ -1,0 +1,21 @@
+.github/workflows/publish-tag.yml
+  s_b953bf735321c2::t_edc3b36da5125f 43
+.github/workflows/windows-process.yml
+  s_b953bf735321c2::t_edc3b36da5125f 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9674876dc43c948df70fa5ffdf83a61f78d3ace0",
+  "prompts": {},
+  "sessions": {
+    "s_b953bf735321c2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0d365-d289-7023-b324-fa25d9c84f25",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
