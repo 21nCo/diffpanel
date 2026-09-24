@@ -3,8 +3,20 @@
   "checkpoint_id": "01M39N6ASS8SZ6H29W3R9YJXPT",
   "strategy": "manual-commit",
   "branch": "aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review",
-  "checkpoints_count": 5,
-  "files_touched": null,
+  "checkpoints_count": 6,
+  "files_touched": [
+    ".github/workflows/windows-process.yml",
+    "apps/cli/src/e2e.test.ts",
+    "apps/cli/src/index.ts",
+    "eslint.config.mjs",
+    "packages/git/src/capture.test.ts",
+    "packages/git/src/capture.ts",
+    "packages/presentation/src/grouping.ts",
+    "packages/presentation/src/navigation.ts",
+    "packages/storage/src/store.test.ts",
+    "packages/storage/src/store.ts",
+    "scripts/verify-package-consumer.mjs"
+  ],
   "sessions": [
     {
       "metadata": "/0/metadata.json",
@@ -12,13 +24,20 @@
       "compact_transcript": "/0/transcript.jsonl",
       "content_hash": "/0/content_hash.txt",
       "prompt": "/0/prompt.txt"
+    },
+    {
+      "metadata": "/1/metadata.json",
+      "transcript": "/1/full.jsonl",
+      "compact_transcript": "/1/transcript.jsonl",
+      "content_hash": "/1/content_hash.txt",
+      "prompt": "/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 2594952,
+    "input_tokens": 2998779,
     "cache_creation_tokens": 0,
-    "cache_read_tokens": 119548800,
-    "output_tokens": 420784,
-    "api_call_count": 947
+    "cache_read_tokens": 132606592,
+    "output_tokens": 465547,
+    "api_call_count": 1040
   }
 }

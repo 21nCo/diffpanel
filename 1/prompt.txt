@@ -1,0 +1,77 @@
+Use $use-skillplane to retrieve and execute exactly 21n/pr-refetch-fix@1.3.0 (skill skill:3ba0f6dd-212c-4933-9feb-cf87481a0466, version skill-version:a0cb9070-f6e5-408f-9d1e-889962922ba2, revision 5, digest sha256:6ea2fcc8c00d256b7edf6c3afd43e667ffe20f2459404ac408e7172b31d5f4a9) for https://github.com/21nCo/diffpanel/pull/1.
+
+This is recurring authorization for exactly one bounded hosted pr-refetch-fix round per activation. The hosted skill owns its procedure and single-round limits. No second round in this activation, force-push, merge, review dismissal, thread resolution, deployment, or unrelated change. Do not run if this automation was explicitly paused by the user.
+
+Work only in /Users/serro/orca/workspaces/diffpanel/diff-1-publish-reusable-diffpanel-packages-for-n, expected branch aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review. Configured head was b3af21f998b0541f511bf97fedf0c14c7827464d; verify the live PR head and worktree before each round, preserving the untracked ledger and other user work. Use GH_CONFIG_DIR=/Users/serro/.config/gh-other for every gh command, require active account thyaravind, and use origin for any normal push.
+
+Before repository mutation retrieve the exact pinned version via Skillplane and verify identity, version, revision and digest. If unavailable or mismatched, make no repository mutation, record drift, disable automation 38c45ec4-5106-441d-87b5-aefa4345dd68 with orca automations edit 38c45ec4-5106-441d-87b5-aefa4345dd68 --disabled --json, read it back with orca automations show 38c45ec4-5106-441d-87b5-aefa4345dd68 --json, report, and stop. Upgrade the pin only with explicit user authorization.
+
+Reuse /Users/serro/orca/workspaces/diffpanel/diff-1-publish-reusable-diffpanel-packages-for-n/.conduct/pr-1-remediation-ledger.md as the persistent handoff; never stage or commit it. Preserve its existing defect-family IDs, failed-round counts and reset assessments. Record each round's head, findings, blockers, verification, check snapshot, reset mode, trend, and clean streak. Apply the pinned skill's broader assessment and reset gates; never repeatedly patch a blocked family or discard deferred concerns.
+
+At configuration, the clean streak was 0 at the configured head; use the ledger's updated state on later activations. A clean assessment requires no code change/push, no actionable or valid blocked code root cause, no unassessed item or recurring/deferred blocker, a stable PR head, and required CI/reviewer checks terminal and successful in the single immediate snapshot allowed by the hosted skill. Reset the streak when any condition fails or the head changes. SonarCloud was failing on the configured head; assess that gate, do not assume it is cleared.
+
+Declare convergence only after two consecutive complete clean assessments at the same head. If converged, PR merged/closed, or a complete repair cannot be established or external dependency blocks safe progress, update the ledger, disable automation 38c45ec4-5106-441d-87b5-aefa4345dd68 with orca automations edit 38c45ec4-5106-441d-87b5-aefa4345dd68 --disabled --json, verify using orca automations show 38c45ec4-5106-441d-87b5-aefa4345dd68 --json, report, and stop. Never claim disabled without read-back. End any nonterminal activation with the hosted skill's report and termination statement.
+
+---
+
+<skill>
+<name>use-skillplane</name>
+<path>/Users/serro/.agents/skills/skillplane/SKILL.md</path>
+---
+name: use-skillplane
+description: Use skillplane to resolve skill
+---
+
+# Skillplane
+
+Skillplane is user's hosted skills platform. Retrieve user's skill using the slug or skill name provided and use that to execute the requested task.
+
+NOTE: Always retrieve and read the hosted skill first before working on the task. If the skill is not found, return an error message indicating the skill could not be located.
+
+## Using skillplane
+Try these in this order to communicate with user's Skillplane for skill retrieval, creation, amend etc.
+1. Direct Skillplane MCP if available and authenticated
+2. Direct Skillplane CLI if available and authenticated
+3. Via Composio CLI if available and authenticated
+4. Via Rex CLI if available and authenticated
+
+## Using tools mentioned in skillplane skills
+When executing a skill retrieved from Skillplane, use the tools referenced within the skill's definition to complete the task. Example tools: Linear, Notion, etc. Tool/Integrations resolution order:
+1. Direct integrations or MCP if available and authenticated
+2. Via Orca CLI if available and authenticated
+3. Via Composio CLI if available and authenticated
+4. Via Rex CLI if available and authenticated
+
+</skill>
+
+---
+
+Use $use-skillplane to retrieve and execute exactly 21n/pr-refetch-fix@1.3.0 (skill skill:3ba0f6dd-212c-4933-9feb-cf87481a0466, version skill-version:a0cb9070-f6e5-408f-9d1e-889962922ba2, revision 5, digest sha256:6ea2fcc8c00d256b7edf6c3afd43e667ffe20f2459404ac408e7172b31d5f4a9) for https://github.com/21nCo/diffpanel/pull/1.
+
+This is recurring authorization for exactly one bounded hosted pr-refetch-fix round per activation. The hosted skill owns its procedure and single-round limits. No second round in this activation, force-push, merge, review dismissal, thread resolution, deployment, or unrelated change. Do not run if this automation was explicitly paused by the user.
+
+Work only in /Users/serro/orca/workspaces/diffpanel/diff-1-publish-reusable-diffpanel-packages-for-n, expected branch aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review. Configured head was b3af21f998b0541f511bf97fedf0c14c7827464d; verify the live PR head and worktree before each round, preserving the untracked ledger and other user work. Use GH_CONFIG_DIR=/Users/serro/.config/gh-other for every gh command, require active account thyaravind, and use origin for any normal push.
+
+Before repository mutation retrieve the exact pinned version via Skillplane and verify identity, version, revision and digest. If unavailable or mismatched, make no repository mutation, record drift, disable automation 38c45ec4-5106-441d-87b5-aefa4345dd68 with orca automations edit 38c45ec4-5106-441d-87b5-aefa4345dd68 --disabled --json, read it back with orca automations show 38c45ec4-5106-441d-87b5-aefa4345dd68 --json, report, and stop. Upgrade the pin only with explicit user authorization.
+
+Reuse /Users/serro/orca/workspaces/diffpanel/diff-1-publish-reusable-diffpanel-packages-for-n/.conduct/pr-1-remediation-ledger.md as the persistent handoff; never stage or commit it. Preserve its existing defect-family IDs, failed-round counts and reset assessments. Record each round's head, findings, blockers, verification, check snapshot, reset mode, trend, and clean streak. Apply the pinned skill's broader assessment and reset gates; never repeatedly patch a blocked family or discard deferred concerns.
+
+At configuration, the clean streak was 0 at the configured head; use the ledger's updated state on later activations. A clean assessment requires no code change/push, no actionable or valid blocked code root cause, no unassessed item or recurring/deferred blocker, a stable PR head, and required CI/reviewer checks terminal and successful in the single immediate snapshot allowed by the hosted skill. Reset the streak when any condition fails or the head changes. A separate manual repair was pushed as af6a9ddaf8d8db581a22d7ae4ea0946aa5faf0ce, and SonarCloud's quality gate then passed at that head; verify the live head and fresh checks each activation. LINT-NAMING remains a valid, unaccepted deferred concern in the ledger, and native Windows verification remains a gap; assess both rather than counting them clean.
+
+Declare convergence only after two consecutive complete clean assessments at the same head. If converged, PR merged/closed, or a complete repair cannot be established or external dependency blocks safe progress, update the ledger, disable automation 38c45ec4-5106-441d-87b5-aefa4345dd68 with orca automations edit 38c45ec4-5106-441d-87b5-aefa4345dd68 --disabled --json, verify using orca automations show 38c45ec4-5106-441d-87b5-aefa4345dd68 --json, report, and stop. Never claim disabled without read-back. End any nonterminal activation with the hosted skill's report and termination statement.
+
+---
+
+Use $use-skillplane to retrieve and execute exactly 21n/pr-refetch-fix@1.4.0 (skill skill:3ba0f6dd-212c-4933-9feb-cf87481a0466, version skill-version:f6e3a7a2-9fb9-4d2e-9d31-213353744a9e, revision 6, digest sha256:b6a6e7a8c670bc5ab12540910401d153e8eedd533d89fd1a1925bc9979112726) for https://github.com/21nCo/diffpanel/pull/1.
+
+This is authorization for exactly one bounded hosted pr-refetch-fix round per activation. The first activation is a user-approved supervised manual run while the recurring schedule remains disabled; that disabled schedule alone is not a reason to skip the manual run. Do not enable the schedule during this activation. Do not run if the user explicitly pauses further work. No second round in one activation, force-push, merge, review dismissal, thread resolution, deployment, or unrelated change.
+
+Work only in /Users/serro/orca/workspaces/diffpanel/diff-1-publish-reusable-diffpanel-packages-for-n on branch aravink/diff-1-publish-reusable-diffpanel-packages-for-native-review. The last observed head was f604442edbdd9f032622471f4accaee15edbc432; verify the live local, origin, and PR heads before work. Preserve the untracked ledger and all user work. Use GH_CONFIG_DIR=/Users/serro/.config/gh-other for every gh command, verify active account thyaravind, and use origin for any normal push.
+
+Before repository mutation, retrieve the exact pinned hosted version and verify identity, version, revision, and digest. If unavailable or mismatched, make no repository mutation, record drift, verify the automation remains disabled, report, and stop. Do not silently upgrade the pin.
+
+Reuse /Users/serro/orca/workspaces/diffpanel/diff-1-publish-reusable-diffpanel-packages-for-n/.conduct/pr-1-remediation-ledger.md as the persistent handoff; never stage or commit it. Verify its current v1.4.0 pin, preserve historical defect-family IDs, failed-round counts, reset assessments, and deferred findings. Record this round's exact head, complete review and CI/check snapshot, classifications, fixes, blockers, verification, convergence mode, trend, and clean streak. Apply the hosted skill's architecture-reset gates.
+
+The prior head had a failing SonarCloud check with eight annotations, including a full-SHA workflow action pin. Fetch and classify the live current-head check annotations alongside review feedback; do not rely on that prior snapshot or treat fixable CI findings as external-only gates. Repository-wide ESLint and native Windows process-tree CI were added after the old ledger rounds, so do not carry their old gaps forward without current evidence.
+
+A clean assessment requires no code change/push, no actionable or valid blocked root cause, no unassessed finding or deferred blocker, a stable PR head, and terminal successful required CI/reviewer checks in the allowed snapshot. Reset the streak if any condition fails or the head changes. Declare convergence only after two consecutive complete clean assessments at the same head. Do not poll CI or refetch after a push. If converged, PR merged/closed, a complete repair cannot be established, or an external dependency blocks safe progress, update the ledger and confirm the automation is disabled with orca automations show 38c45ec4-5106-441d-87b5-aefa4345dd68 --json before reporting. Leave the recurring schedule disabled after this supervised activation, regardless of result, for the supervising user to assess. End with the hosted skill's report and termination statement.
