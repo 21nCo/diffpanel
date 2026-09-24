@@ -5,7 +5,16 @@ import tseslint from 'typescript-eslint';
 
 export default defineConfig([
   {
-    ignores: ['**/dist/**', '**/coverage/**', '**/node_modules/**', '.turbo/**', '.opencode/**', '**/test-results/**', '**/playwright-report/**'],
+    ignores: [
+      '**/dist/**',
+      '**/coverage/**',
+      '**/node_modules/**',
+      '**/.turbo/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
+      ...['.claude', '.codex', '.cursor', '.factory', '.gemini', '.entire', '.opencode', '.pi']
+        .map((directory) => `**/${directory}/**`),
+    ],
   },
   {
     files: ['**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}'],

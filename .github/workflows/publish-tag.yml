@@ -30,14 +30,14 @@ jobs:
 
     steps:
       - name: Checkout release tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
           persist-credentials: false
           ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22.13.0
           registry-url: https://registry.npmjs.org
@@ -70,13 +70,13 @@ jobs:
 
       - name: Build package
         env:
-          PACKAGE_NAME: ${{ steps.resolve.outputs.pkg_name }}
-        run: corepack pnpm --filter "${PACKAGE_NAME}..." build
+          PACKAGE_PATH: ${{ steps.resolve.outputs.pkg_path }}
+        run: corepack pnpm --filter "./${PACKAGE_PATH}..." build
 
       - name: Test package
         env:
-          PACKAGE_NAME: ${{ steps.resolve.outputs.pkg_name }}
-        run: corepack pnpm --filter "${PACKAGE_NAME}" test
+          PACKAGE_PATH: ${{ steps.resolve.outputs.pkg_path }}
+        run: corepack pnpm --filter "./${PACKAGE_PATH}" test
 
       - name: Pack package
         id: pack

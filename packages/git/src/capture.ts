@@ -64,35 +64,45 @@ async function captureChangedReview(
 ): Promise<CapturedReview> {
   let scope = await resolveScope(repositoryRoot, request, processOptions);
   for (let attempt = 1; attempt <= MAX_CAPTURE_ATTEMPTS; attempt += 1) {
-    const liveIndex = scope.type === "staged" && !scope.indexSha;
-    const indexBefore = liveIndex
-      ? await indexSignature(repositoryRoot, processOptions)
-      : null;
-    let result: Awaited<ReturnType<typeof captureAttempt>>;
-    try {
-      result = await captureAttempt(repositoryRoot, scope, limits, options, processOptions, attempt);
-    } catch (error) {
-      if (await shouldRetryCaptureError(repositoryRoot, scope, attempt, indexBefore, error, options, processOptions)) {
-        scope = await resolveScope(repositoryRoot, request, processOptions);
-        continue;
-      }
-      throw error;
-    }
-    const { captured, verified } = result;
-    if (!verified) return await finishCapturedReview(repositoryRoot, scope, captured.files, captured.skipped, options.signal);
-    const indexAfter = liveIndex
-      ? await indexSignature(repositoryRoot, processOptions)
-      : null;
-    if (captureFingerprint(captured) === captureFingerprint(verified)
-      && (indexBefore === null || indexBefore === indexAfter)) {
-      return await finishCapturedReview(repositoryRoot, scope, captured.files, captured.skipped, options.signal);
-    }
-    if (attempt === MAX_CAPTURE_ATTEMPTS) {
-      throw new Error("Repository files or index changed during capture. Retry after the working tree is stable.");
-    }
-    if (liveIndex) scope = await resolveScope(repositoryRoot, request, processOptions);
+    const pass = await captureChangedPass(repositoryRoot, scope, limits, options, processOptions, attempt);
+    if (pass.review) return pass.review;
+    if (pass.refreshScope) scope = await resolveScope(repositoryRoot, request, processOptions);
   }
   throw new Error("Capture failed before producing a stable snapshot.");
+}
+
+async function captureChangedPass(
+  repositoryRoot: string,
+  scope: ChangedScope,
+  limits: CaptureLimits,
+  options: CaptureOptions,
+  processOptions: ProcessOptions,
+  attempt: number,
+): Promise<{ review: CapturedReview; refreshScope: false } | { review: null; refreshScope: boolean }> {
+  const liveIndex = scope.type === "staged" && !scope.indexSha;
+  const indexBefore = liveIndex ? await indexSignature(repositoryRoot, processOptions) : null;
+  let result: Awaited<ReturnType<typeof captureAttempt>>;
+  try {
+    result = await captureAttempt(repositoryRoot, scope, limits, options, processOptions, attempt);
+  } catch (error) {
+    if (await shouldRetryCaptureError(repositoryRoot, scope, attempt, indexBefore, error, options, processOptions)) {
+      return { review: null, refreshScope: true };
+    }
+    throw error;
+  }
+  const { captured, verified } = result;
+  if (!verified) {
+    return { review: await finishCapturedReview(repositoryRoot, scope, captured.files, captured.skipped, options.signal), refreshScope: false };
+  }
+  const indexAfter = liveIndex ? await indexSignature(repositoryRoot, processOptions) : null;
+  if (captureFingerprint(captured) === captureFingerprint(verified)
+    && (indexBefore === null || indexBefore === indexAfter)) {
+    return { review: await finishCapturedReview(repositoryRoot, scope, captured.files, captured.skipped, options.signal), refreshScope: false };
+  }
+  if (attempt === MAX_CAPTURE_ATTEMPTS) {
+    throw new Error("Repository files or index changed during capture. Retry after the working tree is stable.");
+  }
+  return { review: null, refreshScope: liveIndex };
 }
 
 async function captureAttempt(
