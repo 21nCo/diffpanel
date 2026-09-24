@@ -29,7 +29,7 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap --external better-sqlite3",
     "clean": "rm -rf dist coverage",
-    "lint": "tsc --noEmit",
+    "lint": "eslint src",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

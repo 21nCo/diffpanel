@@ -58,6 +58,9 @@ jobs:
       - name: Install locked dependencies without lifecycle scripts
         run: corepack pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Lint source and release scripts
+        run: corepack pnpm lint
+
       - name: Build audited native dependencies
         run: corepack pnpm rebuild esbuild
 

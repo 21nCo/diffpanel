@@ -12,19 +12,23 @@
     "clean": "turbo run clean",
     "diffpanel": "pnpm --filter @diffpanel/cli dev",
     "dev:vscode": "pnpm --filter diffpanel-vscode dev",
-    "lint": "turbo run lint",
+    "lint": "eslint .",
     "test": "turbo run test && pnpm test:release",
     "test:release": "node --test scripts/*.test.mjs",
     "typecheck": "turbo run typecheck",
     "verify:packages": "node scripts/verify-package-consumer.mjs",
-    "validate": "pnpm typecheck && pnpm test && pnpm build && pnpm verify:packages"
+    "validate": "pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm verify:packages"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.15.30",
     "esbuild": "^0.27.0",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
     "tsup": "^8.5.0",
     "turbo": "^2.5.4",
     "typescript": "^5.8.3",
+    "typescript-eslint": "^8.70.1",
     "vitest": "^3.2.4"
   }
 }

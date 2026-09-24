@@ -22,7 +22,7 @@ export async function listRunsWithCompatibility(execute: Execute, includeArchive
   } catch (error) {
     if (runs.length > 0 || !isLegacyPaginationError(error)) throw error;
     const legacy = JSON.parse(await execute([...sharedArgs, "--json"])) as unknown;
-    if (!Array.isArray(legacy)) throw new Error("Legacy Diffpanel CLI returned an invalid run list.");
+    if (!Array.isArray(legacy)) throw new Error("Legacy Diffpanel CLI returned an invalid run list.", { cause: error });
     return legacy as RunSummary[];
   }
 }

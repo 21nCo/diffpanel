@@ -190,7 +190,7 @@
     "build": "node esbuild.mjs",
     "clean": "rm -rf dist coverage",
     "dev": "node esbuild.mjs --watch",
-    "lint": "tsc --noEmit",
+    "lint": "eslint src scripts browser-tests esbuild.mjs playwright.config.mjs",
     "package": "pnpm --filter diffpanel-vscode... build && node scripts/package-extension.mjs",
     "test": "pnpm --filter diffpanel-vscode... build && vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit",

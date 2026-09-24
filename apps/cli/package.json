@@ -10,7 +10,7 @@
     "build": "tsup src/index.ts --format esm --dts --sourcemap --external better-sqlite3 && node -e \"require('node:fs').chmodSync('dist/index.js', 0o755)\"",
     "clean": "rm -rf dist coverage",
     "dev": "tsx src/index.ts",
-    "lint": "tsc --noEmit",
+    "lint": "eslint src",
     "test": "pnpm --filter @diffpanel/cli... build && vitest run",
     "typecheck": "tsc --noEmit"
   },

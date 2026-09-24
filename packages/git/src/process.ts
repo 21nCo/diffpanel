@@ -48,6 +48,8 @@ export async function runProcess(
     let outputBytes = 0;
     let terminalError: Error | null = null;
     let settled = false;
+    // The timer is installed after the event handlers that clear it.
+    // eslint-disable-next-line prefer-const
     let timeout: NodeJS.Timeout | undefined;
     let forceTimer: NodeJS.Timeout | undefined;
     let terminationDeadline: NodeJS.Timeout | undefined;
