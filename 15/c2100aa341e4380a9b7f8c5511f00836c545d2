@@ -1,0 +1,52 @@
+packages/presentation/src/navigation.ts
+  s_36647e141eaee6::t_cfcbb0ce2b9e97 70-74
+apps/cli/src/e2e.test.ts
+  s_36647e141eaee6::t_64f04284cf7651 109-117,119
+  s_36647e141eaee6::t_34f7d161b9cf2a 118
+packages/git/src/capture.ts
+  s_36647e141eaee6::t_8bf953e72bb0d9 71,73,75,81-82,98-124
+  s_36647e141eaee6::t_69560198e47fba 30,55-65,76,93,125-132,226,230-237,301,381,436,440,455-456,458,467,471-481,487-505,717
+  s_36647e141eaee6::t_bc54472f9b675d 267,288-300,641-645,704-716
+  s_36647e141eaee6::t_cb3d3d9b1d25d5 238,302,718
+packages/git/src/capture.test.ts
+  s_36647e141eaee6::t_5baa16b729bde5 405-443
+eslint.config.mjs
+  s_36647e141eaee6::t_195073092ad96a 8,12,18
+packages/presentation/src/grouping.ts
+  s_36647e141eaee6::t_50ae70a82b285c 54,58-69
+  s_36647e141eaee6::t_259fd2c70ac2e7 70-71
+packages/storage/src/store.ts
+  s_36647e141eaee6::t_ad187d8aa71544 442
+  s_36647e141eaee6::t_8ab9b093abcbf4 350,562-575
+  s_36647e141eaee6::t_195073092ad96a 217,440,445,448
+  s_36647e141eaee6::t_cfcbb0ce2b9e97 441,443-444
+  s_36647e141eaee6::t_e1e8bc08189df3 576-577
+.github/workflows/windows-process.yml
+  s_36647e141eaee6::t_cfcbb0ce2b9e97 17-20
+  s_36647e141eaee6::t_195073092ad96a 30
+  s_36647e141eaee6::t_cb16fa0606f0c2 5-11
+packages/storage/src/store.test.ts
+  s_36647e141eaee6::t_64f04284cf7651 476-500
+apps/cli/src/index.ts
+  s_36647e141eaee6::t_34f7d161b9cf2a 239-240,242,247-248
+  s_36647e141eaee6::t_195073092ad96a 254
+scripts/verify-package-consumer.mjs
+  s_36647e141eaee6::t_f6d80b4d9228f6 12-14,32-33,53-54,58
+  s_36647e141eaee6::t_aa5d7cbf06bc68 76,80,99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "15c2100aa341e4380a9b7f8c5511f00836c545d2",
+  "prompts": {},
+  "sessions": {
+    "s_36647e141eaee6": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0cf1a-f300-7be0-a59e-0cdd239e38f0",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "thyaravind <samalaaravind02@gmail.com>"
+    }
+  }
+}
