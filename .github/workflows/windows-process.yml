@@ -1,0 +1,24 @@
+name: Windows process lifecycle
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  process-tree:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+      - name: Install locked dependencies
+        run: corepack pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build esbuild native binary
+        run: corepack pnpm rebuild esbuild
+      - name: Test Windows process lifecycle
+        run: corepack pnpm --filter @diffpanel/git exec vitest run src/process.test.ts src/windows-process.test.ts

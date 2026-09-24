@@ -80,7 +80,7 @@ describe("runProcess", () => {
     await expect(running).rejects.toThrow(/cancelled/);
   });
 
-  it.skipIf(process.platform === "win32")("terminates descendants that keep inherited pipes open after the leader exits", async () => {
+  it("terminates descendants that keep inherited pipes open after the leader exits", async () => {
     const directory = await workingDirectory();
     const pidFile = join(directory, "descendant.pid");
     const script = [
@@ -92,15 +92,21 @@ describe("runProcess", () => {
     const cleanup = setTimeout(() => {
       if (!existsSync(pidFile)) return;
       try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); } catch { /* Already terminated. */ }
-    }, 1_500);
+    }, 10_000);
+    cleanup.unref();
     const startedAt = Date.now();
     try {
-      await expect(runProcess(process.execPath, ["--eval", script, pidFile], directory, { timeoutMs: 250 })).rejects.toThrow(/timed out/);
-      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      await expect(runProcess(process.execPath, ["--eval", script, pidFile], directory, {
+        timeoutMs: process.platform === "win32" ? 1_000 : 250,
+      })).rejects.toThrow(/timed out/);
+      expect(Date.now() - startedAt).toBeLessThan(process.platform === "win32" ? 5_000 : 1_000);
       const descendantPid = Number(readFileSync(pidFile, "utf8"));
-      await waitForProcessExit(descendantPid, 500);
+      await waitForProcessExit(descendantPid, process.platform === "win32" ? 2_000 : 500);
     } finally {
       clearTimeout(cleanup);
+      if (existsSync(pidFile)) {
+        try { process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL"); } catch { /* Already terminated. */ }
+      }
     }
-  });
+  }, 8_000);
 });
