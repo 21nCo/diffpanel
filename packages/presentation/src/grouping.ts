@@ -1,5 +1,5 @@
-import type { Chapter, ReviewFile, ReviewItem } from "@diffpanel/core";
-import { diffCounts } from "./presentation.js";
+import type { Chapter, ReviewFile, ReviewItem } from "diffpanel";
+import { diffCounts } from "./navigation.js";
 
 export interface ItemMatch { file: ReviewFile; item: ReviewItem }
 export interface FileGroup {
@@ -28,9 +28,10 @@ export function groupFiles(matches: ItemMatch[]): FileGroup[] {
     group.deletions += counts.deletions;
     groups.set(file.id, group);
   }
-  return [...groups.values()].map((group) => ({
-    ...group, items: group.items.sort((a, b) => a.ordinal - b.ordinal),
-  }));
+  return [...groups.values()].map((group) => {
+    group.items.sort((a, b) => a.ordinal - b.ordinal);
+    return group;
+  });
 }
 
 export function otherFileChapters(file: ReviewFile, chapters: Chapter[], currentId?: string): Chapter[] {
@@ -38,12 +39,34 @@ export function otherFileChapters(file: ReviewFile, chapters: Chapter[], current
   return chapters.filter((chapter) => chapter.id !== currentId && chapter.itemRefs.some((ref) => refs.has(ref)));
 }
 
-// Deliberately a textual classifier, not a claim about module resolution or runtime behavior.
-// Only complete, single-line static imports/re-exports with unchanged syntax qualify.
 function importLine(line: string): { source: string; shape: string } | null {
-  const match = /^(\s*(?:import\s+(?:type\s+)?[\w$*{},\s]+\s+from\s*|export\s+(?:type\s+)?(?:\*|\{[\w$,\s]*\})\s+from\s*|import\s*))(["'])([^"'\\\r\n]+)\2(\s*;?\s*)$/.exec(line);
-  if (!match) return null;
-  return { source: match[3]!, shape: `${match[1]}${match[2]}SOURCE${match[2]}${match[4]}` };
+  const quoteAt = line.search(/["']/u);
+  if (quoteAt < 0) return null;
+  const quote = line[quoteAt]!;
+  const endQuoteAt = line.indexOf(quote, quoteAt + 1);
+  if (endQuoteAt < 0) return null;
+  const source = line.slice(quoteAt + 1, endQuoteAt);
+  const suffix = line.slice(endQuoteAt + 1);
+  if (!source || /["'\\\r\n]/u.test(source) || !["", ";"].includes(suffix.trim())) return null;
+
+  const prefix = line.slice(0, quoteAt);
+  const declaration = prefix.trim();
+  if (declaration !== "import" && !validModuleDeclaration(declaration)) return null;
+  return { source, shape: `${prefix}${quote}SOURCE${quote}${suffix}` };
+}
+
+function validModuleDeclaration(declaration: string): boolean {
+  if (!declaration.endsWith("from")) return false;
+  const beforeFrom = declaration.slice(0, -4);
+  if (!/\s/u.test(beforeFrom.at(-1) ?? "")) return false;
+  const head = beforeFrom.trim();
+  const isImport = /^import\s/u.test(head);
+  const isExport = /^export\s/u.test(head);
+  if (!isImport && !isExport) return false;
+  let binding = head.slice(6).trimStart();
+  if (/^type\s/u.test(binding)) binding = binding.slice(4).trimStart();
+  if (isImport) return !!binding && /^[\w$*{},\s]+$/u.test(binding);
+  return binding === "*" || /^\{[\w$,\s]*\}$/u.test(binding);
 }
 
 export function importRewrite(item: ReviewItem): Transformation["mappings"] | null {
@@ -84,7 +107,6 @@ export function isExactMove(file: ReviewFile): boolean {
     && file.beforeBlob !== null && file.beforeBlob === file.afterBlob;
 }
 
-/** Infer a segment-aligned prefix rule; every concrete suffix must remain identical. */
 export function prefixRewrite(mapping: { before: string; after: string }): Transformation["mappings"][number] | null {
   const before = mapping.before.split("/");
   const after = mapping.after.split("/");
@@ -94,7 +116,6 @@ export function prefixRewrite(mapping: { before: string; after: string }): Trans
   if (common === 0) return null;
   const from = `${before.slice(0, -common).join("/")}/`;
   const to = `${after.slice(0, -common).join("/")}/`;
-  // Literal wildcard paths and dot-segment paths do not support an unambiguous rule.
   if (from === to || [...before, ...after].some((part) => !part || part === "." || part === ".." || part.includes("*"))) return null;
   return { before: from, after: to, prefix: true };
 }
@@ -128,7 +149,6 @@ export function partitionChanges(matches: ItemMatch[]): { transformations: Trans
       prefixes.set(key, entry);
     }
   }
-  // A repeated edit of one module is an exact mapping, not evidence of a prefix migration.
   const supported = new Set([...prefixes].filter(([, entry]) => entry.sources.size >= 2 && entry.files.size >= 2).map(([key]) => key));
   for (const match of unique) {
     const move = isExactMove(match.file);

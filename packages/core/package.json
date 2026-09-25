@@ -1,18 +1,40 @@
 {
-  "name": "@diffpanel/core",
-  "version": "0.0.0",
-  "private": true,
+  "name": "diffpanel",
+  "version": "0.0.2",
+  "description": "Browser-safe schemas and validation contracts for Diffpanel reviews.",
   "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js",
+      "default": "./dist/node.js"
     }
   },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/21nCo/diffpanel.git",
+    "directory": "packages/core"
+  },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --sourcemap",
+    "build": "tsup src/index.ts src/node.ts --format esm --dts --sourcemap",
     "clean": "rm -rf dist coverage",
-    "lint": "tsc --noEmit",
+    "lint": "eslint src",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -26,4 +48,3 @@
     "vitest": "^3.2.4"
   }
 }
-

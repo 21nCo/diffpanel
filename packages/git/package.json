@@ -1,23 +1,40 @@
 {
   "name": "@diffpanel/git",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.0.1",
+  "description": "Bounded, cancellation-aware Git capture for Diffpanel reviews.",
   "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/21nCo/diffpanel.git",
+    "directory": "packages/git"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap",
     "clean": "rm -rf dist coverage",
-    "lint": "tsc --noEmit",
+    "lint": "eslint src",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@diffpanel/core": "workspace:*"
+    "diffpanel": ">=0.0.2 <0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
@@ -26,4 +43,3 @@
     "vitest": "^3.2.4"
   }
 }
-

@@ -10,12 +10,12 @@
     "build": "tsup src/index.ts --format esm --dts --sourcemap --external better-sqlite3 && node -e \"require('node:fs').chmodSync('dist/index.js', 0o755)\"",
     "clean": "rm -rf dist coverage",
     "dev": "tsx src/index.ts",
-    "lint": "tsc --noEmit",
-    "test": "vitest run",
+    "lint": "eslint src",
+    "test": "pnpm --filter @diffpanel/cli... build && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@diffpanel/core": "workspace:*",
+    "diffpanel": "workspace:*",
     "@diffpanel/git": "workspace:*",
     "@diffpanel/storage": "workspace:*",
     "commander": "^14.0.0"

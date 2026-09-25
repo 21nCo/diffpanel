@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import type { GeneratedReview, ReviewManifest } from "@diffpanel/core";
+import type { GeneratedReview, ReviewManifest } from "diffpanel";
 
 export function DiagramDirectory({ review, onOpen }: {
   review: GeneratedReview;

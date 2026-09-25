@@ -1,4 +1,4 @@
-import type { Chapter, ReviewFile, ReviewItem } from "@diffpanel/core";
+import type { Chapter, ReviewFile, ReviewItem } from "diffpanel";
 import type { RunSummary } from "@diffpanel/storage";
 
 export type ReviewTreeNode = RepositoryNode | RunNode | ChapterNode | ItemNode;

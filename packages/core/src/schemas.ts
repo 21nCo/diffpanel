@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const reviewScopeSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worktree"), baseRef: z.string(), baseSha: z.string() }),
-  z.object({ type: z.literal("staged"), baseRef: z.string(), baseSha: z.string() }),
+  z.object({ type: z.literal("staged"), baseRef: z.string(), baseSha: z.string(), indexSha: z.string().optional() }),
   z.object({
     type: z.literal("range"),
     expression: z.string(),

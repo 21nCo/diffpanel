@@ -1,4 +1,5 @@
-import type { ReviewManifest } from "./schemas.js";
+import type { ReviewManifest } from "diffpanel";
+import { generationInstructionLines } from "./contract.js";
 
 const PREVIEW_LIMIT = 24_000;
 
@@ -15,8 +16,9 @@ export function formatGenerationInput(manifest: ReviewManifest): string {
     `Review items: ${manifest.files.reduce((total, file) => total + file.items.length, 0)}`,
     `Skipped paths: ${manifest.skipped.length} (not covered by review item assignments)`,
     "",
-    "Every item ID below must appear in exactly one chapter itemRefs array.",
-    "Use repository inspection when the preview is insufficient.",
+    "## Provider-neutral generation contract",
+    ...generationInstructionLines().map((instruction) => `- ${instruction}`),
+    "- Use repository inspection only when the immutable preview is insufficient.",
     "",
   ];
 

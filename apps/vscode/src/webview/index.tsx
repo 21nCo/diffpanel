@@ -1,13 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { Chapter, GeneratedReview, ReviewFile, ReviewItem } from "@diffpanel/core";
+import type { Chapter, GeneratedReview, ReviewFile, ReviewItem } from "diffpanel";
 import type { StoredRun } from "@diffpanel/storage";
 import {
   chapterItemRefs,
   chapterLabels,
   childChapters,
   uniqueFileCount,
-} from "../presentation.js";
+} from "@diffpanel/presentation";
 import { FileList, ReviewEvidence } from "./review-evidence.js";
 import { CaptureCoverage, DiagramDirectory } from "./review-overview.js";
 import "./styles.css";

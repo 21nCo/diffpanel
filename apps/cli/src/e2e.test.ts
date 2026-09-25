@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { runProcess } from "@diffpanel/git";
-import type { ReviewManifest } from "@diffpanel/core";
+import type { ReviewManifest } from "diffpanel";
 
 const temporaryDirectories: string[] = [];
 
@@ -78,8 +78,11 @@ describe("diffpanel CLI", () => {
 
       expect(await runCli(["validate", reviewPath, "--run", receipt.runId], home, repository)).toContain("cover every item exactly once");
       expect(await runCli(["publish", reviewPath, "--run", receipt.runId, "--title", "Update exported value"], home, repository)).toContain("Published 1 chapters");
+      const activeWriterDirectory = join(home, "runs", "active-external-writer");
+      await mkdir(activeWriterDirectory, { recursive: true });
       const runs = JSON.parse(await runCli(["list", "--json"], home, repository)) as Array<{ status: string; runId: string; reviewTitle: string }>;
       expect(runs).toEqual([expect.objectContaining({ runId: receipt.runId, status: "ready", reviewTitle: "Update exported value" })]);
+      await access(activeWriterDirectory);
       expect(await runCli(["title", receipt.runId, "Named review"], home, repository)).toContain("Renamed");
       expect(JSON.parse(await runCli(["list", "--json"], home, repository))).toEqual([
         expect.objectContaining({ runId: receipt.runId, reviewTitle: "Named review" }),
@@ -92,6 +95,45 @@ describe("diffpanel CLI", () => {
       expect(await runCli(["unarchive", receipt.runId], home, repository)).toContain(`Restored ${receipt.runId}`);
       const file = manifest.files[0]!;
       expect(await runCli(["content", receipt.runId, file.id, "after"], home, repository)).toContain("value = 2");
+      expect(JSON.parse(await runCli(["doctor", "--verify", "--json"], home, repository))).toMatchObject({
+        ok: true,
+        recovery: { failedRunIds: [], deletedBlobCount: 0 },
+      });
+      await writeFile(join(home, "runs", receipt.runId, "review.json"), "not json\n");
+      const recovered = JSON.parse(await runCli(["show", receipt.runId, "--json"], home, repository)) as {
+        summary: { status: string };
+        review: unknown;
+      };
+      expect(recovered.summary.status).toBe("failed");
+      expect(recovered.review).toBeNull();
+      const doctor = await runProcess(
+        process.execPath,
+        [resolve("dist/index.js"), "doctor", "--verify", "--json"],
+        repository,
+        { acceptedExitCodes: [0, 1] },
+      );
+      expect(doctor.exitCode).toBe(1);
+      expect(JSON.parse(doctor.stdout.toString("utf8"))).toMatchObject({
+        ok: false,
+        failedRunIds: [receipt.runId],
+      });
+      for (const invalidLimit of ["10files", "1.5", "300"]) {
+        const result = await runProcess(
+          process.execPath,
+          [resolve("dist/index.js"), "list", "--limit", invalidLimit],
+          repository,
+          { acceptedExitCodes: [0, 1] },
+        );
+        expect(result.exitCode).toBe(1);
+        expect(result.stderr.toString("utf8")).toMatch(/integer|between 1 and 200/);
+      }
+      await rm(repository, { recursive: true, force: true });
+      expect(JSON.parse(await runCli(["list", "--repository", repository, "--json"], home, home))).toEqual([
+        expect.objectContaining({ runId: receipt.runId }),
+      ]);
+      expect(JSON.parse(await runCli([
+        "prune", "--repository", repository, "--keep-latest", "1", "--json",
+      ], home, home))).toMatchObject({ deletedRunIds: [], retainedRunCount: 1 });
     } finally {
       if (previousHome === undefined) delete process.env.DIFFPANEL_HOME;
       else process.env.DIFFPANEL_HOME = previousHome;

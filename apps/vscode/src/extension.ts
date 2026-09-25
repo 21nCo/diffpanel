@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import * as vscode from "vscode";
-import { REVIEW_TITLE_MAX_LENGTH, type ReviewFile, type ReviewItem } from "@diffpanel/core";
+import { REVIEW_TITLE_MAX_LENGTH, type ReviewFile, type ReviewItem } from "diffpanel";
 import { DiffpanelCli } from "./cli.js";
 import { DiffpanelContentProvider } from "./content.js";
 import { DetailsProvider } from "./details.js";

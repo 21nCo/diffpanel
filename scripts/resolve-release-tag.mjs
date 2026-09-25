@@ -1,0 +1,125 @@
+import { appendFile, readFile } from 'node:fs/promises';
+import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+import { npmTagForVersion } from './release-version.mjs';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRoot = path.resolve(__dirname, '..');
+const releasePackagesPath = path.join(repoRoot, 'release-packages.json');
+const tagPattern = /^(?<slug>[a-z0-9][a-z0-9-]*)-v(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/;
+
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+async function loadReleaseTargets() {
+  const raw = await readFile(releasePackagesPath, 'utf8');
+  const releasePackages = JSON.parse(raw);
+
+  if (!Array.isArray(releasePackages)) {
+    fail(`Expected ${path.relative(repoRoot, releasePackagesPath)} to contain an array`);
+  }
+
+  const targets = [];
+  const slugs = new Set();
+
+  for (const entry of releasePackages) {
+    if (!entry?.slug || !entry?.path || !entry?.name) {
+      fail(`Invalid release target entry in ${path.relative(repoRoot, releasePackagesPath)}: ${JSON.stringify(entry)}`);
+    }
+
+    if (slugs.has(entry.slug)) {
+      fail(`Duplicate release target slug: ${entry.slug}`);
+    }
+
+    const packagePath = path.resolve(repoRoot, entry.path);
+    const relativePackagePath = path.relative(repoRoot, packagePath);
+
+    if (relativePackagePath.startsWith('..') || path.isAbsolute(relativePackagePath)) {
+      fail(`Release target ${entry.slug} resolves outside the repository: ${entry.path}`);
+    }
+
+    slugs.add(entry.slug);
+    targets.push({
+      slug: entry.slug,
+      name: entry.name,
+      path: relativePackagePath,
+    });
+  }
+
+  return targets;
+}
+
+async function writeOutputs(outputs) {
+  if (!process.env.GITHUB_OUTPUT) {
+    return;
+  }
+
+  const lines = Object.entries(outputs).map(([key, value]) => `${key}=${value}`);
+  await appendFile(process.env.GITHUB_OUTPUT, `${lines.join('\n')}\n`);
+}
+
+const tag = process.argv[2] ?? process.env.GITHUB_REF_NAME;
+
+if (!tag) {
+  fail('Expected a release tag argument or GITHUB_REF_NAME');
+}
+
+const match = tag.match(tagPattern);
+
+if (!match?.groups) {
+  fail(`Unsupported tag format: ${tag}. Expected <package-slug>-v<version>.`);
+}
+
+const { slug, version } = match.groups;
+const npmTag = npmTagForVersion(version);
+const releaseTargets = await loadReleaseTargets();
+const target = releaseTargets.find((candidate) => candidate.slug === slug);
+
+if (!target) {
+  const supportedSlugs = releaseTargets.map((candidate) => candidate.slug).join(', ');
+  fail(`No publishable workspace found for slug "${slug}". Supported slugs: ${supportedSlugs}`);
+}
+
+const packageJsonFile = path.join(repoRoot, target.path, 'package.json');
+const packageJson = JSON.parse(await readFile(packageJsonFile, 'utf8'));
+
+if (packageJson.name !== target.name) {
+  fail(
+    `Release target ${target.slug} expected ${target.name} at ${target.path}/package.json, found ${packageJson.name ?? 'undefined'}`,
+  );
+}
+
+if (packageJson.private) {
+  fail(`Release target ${target.slug} is private in ${target.path}/package.json`);
+}
+
+if (packageJson.version !== version) {
+  fail(`Tag version ${version} does not match ${target.name}@${packageJson.version} in ${target.path}/package.json`);
+}
+
+await writeOutputs({
+  pkg_slug: target.slug,
+  pkg_name: target.name,
+  pkg_version: packageJson.version,
+  pkg_path: target.path,
+  npm_tag: npmTag,
+});
+
+console.log(
+  JSON.stringify(
+    {
+      tag,
+      slug: target.slug,
+      name: target.name,
+      version: packageJson.version,
+      path: target.path,
+      npmTag,
+    },
+    null,
+    2,
+  ),
+);

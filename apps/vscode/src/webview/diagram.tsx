@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import mermaid from "mermaid";
 import DOMPurify from "dompurify";
-import { diagramSourceError } from "../diagram-policy.js";
+import { diagramSourceError } from "@diffpanel/presentation";
 
 mermaid.initialize({
   startOnLoad: false,

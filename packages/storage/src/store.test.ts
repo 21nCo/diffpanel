@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
+import Database from "better-sqlite3";
 import type { CapturedReview } from "@diffpanel/git";
 import { DiffpanelStore } from "./store.js";
 
@@ -73,7 +74,7 @@ describe("DiffpanelStore", () => {
     await writeFile(legacyDatabase, "");
 
     const store = await DiffpanelStore.open(home);
-    expect(store.databasePath).toBe(legacyDatabase);
+    expect(store.databasePath).toBe(join(await realpath(home), "conductor.sqlite3"));
     store.close();
   });
 
@@ -94,11 +95,11 @@ describe("DiffpanelStore", () => {
     expect(stored.summary.reviewTitle).toBe("Working tree");
     expect(stored.review?.chapters[0]?.itemRefs).toEqual(["item-1"]);
 
-    const archived = store.setArchived(receipt.runId, true);
+    const archived = await store.setArchived(receipt.runId, true);
     expect(archived.archivedAt).not.toBeNull();
     expect(store.listRuns()).toEqual([]);
     expect(store.listRuns(undefined, true)).toHaveLength(1);
-    expect(store.setArchived(receipt.runId, false).archivedAt).toBeNull();
+    expect((await store.setArchived(receipt.runId, false)).archivedAt).toBeNull();
     expect(store.listRuns()).toHaveLength(1);
     store.close();
   });
@@ -118,9 +119,111 @@ describe("DiffpanelStore", () => {
     });
     expect((await store.getRun(receipt.runId)).summary.reviewTitle).toBe("AuthFn account runtime");
 
-    expect(store.setReviewTitle(receipt.runId, "PR 569 account runtime").reviewTitle).toBe("PR 569 account runtime");
-    expect(store.setReviewTitle(receipt.runId, null).reviewTitle).toBe("Working tree");
+    expect((await store.setReviewTitle(receipt.runId, "PR 569 account runtime")).reviewTitle).toBe("PR 569 account runtime");
+    expect((await store.setReviewTitle(receipt.runId, null)).reviewTitle).toBe("Working tree");
     store.close();
+  });
+
+  it("does not report a setter update committed when another operation rolls back", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-setter-rollback-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const receipt = await store.createPreparedRun(capturedReview());
+      let entered!: () => void;
+      let release!: () => void;
+      const transactionEntered = new Promise<void>((resolvePromise) => { entered = resolvePromise; });
+      const holdTransaction = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+      const maintenance = store as unknown as {
+        withMaintenanceLock<T>(operation: () => Promise<T>): Promise<T>;
+      };
+      const failedOperation = maintenance.withMaintenanceLock(async () => {
+        entered();
+        await holdTransaction;
+        throw new Error("simulated maintenance failure");
+      });
+      const failedAssertion = expect(failedOperation).rejects.toThrow(/simulated maintenance failure/);
+      await transactionEntered;
+      const setter = store.setArchived(receipt.runId, true);
+      release();
+      await failedAssertion;
+      expect((await setter).archivedAt).not.toBeNull();
+      expect(store.listRuns()).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  it("queues a second connection's setter behind in-process maintenance", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-setter-queue-"));
+    temporaryDirectories.push(home);
+    const first = await DiffpanelStore.open(home);
+    const second = await DiffpanelStore.open(home, { recover: false });
+    try {
+      const receipt = await first.createPreparedRun(capturedReview());
+      let entered!: () => void;
+      let release!: () => void;
+      const transactionEntered = new Promise<void>((resolvePromise) => { entered = resolvePromise; });
+      const holdTransaction = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+      const maintenance = first as unknown as {
+        withMaintenanceLock<T>(operation: () => Promise<T>): Promise<T>;
+      };
+      const pending = maintenance.withMaintenanceLock(async () => {
+        entered();
+        await holdTransaction;
+      });
+      await transactionEntered;
+      (second as unknown as { database: Database.Database }).database.pragma("busy_timeout = 100");
+      const setter = second.setReviewTitle(receipt.runId, "Queued title");
+      release();
+      await pending;
+      expect((await setter).reviewTitle).toBe("Queued title");
+      expect(first.listRuns()[0]?.reviewTitle).toBe("Queued title");
+    } finally { first.close(); second.close(); }
+  });
+
+  it("queues a new store open behind in-process maintenance", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-open-queue-"));
+    temporaryDirectories.push(home);
+    const first = await DiffpanelStore.open(home);
+    let second: DiffpanelStore | undefined;
+    let release!: () => void;
+    let entered!: () => void;
+    const transactionEntered = new Promise<void>((resolvePromise) => { entered = resolvePromise; });
+    const holdTransaction = new Promise<void>((resolvePromise) => { release = resolvePromise; });
+    const maintenance = first as unknown as {
+      withMaintenanceLock<T>(operation: () => Promise<T>): Promise<T>;
+    };
+    const pending = maintenance.withMaintenanceLock(async () => {
+      entered();
+      await holdTransaction;
+    });
+    await transactionEntered;
+    let openState: "pending" | "opened" | "failed" = "pending";
+    const opening = DiffpanelStore.open(home, { recover: false }).then(
+      (store) => { openState = "opened"; return { ok: true as const, store }; },
+      (error: unknown) => { openState = "failed"; return { ok: false as const, error }; },
+    );
+    const releaseTimer = setTimeout(release, 1_000);
+    try {
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
+      expect(openState).toBe("pending");
+      release();
+      await pending;
+      const result = await opening;
+      if (!result.ok) throw result.error;
+      second = result.store;
+      const receipt = await second.createPreparedRun(capturedReview());
+      expect(first.listRuns()[0]?.runId).toBe(receipt.runId);
+    } finally {
+      clearTimeout(releaseTimer);
+      release();
+      await pending;
+      if (!second) {
+        const result = await opening;
+        if (result.ok) result.store.close();
+      }
+      second?.close();
+      first.close();
+    }
   });
 
   it("persists empty-file move evidence and its zero-byte content hashes", async () => {
@@ -143,5 +246,340 @@ describe("DiffpanelStore", () => {
       await store.publish(receipt.runId, generatedReview(receipt.runId));
       expect((await store.getRun(receipt.runId)).review?.chapters[0]!.itemRefs).toEqual(["item-1"]);
     } finally { store.close(); }
+  });
+
+  it("paginates runs with stable cursors", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-pages-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      for (let index = 0; index < 3; index += 1) await store.createPreparedRun(capturedReview(), { title: `Run ${index}` });
+      const first = store.listRunsPage({ limit: 2 });
+      const second = store.listRunsPage({ limit: 2, cursor: first.nextCursor! });
+      expect(first.runs).toHaveLength(2);
+      expect(first.nextCursor).not.toBeNull();
+      expect(second.runs).toHaveLength(1);
+      expect(second.nextCursor).toBeNull();
+      expect(new Set([...first.runs, ...second.runs].map((run) => run.runId)).size).toBe(3);
+      expect(() => store.listRunsPage({ limit: 201 })).toThrow(/between 1 and 200/);
+      expect(() => store.listRunsPage({ cursor: "not-a-cursor" })).toThrow(/Invalid run-list cursor/);
+    } finally { store.close(); }
+  });
+
+  it("keeps the legacy list-all API exhaustive beyond one page", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-list-all-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      for (let index = 0; index < 205; index += 1) {
+        await store.createPreparedRun({ ...capturedReview(), repositoryId: `repo-${index}` });
+      }
+      expect(store.listRuns(undefined, true)).toHaveLength(205);
+    } finally { store.close(); }
+  });
+
+  it("authorizes blob reads through a referencing run", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-blob-auth-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const first = await store.createPreparedRun(capturedReview());
+      const second = await store.createPreparedRun({ ...capturedReview(), repositoryId: "repo-2" });
+      const run = await store.getRun(first.runId);
+      const hash = run.manifest.files[0]!.afterBlob!;
+      expect((await store.getRunBlob(first.runId, hash)).toString("utf8")).toBe("after\n");
+      await expect(store.getRunBlob("missing-run", hash)).rejects.toThrow(/not referenced/);
+      expect((await store.getFileContent(second.runId, "file-1", "before"))?.toString("utf8")).toBe("before\n");
+    } finally { store.close(); }
+  });
+
+  it("backfills version-4 blob references during migration without full recovery", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-v4-blob-migration-"));
+    temporaryDirectories.push(home);
+    const initial = await DiffpanelStore.open(home);
+    const receipt = await initial.createPreparedRun(capturedReview());
+    const stored = await initial.getRun(receipt.runId);
+    const hash = stored.manifest.files[0]!.afterBlob!;
+    const databasePath = initial.databasePath;
+    initial.close();
+
+    const legacy = new Database(databasePath);
+    legacy.exec("DROP TABLE run_blobs; UPDATE schema_version SET version = 4;");
+    legacy.close();
+
+    const [first, second] = await Promise.all([
+      DiffpanelStore.open(home, { recover: false }),
+      DiffpanelStore.open(home, { recover: false }),
+    ]);
+    try {
+      expect(first.lastRecoveryReport).toBeNull();
+      expect(second.lastRecoveryReport).toBeNull();
+      expect((await first.getRunBlob(receipt.runId, hash)).toString("utf8")).toBe("after\n");
+      expect((await second.getRunBlob(receipt.runId, hash)).toString("utf8")).toBe("after\n");
+    } finally {
+      first.close();
+      second.close();
+    }
+  });
+
+  it("keeps shared blobs referenced by retained runs during retention", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-retention-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const receipts: Array<{ runId: string }> = [];
+      for (let index = 0; index < 3; index += 1) {
+        const receipt = await store.createPreparedRun(capturedReview(), { title: `Run ${index}` });
+        await store.setArchived(receipt.runId, true);
+        receipts.push(receipt);
+      }
+      const retainedHash = (await store.getRun(receipts[2]!.runId)).manifest.files[0]!.afterBlob!;
+      const result = await store.applyRetention({ keepLatest: 1, olderThan: new Date(Date.now() + 60_000) });
+      expect(result.deletedRunIds).toHaveLength(2);
+      expect(store.listRuns(undefined, true)).toHaveLength(1);
+      expect((await store.getRunBlob(store.listRuns(undefined, true)[0]!.runId, retainedHash)).toString()).toBe("after\n");
+      expect(result.deletedBlobCount).toBe(0);
+    } finally { store.close(); }
+  });
+
+  it("recovers a validated review written before its database update", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-recovery-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    await writeFile(join(home, "runs", receipt.runId, "review.json"), `${JSON.stringify(generatedReview(receipt.runId))}\n`);
+    store.close();
+
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.recoveredRunIds).toContain(receipt.runId);
+      expect((await recovered.getRun(receipt.runId)).summary.status).toBe("ready");
+    } finally { recovered.close(); }
+  });
+
+  it("marks runs failed when immutable content is missing on restart", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-missing-blob-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    const hash = (await store.getRun(receipt.runId)).manifest.files[0]!.afterBlob!;
+    store.close();
+    await unlink(join(home, "blobs", hash.slice(0, 2), hash.slice(2)));
+
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.failedRunIds).toContain(receipt.runId);
+      expect((await recovered.getRun(receipt.runId)).summary.status).toBe("failed");
+    } finally { recovered.close(); }
+  });
+
+  it("marks runs failed when immutable content is corrupt on restart", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-corrupt-blob-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    const hash = (await store.getRun(receipt.runId)).manifest.files[0]!.afterBlob!;
+    store.close();
+    await writeFile(join(home, "blobs", hash.slice(0, 2), hash.slice(2)), "tampered\n");
+
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.failedRunIds).toContain(receipt.runId);
+      expect((await recovered.getRun(receipt.runId)).summary.status).toBe("failed");
+    } finally { recovered.close(); }
+  });
+
+  it("serializes maintenance across store instances", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-concurrent-store-"));
+    temporaryDirectories.push(home);
+    const first = await DiffpanelStore.open(home);
+    const second = await DiffpanelStore.open(home);
+    try {
+      const receipts = await Promise.all(Array.from({ length: 12 }, (_, index) =>
+        (index % 2 === 0 ? first : second).createPreparedRun({ ...capturedReview(), repositoryId: `repo-${index}` })));
+      await Promise.all([first.garbageCollectBlobs(), second.recover()]);
+      expect(first.listRuns(undefined, true)).toHaveLength(12);
+      await Promise.all(receipts.map(async ({ runId }) => {
+        expect((await first.getFileContent(runId, "file-1", "after"))?.toString()).toBe("after\n");
+      }));
+    } finally { first.close(); second.close(); }
+  });
+
+  it("preflights retained manifests before deleting expired runs", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-retention-preflight-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const older = await store.createPreparedRun(capturedReview(), { title: "Older" });
+      await store.setArchived(older.runId, true);
+      const retained = await store.createPreparedRun(capturedReview(), { title: "Retained" });
+      await store.setArchived(retained.runId, true);
+      await writeFile(retained.manifestPath, "not json\n");
+      await expect(store.applyRetention({ keepLatest: 1, olderThan: new Date(Date.now() + 60_000) })).rejects.toThrow(/retained run/);
+      expect(store.listRuns(undefined, true).map((run) => run.runId)).toEqual(expect.arrayContaining([older.runId, retained.runId]));
+      await access(older.manifestPath);
+    } finally { store.close(); }
+  });
+
+  it("does not restore rows after filesystem deletion when an unrelated retained manifest is corrupt", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-retention-global-preflight-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const scoped = { ...capturedReview(), repositoryId: "repo-scoped", repositoryRoot: "/tmp/scoped" };
+      const older = await store.createPreparedRun(scoped, { title: "Scoped older" });
+      await store.setArchived(older.runId, true);
+      const newest = await store.createPreparedRun(scoped, { title: "Scoped newest" });
+      await store.setArchived(newest.runId, true);
+      const unrelated = await store.createPreparedRun({
+        ...capturedReview(),
+        repositoryId: "repo-unrelated",
+        repositoryRoot: "/tmp/unrelated",
+      });
+      await writeFile(unrelated.manifestPath, "not json\n");
+
+      await expect(store.applyRetention({
+        repositoryRoot: scoped.repositoryRoot,
+        keepLatest: 1,
+        olderThan: new Date(Date.now() + 60_000),
+      })).rejects.toThrow(/retained run|collect blobs/);
+
+      expect(store.listRuns(undefined, true).map((run) => run.runId)).toContain(older.runId);
+      await access(older.manifestPath);
+    } finally { store.close(); }
+  });
+
+  it("defers ready-run verification until explicitly requested", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-corrupt-review-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    await store.publish(receipt.runId, generatedReview(receipt.runId));
+    const incomplete = await store.createPreparedRun(capturedReview());
+    await writeFile(join(home, "runs", incomplete.runId, "review.json"), `${JSON.stringify(generatedReview(incomplete.runId))}\n`);
+    store.close();
+    await writeFile(join(home, "runs", receipt.runId, "review.json"), "{}\n");
+
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.failedRunIds).not.toContain(receipt.runId);
+      expect(recovered.lastRecoveryReport?.recoveredRunIds).toContain(incomplete.runId);
+      expect(recovered.listRuns().find((run) => run.runId === receipt.runId)?.status).toBe("ready");
+      expect((await recovered.getRun(incomplete.runId)).summary.status).toBe("ready");
+      await expect(recovered.getRun(receipt.runId)).rejects.toThrow();
+      const report = await recovered.recoverRun(receipt.runId);
+      expect(report.failedRunIds).toContain(receipt.runId);
+      expect((await recovered.getRun(receipt.runId)).summary.status).toBe("failed");
+    } finally { recovered.close(); }
+  });
+
+  it("refuses to publish a failed run whose immutable blob is corrupt", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-publish-integrity-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    try {
+      const receipt = await store.createPreparedRun(capturedReview());
+      const hash = (await store.getRun(receipt.runId)).manifest.files[0]!.afterBlob!;
+      await writeFile(join(home, "blobs", hash.slice(0, 2), hash.slice(2)), "tampered\n");
+      expect((await store.recoverRun(receipt.runId)).failedRunIds).toContain(receipt.runId);
+      await expect(store.publish(receipt.runId, generatedReview(receipt.runId))).rejects.toThrow(/integrity/);
+      expect(store.listRuns(undefined, true).find((run) => run.runId === receipt.runId)?.status).toBe("failed");
+    } finally { store.close(); }
+  });
+
+  it("rejects an empty targeted recovery without recovering other runs", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-empty-recovery-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home, { recover: false });
+    try {
+      const receipt = await store.createPreparedRun(capturedReview());
+      await expect(store.recoverRun("")).rejects.toThrow(/Unknown Diffpanel run/);
+      expect(store.listRuns(undefined, true).find((run) => run.runId === receipt.runId)?.status).toBe("prepared");
+    } finally { store.close(); }
+  });
+
+  it("leaves ready blobs and unrelated garbage for targeted or explicit verification", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-ready-integrity-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    const receipt = await store.createPreparedRun(capturedReview());
+    await store.publish(receipt.runId, generatedReview(receipt.runId));
+    const hash = (await store.getRun(receipt.runId)).manifest.files[0]!.afterBlob!;
+    const blob = join(home, "blobs", hash.slice(0, 2), hash.slice(2));
+    const orphanHash = "a".repeat(64);
+    const orphan = join(home, "blobs", orphanHash.slice(0, 2), orphanHash.slice(2));
+    await mkdir(join(home, "blobs", orphanHash.slice(0, 2)), { recursive: true });
+    await writeFile(orphan, "orphan\n");
+    store.close();
+    await writeFile(blob, "tampered\n");
+
+    const reopened = await DiffpanelStore.open(home);
+    try {
+      expect(reopened.listRuns()[0]?.status).toBe("ready");
+      expect(reopened.lastRecoveryReport?.failedRunIds).toEqual([]);
+      await access(orphan);
+      await expect(reopened.getRunBlob(receipt.runId, hash)).rejects.toThrow(/integrity/);
+      expect((await reopened.recoverRun(receipt.runId)).failedRunIds).toEqual([]);
+      expect(reopened.listRuns()[0]?.status).toBe("ready");
+      const report = await reopened.recover();
+      expect(report.failedRunIds).toContain(receipt.runId);
+      expect(report.deletedBlobCount).toBe(0);
+      await access(orphan);
+      expect((await reopened.getRun(receipt.runId)).summary.status).toBe("failed");
+    } finally { reopened.close(); }
+  });
+
+  it("collects unrelated blobs only during explicit maintenance", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-explicit-gc-"));
+    temporaryDirectories.push(home);
+    const store = await DiffpanelStore.open(home);
+    store.close();
+    const orphanHash = "b".repeat(64);
+    const orphan = join(home, "blobs", orphanHash.slice(0, 2), orphanHash.slice(2));
+    await mkdir(join(home, "blobs", orphanHash.slice(0, 2)), { recursive: true });
+    await writeFile(orphan, "orphan\n");
+
+    const reopened = await DiffpanelStore.open(home);
+    try {
+      await access(orphan);
+      expect(reopened.lastRecoveryReport?.deletedBlobCount).toBe(0);
+      expect(await reopened.garbageCollectBlobs()).toBe(1);
+      await expect(access(orphan)).rejects.toThrow();
+    } finally { reopened.close(); }
+  });
+
+  it("removes orphan run directories and interrupted temporary writes on restart", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-orphan-recovery-"));
+    temporaryDirectories.push(home);
+    const initial = await DiffpanelStore.open(home);
+    initial.close();
+    await mkdir(join(home, "runs", "orphan-run"), { recursive: true });
+    await writeFile(join(home, "runs", "orphan-run", "manifest.json.tmp"), "partial");
+    const recovered = await DiffpanelStore.open(home);
+    try {
+      expect(recovered.lastRecoveryReport?.removedOrphanRunIds).toContain("orphan-run");
+      await expect(access(join(home, "runs", "orphan-run"))).rejects.toThrow();
+    } finally { recovered.close(); }
+  });
+
+  it("allows read-only clients to open without running filesystem recovery", async () => {
+    const home = await mkdtemp(join(tmpdir(), "diffpanel-read-only-open-"));
+    temporaryDirectories.push(home);
+    const initial = await DiffpanelStore.open(home);
+    initial.close();
+    const orphan = join(home, "runs", "active-external-writer");
+    await mkdir(orphan, { recursive: true });
+
+    const reader = await DiffpanelStore.open(home, { recover: false });
+    try {
+      expect(reader.lastRecoveryReport).toBeNull();
+      await access(orphan);
+    } finally { reader.close(); }
+
+    const maintainer = await DiffpanelStore.open(home);
+    try {
+      expect(maintainer.lastRecoveryReport?.removedOrphanRunIds).toContain("active-external-writer");
+      await expect(access(orphan)).rejects.toThrow();
+    } finally { maintainer.close(); }
   });
 });

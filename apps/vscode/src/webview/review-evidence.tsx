@@ -1,7 +1,6 @@
 import React, { useId, useState } from "react";
-import type { Chapter } from "@diffpanel/core";
-import { groupFiles, moveDescription, otherFileChapters, partitionChanges, type ItemMatch } from "../review-groups.js";
-import { itemLocationLabel } from "../presentation.js";
+import type { Chapter } from "diffpanel";
+import { groupFiles, itemLocationLabel, moveDescription, otherFileChapters, partitionChanges, type ItemMatch } from "@diffpanel/presentation";
 
 export interface EvidenceProps {
   matches: ItemMatch[];

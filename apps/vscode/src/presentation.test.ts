@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Chapter, ReviewFile } from "@diffpanel/core";
+import type { Chapter, ReviewFile } from "diffpanel";
 import {
   chapterItemRefs,
   chapterLabels,
@@ -7,7 +7,7 @@ import {
   diffCounts,
   itemLocationLabel,
   uniqueFileCount,
-} from "./presentation.js";
+} from "@diffpanel/presentation";
 
 const chapters: Chapter[] = [
   chapter("foundation", null, 1, ["foundation-item"]),

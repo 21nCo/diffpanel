@@ -1,0 +1,7 @@
+[
+  { "slug": "diffpanel", "path": "packages/core", "name": "diffpanel" },
+  { "slug": "diffpanel-generation", "path": "packages/generation", "name": "@diffpanel/generation" },
+  { "slug": "diffpanel-git", "path": "packages/git", "name": "@diffpanel/git" },
+  { "slug": "diffpanel-presentation", "path": "packages/presentation", "name": "@diffpanel/presentation" },
+  { "slug": "diffpanel-storage", "path": "packages/storage", "name": "@diffpanel/storage" }
+]

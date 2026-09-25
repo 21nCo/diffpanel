@@ -1,4 +1,4 @@
-import type { Chapter, ReviewFile, ReviewItem } from "@diffpanel/core";
+import type { Chapter, ReviewFile, ReviewItem } from "diffpanel";
 
 export function chapterLabels(chapters: Chapter[]): Map<string, string> {
   const labels = new Map<string, string>();
@@ -67,7 +67,11 @@ export function diffCounts(file: ReviewFile, item: ReviewItem): { additions: num
 }
 
 export function itemLocationLabel(item: ReviewItem): string {
-  if (item.kind === "file") return item.status === "snapshot" ? "snapshot" : item.status === "renamed" ? "path change" : "file change";
+  if (item.kind === "file") {
+    if (item.status === "snapshot") return "snapshot";
+    if (item.status === "renamed") return "path change";
+    return "file change";
+  }
   if (item.status === "deleted") return "deleted";
   const line = item.newStart && item.newStart > 0 ? item.newStart : item.oldStart ?? 1;
   return `line ${line}`;
@@ -78,7 +82,7 @@ function alphabetic(index: number): string {
   let label = "";
   while (value > 0) {
     value -= 1;
-    label = String.fromCharCode(97 + (value % 26)) + label;
+    label = String.fromCodePoint(97 + (value % 26)) + label;
     value = Math.floor(value / 26);
   }
   return label;

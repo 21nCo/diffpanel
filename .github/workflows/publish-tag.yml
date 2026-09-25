@@ -1,0 +1,114 @@
+name: Publish tagged package
+
+on:
+  push:
+    tags:
+      - 'diffpanel-v*.*.*'
+      - 'diffpanel-generation-v*.*.*'
+      - 'diffpanel-git-v*.*.*'
+      - 'diffpanel-presentation-v*.*.*'
+      - 'diffpanel-storage-v*.*.*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing release tag in the form <package-slug>-v<version>'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22.13.0
+          package-manager-cache: false # corepack is enabled in the next step
+          registry-url: https://registry.npmjs.org
+
+      - name: Enable pinned package manager
+        run: corepack enable
+
+      - name: Resolve publish target
+        id: resolve
+        run: node ./scripts/resolve-release-tag.mjs "${RELEASE_TAG}"
+
+      - name: Verify checked out tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: corepack pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Lint source and release scripts
+        run: corepack pnpm lint
+
+      - name: Build audited native dependencies
+        run: corepack pnpm rebuild esbuild
+
+      - name: Build storage native dependency
+        if: steps.resolve.outputs.pkg_name == '@diffpanel/storage'
+        run: corepack pnpm --filter @diffpanel/storage rebuild better-sqlite3
+
+      - name: Build package
+        env:
+          PACKAGE_PATH: ${{ steps.resolve.outputs.pkg_path }}
+        run: corepack pnpm --filter "./${PACKAGE_PATH}..." build
+
+      - name: Test package
+        env:
+          PACKAGE_PATH: ${{ steps.resolve.outputs.pkg_path }}
+        run: corepack pnpm --filter "./${PACKAGE_PATH}" test
+
+      - name: Pack package
+        id: pack
+        working-directory: ${{ steps.resolve.outputs.pkg_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pack_dir="${RUNNER_TEMP}/diffpanel-pack"
+          mkdir -p "${pack_dir}"
+          npm pack --pack-destination "${pack_dir}" --json
+          mapfile -t tarballs < <(find "${pack_dir}" -maxdepth 1 -type f -name '*.tgz' -print)
+          if [[ ${#tarballs[@]} -ne 1 ]]; then
+            echo "Expected exactly one package tarball, found ${#tarballs[@]}" >&2
+            exit 1
+          fi
+          echo "tarball=${tarballs[0]}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify clean external install
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture_dir="$(mktemp -d)"
+          cd "${fixture_dir}"
+          npm init --yes >/dev/null
+          npm install --ignore-scripts --package-lock=false "${{ steps.pack.outputs.tarball }}"
+          if [[ "${{ steps.resolve.outputs.pkg_name }}" == "@diffpanel/storage" ]]; then
+            npm rebuild better-sqlite3
+          fi
+          node --input-type=module --eval 'await import(process.argv[1])' "${{ steps.resolve.outputs.pkg_name }}"
+
+      - name: Publish package
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --access public --tag "${{ steps.resolve.outputs.npm_tag }}"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

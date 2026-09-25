@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import type { Chapter } from "@diffpanel/core";
+import type { Chapter } from "diffpanel";
 import type { StoredRun } from "@diffpanel/storage";
 
 export interface DetailsSelection {

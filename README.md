@@ -6,8 +6,10 @@ Diffpanel turns repository changes and snapshots into persistent, agent-generate
 
 - `apps/cli` prepares immutable review runs and publishes validated agent output.
 - `apps/vscode` lists generated reviews and opens their items in native diff editors.
-- `packages/core` owns the provider-neutral schemas and coverage rules.
+- `packages/core` publishes `diffpanel`, the browser-safe schemas and coverage rules, plus Node-only helpers under `diffpanel/node`.
+- `packages/generation` publishes provider-neutral generation instructions and immutable-input formatting.
 - `packages/git` captures worktree, staged, ref-range, and repository snapshots.
+- `packages/presentation` provides framework-neutral chapter navigation, change grouping, and diagram policy.
 - `packages/storage` persists runs in the local Diffpanel library.
 - `skills/diffpanel-chapters` lets Codex, Claude, or Cursor Agent generate chapters.
 
@@ -49,7 +51,7 @@ ln -s "$PWD/skills/diffpanel-chapters" "${CODEX_HOME:-$HOME/.codex}/skills/diffp
 Build and install the Cursor/VS Code surface:
 
 ```bash
-pnpm --filter diffpanel package
+pnpm --filter diffpanel-vscode package
 cursor --install-extension apps/vscode/diffpanel-0.1.0.vsix
 ```
 
@@ -77,3 +79,25 @@ diffpanel title <run-id> --clear
 ### Generate a review
 
 Invoke `$diffpanel-chapters` from a supported coding agent. The skill prepares an immutable run, generates exact-coverage chapters, validates the JSON, and publishes it. Return to the Diffpanel activity-bar panel to browse the generated review and open its saved files in native diff editors.
+
+## Publishing packages
+
+Public packages are released by pushing a package-specific version tag. The
+workflow resolves the tag through `release-packages.json`, builds and tests the
+selected package, verifies its tarball in a clean consumer, and publishes it
+with the repository's `NPM_TOKEN` secret.
+
+```bash
+git tag diffpanel-presentation-v0.0.1
+git push origin diffpanel-presentation-v0.0.1
+```
+
+Supported tag prefixes are `diffpanel`, `diffpanel-generation`,
+`diffpanel-git`, `diffpanel-presentation`, and `diffpanel-storage`. Publish
+`diffpanel` first, then generation, git, and presentation; publish storage last
+because it depends on the core, generation, and Git packages. Tags must match
+the selected package's exact `package.json` version.
+
+The first split release starts with `diffpanel-v0.0.2`: the already-published
+`diffpanel@0.0.1` bundled Node crypto and did not expose the browser/Node entry
+point boundary required by the reusable packages.

@@ -1,4 +1,4 @@
-import type { GeneratedReview, ReviewManifest } from "@diffpanel/core";
+import type { GeneratedReview, ReviewManifest } from "diffpanel";
 
 export interface PreparedRunReceipt {
   runId: string;
@@ -36,4 +36,41 @@ export interface StoredRun {
   summary: RunSummary;
   manifest: ReviewManifest;
   review: GeneratedReview | null;
+}
+
+export interface ListRunsOptions {
+  repositoryRoot?: string;
+  includeArchived?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface RunPage {
+  runs: RunSummary[];
+  nextCursor: string | null;
+}
+
+export interface OpenStoreOptions {
+  recover?: boolean;
+}
+
+export interface RetentionPolicy {
+  repositoryRoot?: string;
+  olderThan?: Date;
+  keepLatest?: number;
+  archivedOnly?: boolean;
+}
+
+export interface RetentionResult {
+  deletedRunIds: string[];
+  deletedBlobCount: number;
+  retainedRunCount: number;
+}
+
+export interface RecoveryReport {
+  recoveredRunIds: string[];
+  failedRunIds: string[];
+  removedOrphanRunIds: string[];
+  removedTemporaryFiles: number;
+  deletedBlobCount: number;
 }

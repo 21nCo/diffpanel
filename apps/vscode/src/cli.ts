@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import * as vscode from "vscode";
 import type { RunSummary, StoredRun } from "@diffpanel/storage";
 import { resolveInvocation, type Invocation } from "./invocation.js";
+import { listRunsWithCompatibility } from "./cli-list.js";
 
 export class DiffpanelCli {
   private readonly output = vscode.window.createOutputChannel("Diffpanel");
@@ -13,7 +14,7 @@ export class DiffpanelCli {
   }
 
   async list(includeArchived = false): Promise<RunSummary[]> {
-    return JSON.parse(await this.execute(["list", ...(includeArchived ? ["--include-archived"] : []), "--json"])) as RunSummary[];
+    return await listRunsWithCompatibility((args) => this.execute(args), includeArchived);
   }
 
   async show(runId: string): Promise<StoredRun> {

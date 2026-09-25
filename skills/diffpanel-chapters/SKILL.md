@@ -49,6 +49,10 @@ diffpanel content <run-id> <file-id> after
 ## Build the review
 
 Read [references/output-schema.md](references/output-schema.md) before writing the JSON.
+The published `@diffpanel/generation` package is the provider-neutral source of
+truth for immutable generation-input formatting and machine-readable contract
+lines. This skill adds agent workflow guidance without redefining those shared
+contracts.
 
 Group items by causal and architectural relationship:
 

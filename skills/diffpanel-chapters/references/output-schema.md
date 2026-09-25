@@ -1,5 +1,10 @@
 # Generated review schema
 
+This human-readable guide elaborates the provider-neutral contract exported by
+`@diffpanel/generation`. Consumers should use that package for immutable input
+formatting, review schemas, and validation instead of copying implementation
+details from the CLI or editor extension.
+
 Return one JSON object:
 
 ```jsonc
