@@ -18,9 +18,14 @@ export default defineConfig([
   },
   {
     files: ['**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}'],
-    ignores: ['apps/vscode/browser-tests/**'],
+    ignores: ['apps/vscode/browser-tests/**', 'apps/chatgpt/browser-tests/**'],
     extends: [js.configs.recommended, tseslint.configs.recommended],
     languageOptions: { globals: globals.node },
+  },
+  {
+    files: ['apps/chatgpt/browser-tests/**/*.{js,mjs,ts}'],
+    extends: [js.configs.recommended, tseslint.configs.recommended],
+    languageOptions: { globals: { ...globals.browser, ...globals.node } },
   },
   {
     files: ['apps/vscode/browser-tests/**/*.{js,cjs,mjs,jsx,ts,cts,mts,tsx}'],

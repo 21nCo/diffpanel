@@ -1,0 +1,22 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "diffpanel",
+  "version": "0.1.0",
+  "description": "Discuss immutable saved code reviews with chapter navigation, diagrams, and saved diffs beside ChatGPT.",
+  "author": { "name": "21nCo" },
+  "repository": "https://github.com/21nCo/diffpanel",
+  "license": "MIT",
+  "extensions": {
+    "com.openai": {
+      "apps": "./.app.json",
+      "interface": {
+        "displayName": "Diffpanel",
+        "shortDescription": "Review saved changes beside your conversation",
+        "developerName": "21nCo",
+        "category": "Developer Tools",
+        "capabilities": ["Read"],
+        "defaultPrompt": ["Open my authorized saved Diffpanel reviews.", "Explain the selected Diffpanel change using its saved evidence."]
+      }
+    }
+  }
+}

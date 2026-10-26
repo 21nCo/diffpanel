@@ -1,0 +1,12 @@
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+const index = process.argv.indexOf("--app-id");
+const appId = index === -1 ? "" : process.argv[index + 1];
+if (!/^plugin_asdk_app_[a-zA-Z0-9]+$/.test(appId ?? "")) throw new Error("Supply --app-id with the actual developer-mode MCP connection ID from ChatGPT.");
+await mkdir("dist/plugin", { recursive: true });
+await cp("../../plugins/diffpanel", "dist/plugin", { recursive: true });
+await writeFile("dist/plugin/.app.json", JSON.stringify({ apps: { diffpanel: { id: appId } } }, null, 2));
+const manifest = JSON.parse(await readFile("dist/plugin/plugin.json", "utf8"));
+const result = spawnSync("zip", ["-r", "-FS", "../diffpanel-plugin.zip", "."], { cwd: "dist/plugin", stdio: "inherit" });
+if (result.status !== 0) throw new Error("Could not create plugin archive; install zip and retry.");
+console.log(`Packaged ${manifest.name}@${manifest.version} with registered connection ${appId}: dist/diffpanel-plugin.zip`);

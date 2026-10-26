@@ -5,6 +5,16 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
+    "@diffpanel/chatgpt#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/vscode/src/webview/diagram.tsx",
+        "$TURBO_ROOT$/apps/vscode/src/webview/review-evidence.tsx",
+        "$TURBO_ROOT$/apps/vscode/src/webview/review-overview.tsx"
+      ],
+      "outputs": ["dist/server.js", "dist/server.js.map", "dist/review.html", "dist/browser-metafile.json"]
+    },
     "typecheck": {
       "dependsOn": ["^build"],
       "outputs": []

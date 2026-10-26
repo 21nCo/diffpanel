@@ -6,6 +6,7 @@ Diffpanel turns repository changes and snapshots into persistent, agent-generate
 
 - `apps/cli` prepares immutable review runs and publishes validated agent output.
 - `apps/vscode` lists generated reviews and opens their items in native diff editors.
+- `apps/chatgpt` serves explicitly authorized saved reviews through a private MCP connection and renders a read-only conversation panel; see its [setup and live verification guide](apps/chatgpt/README.md).
 - `packages/core` publishes `diffpanel`, the browser-safe schemas and coverage rules, plus Node-only helpers under `diffpanel/node`.
 - `packages/generation` publishes provider-neutral generation instructions and immutable-input formatting.
 - `packages/git` captures worktree, staged, ref-range, and repository snapshots.
