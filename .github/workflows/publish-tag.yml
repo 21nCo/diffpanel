@@ -3,6 +3,7 @@ name: Publish tagged package
 on:
   push:
     tags:
+      - 'devroll-v*.*.*'
       - 'diffpanel-v*.*.*'
       - 'diffpanel-generation-v*.*.*'
       - 'diffpanel-git-v*.*.*'

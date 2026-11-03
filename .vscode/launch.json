@@ -6,10 +6,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/apps/vscode"
+        "--extensionDevelopmentPath=${workspaceFolder}/products/diffpanel/vscode"
       ],
       "outFiles": [
-        "${workspaceFolder}/apps/vscode/dist/**/*.js"
+        "${workspaceFolder}/products/diffpanel/vscode/dist/**/*.js"
       ],
       "preLaunchTask": "Build Diffpanel"
     }

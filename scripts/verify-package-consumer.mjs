@@ -18,11 +18,12 @@ const consumerDirectory = join(temporaryRoot, "consumer");
 const repository = join(temporaryRoot, "repository");
 const home = join(temporaryRoot, "home");
 const packagePaths = [
-  "packages/core",
-  "packages/generation",
-  "packages/git",
-  "packages/presentation",
-  "packages/storage",
+  "packages/devroll",
+  "products/diffpanel/core",
+  "products/diffpanel/generation",
+  "products/diffpanel/git",
+  "products/diffpanel/presentation",
+  "products/diffpanel/storage",
 ];
 
 try {
@@ -60,6 +61,7 @@ try {
     import { execFileSync } from "node:child_process";
     import { readFile, writeFile } from "node:fs/promises";
     import { join } from "node:path";
+    import { findTool, tools } from "devroll";
     import { reviewManifestSchema } from "diffpanel";
     import { sha256 } from "diffpanel/node";
     import { formatGenerationInput, generationContract } from "@diffpanel/generation";
@@ -105,6 +107,8 @@ try {
     const labels = chapterLabels([{ id: "root", parentId: null, order: 1, title: "Root", summary: "Root.", itemRefs: [], keyChanges: [] }]);
     assert.equal(labels.get("root"), "1");
     assert.equal(sha256("diffpanel").length, 64);
+    assert.equal(findTool("diffpanel")?.packageName, "diffpanel");
+    assert(tools.length >= 1);
   `;
   const consumerScriptPath = join(consumerDirectory, "verify.mjs");
   await writeFile(consumerScriptPath, consumerScript);

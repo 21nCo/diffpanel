@@ -40,7 +40,7 @@ Observed path maps open supporting saved diffs. Optional generated Mermaid diagr
 
 ### Browser verification
 
-After building workspace dependencies, run `pnpm --dir apps/vscode test:browser`. Install Playwright Chromium first (`pnpm --dir apps/vscode exec playwright install chromium`), or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an existing Chromium/Chrome executable. Tests use an isolated profile and exercise the bundled webview with a simulated VS Code messaging bridge and content security policy. They do not install or launch the extension itself.
+After building workspace dependencies, run `pnpm --dir products/diffpanel/vscode test:browser`. Install Playwright Chromium first (`pnpm --dir products/diffpanel/vscode exec playwright install chromium`), or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an existing Chromium/Chrome executable. Tests use an isolated profile and exercise the bundled webview with a simulated VS Code messaging bridge and content security policy. They do not install or launch the extension itself.
 
 
 Pure moves and metadata-only changes are now captured as file review items. Historical reviews retain their original snapshots: prepare a fresh review to recover paths skipped by older versions. The Snapshot coverage section separates captured files/items from excluded paths and lists the exclusion reasons.
@@ -52,7 +52,7 @@ The Diagrams directory appears only when the entire review overview is selected.
 Replay grouping against a saved review without changing it:
 
 ```sh
-node apps/vscode/scripts/measure-review.mjs /absolute/path/manifest.json /absolute/path/review.json
+node products/diffpanel/vscode/scripts/measure-review.mjs /absolute/path/manifest.json /absolute/path/review.json
 ```
 
 The recorded TIDY-477 fixture contains selected real renamed imports and a mixed edit from `b598ae69..ce01fcd0`. Git capture tests additionally exercise pure moves, empty-file moves, and mode-only changes in temporary repositories. The replay helper verifies item coverage while measuring compression in the original chapter scopes.

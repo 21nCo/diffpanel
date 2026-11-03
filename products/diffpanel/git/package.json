@@ -1,7 +1,7 @@
 {
-  "name": "@diffpanel/storage",
+  "name": "@diffpanel/git",
   "version": "0.0.1",
-  "description": "SQLite metadata and immutable content storage for Diffpanel reviews.",
+  "description": "Bounded, cancellation-aware Git capture for Diffpanel reviews.",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
@@ -23,24 +23,20 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/21nCo/diffpanel.git",
-    "directory": "packages/storage"
+    "url": "git+https://github.com/21nCo/devroll.git",
+    "directory": "products/diffpanel/git"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --sourcemap --external better-sqlite3",
+    "build": "tsup src/index.ts --format esm --dts --sourcemap",
     "clean": "rm -rf dist coverage",
     "lint": "eslint src",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@diffpanel/generation": ">=0.0.1 <0.1.0",
-    "diffpanel": ">=0.0.2 <0.1.0",
-    "@diffpanel/git": ">=0.0.1 <0.1.0",
-    "better-sqlite3": "^12.2.0"
+    "diffpanel": ">=0.0.2 <0.1.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.30",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
