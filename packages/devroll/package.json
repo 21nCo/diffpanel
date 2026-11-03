@@ -1,7 +1,7 @@
 {
-  "name": "@diffpanel/git",
+  "name": "devroll",
   "version": "0.0.1",
-  "description": "Bounded, cancellation-aware Git capture for Diffpanel reviews.",
+  "description": "Catalog of the Devroll developer tools from 21n, such as Diffpanel and Iterbar.",
   "type": "module",
   "license": "MIT",
   "sideEffects": false,
@@ -23,9 +23,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/21nCo/diffpanel.git",
-    "directory": "packages/git"
+    "url": "git+https://github.com/21nCo/devroll.git",
+    "directory": "packages/devroll"
   },
+  "homepage": "https://github.com/21nCo/devroll#readme",
+  "keywords": [
+    "devroll",
+    "developer-tools",
+    "diffpanel",
+    "iterbar"
+  ],
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap",
     "clean": "rm -rf dist coverage",
@@ -33,11 +40,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "diffpanel": ">=0.0.2 <0.1.0"
-  },
   "devDependencies": {
-    "@types/node": "^22.15.30",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"

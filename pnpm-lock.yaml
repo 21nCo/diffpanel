@@ -39,20 +39,32 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
 
-  apps/cli:
+  packages/devroll:
+    devDependencies:
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
+
+  products/diffpanel/cli:
     dependencies:
       '@diffpanel/git':
         specifier: workspace:*
-        version: link:../../packages/git
+        version: link:../git
       '@diffpanel/storage':
         specifier: workspace:*
-        version: link:../../packages/storage
+        version: link:../storage
       commander:
         specifier: ^14.0.0
         version: 14.0.3
       diffpanel:
         specifier: workspace:*
-        version: link:../../packages/core
+        version: link:../core
     devDependencies:
       '@types/node':
         specifier: ^22.15.30
@@ -70,17 +82,118 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
 
-  apps/vscode:
+  products/diffpanel/core:
+    dependencies:
+      zod:
+        specifier: ^4.1.5
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.30
+        version: 22.20.1
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
+
+  products/diffpanel/generation:
+    dependencies:
+      diffpanel:
+        specifier: '>=0.0.2 <0.1.0'
+        version: link:../core
+    devDependencies:
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
+
+  products/diffpanel/git:
+    dependencies:
+      diffpanel:
+        specifier: '>=0.0.2 <0.1.0'
+        version: link:../core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.30
+        version: 22.20.1
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
+
+  products/diffpanel/presentation:
+    dependencies:
+      diffpanel:
+        specifier: '>=0.0.2 <0.1.0'
+        version: link:../core
+    devDependencies:
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
+
+  products/diffpanel/storage:
+    dependencies:
+      '@diffpanel/generation':
+        specifier: '>=0.0.1 <0.1.0'
+        version: link:../generation
+      '@diffpanel/git':
+        specifier: '>=0.0.1 <0.1.0'
+        version: link:../git
+      better-sqlite3:
+        specifier: ^12.2.0
+        version: 12.11.1
+      diffpanel:
+        specifier: '>=0.0.2 <0.1.0'
+        version: link:../core
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^22.15.30
+        version: 22.20.1
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
+
+  products/diffpanel/vscode:
     dependencies:
       '@diffpanel/presentation':
         specifier: workspace:*
-        version: link:../../packages/presentation
+        version: link:../presentation
       '@diffpanel/storage':
         specifier: workspace:*
-        version: link:../../packages/storage
+        version: link:../storage
       diffpanel:
         specifier: workspace:*
-        version: link:../../packages/core
+        version: link:../core
       dompurify:
         specifier: 3.3.3
         version: 3.3.3
@@ -115,107 +228,6 @@ importers:
       esbuild:
         specifier: ^0.27.0
         version: 0.27.7
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
-
-  packages/core:
-    dependencies:
-      zod:
-        specifier: ^4.1.5
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: ^22.15.30
-        version: 22.20.1
-      tsup:
-        specifier: ^8.5.0
-        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
-
-  packages/generation:
-    dependencies:
-      diffpanel:
-        specifier: '>=0.0.2 <0.1.0'
-        version: link:../core
-    devDependencies:
-      tsup:
-        specifier: ^8.5.0
-        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
-
-  packages/git:
-    dependencies:
-      diffpanel:
-        specifier: '>=0.0.2 <0.1.0'
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: ^22.15.30
-        version: 22.20.1
-      tsup:
-        specifier: ^8.5.0
-        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
-
-  packages/presentation:
-    dependencies:
-      diffpanel:
-        specifier: '>=0.0.2 <0.1.0'
-        version: link:../core
-    devDependencies:
-      tsup:
-        specifier: ^8.5.0
-        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.7(@types/node@22.20.1)(supports-color@7.2.0)(tsx@4.23.11)
-
-  packages/storage:
-    dependencies:
-      '@diffpanel/generation':
-        specifier: '>=0.0.1 <0.1.0'
-        version: link:../generation
-      '@diffpanel/git':
-        specifier: '>=0.0.1 <0.1.0'
-        version: link:../git
-      better-sqlite3:
-        specifier: ^12.2.0
-        version: 12.11.1
-      diffpanel:
-        specifier: '>=0.0.2 <0.1.0'
-        version: link:../core
-    devDependencies:
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
-      '@types/node':
-        specifier: ^22.15.30
-        version: 22.20.1
-      tsup:
-        specifier: ^8.5.0
-        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

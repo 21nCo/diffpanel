@@ -23,8 +23,8 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/21nCo/diffpanel.git",
-    "directory": "packages/generation"
+    "url": "git+https://github.com/21nCo/devroll.git",
+    "directory": "products/diffpanel/generation"
   },
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts --sourcemap",

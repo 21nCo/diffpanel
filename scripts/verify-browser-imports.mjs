@@ -12,10 +12,11 @@ const forbiddenGlobals = {
 const result = await build({
   stdin: {
     contents: [
+      'import { tools } from "devroll";',
       'import { reviewManifestSchema } from "diffpanel";',
       'import { generationContract } from "@diffpanel/generation";',
       'import { chapterLabels } from "@diffpanel/presentation";',
-      "globalThis.__diffpanelBrowserVerification = [reviewManifestSchema, generationContract, chapterLabels];",
+      "globalThis.__diffpanelBrowserVerification = [tools, reviewManifestSchema, generationContract, chapterLabels];",
       ...(probeNodeGlobal ? ["globalThis.__diffpanelProbe = process;"] : []),
     ].join("\n"),
     loader: "js",
