@@ -1,48 +1,29 @@
 import { describe, expect, it } from "vitest";
-import type { z } from "zod";
+import { z } from "zod";
+import * as api from "./index.js";
 import {
-  activeVariantsSchema,
-  attachmentRefSchema,
   bearerAuthorization,
-  boundingBoxSchema,
-  daemonErrorResponseSchema,
   daemonEventSchema,
-  daemonInfoSchema,
   daemonPath,
-  evidenceRefSchema,
-  evidenceWindowSchema,
-  feedbackDraftSchema,
-  feedbackListQuerySchema,
   feedbackListResponseSchema,
   feedbackSchema,
-  feedbackTargetSchema,
   formatSourceLocation,
   formatVariantParam,
   InvalidMessageError,
   isIterbarContractError,
   IterbarContractError,
+  MAX_ATTACHMENT_BYTES,
   PAGE_API_GLOBAL,
   parseMessage,
   parseMessageJson,
   parseSourceLocation,
   parseVariantParam,
   readPageApi,
-  registerOriginsRequestSchema,
-  registerOriginsResponseSchema,
-  registrySnapshotSchema,
-  replyRequestSchema,
-  replySchema,
   safeParseMessage,
-  slotListResponseSchema,
-  slotReportSchema,
-  slotStateSchema,
-  sourceLocationSchema,
   statusRequestSchema,
-  storeLockSchema,
   tokenFromAuthorization,
   tokenFromWebSocketProtocols,
   UnsupportedSchemaVersionError,
-  variantSelectionSchema,
   webSocketProtocols,
   WEBSOCKET_SUBPROTOCOL,
 } from "./index.js";
@@ -114,181 +95,312 @@ const daemonInfo = {
   startedAt: createdAt,
 };
 
+const warning = snapshot.warnings[0];
+const draftChoice = { ...draft, kind: "choose_variant", text: "", choice: { slot: "pricing", version: "v2" } };
+
+type SchemaName = Extract<keyof typeof api, `${string}Schema`>;
+
 interface Case {
-  readonly name: string;
-  readonly schema: z.ZodType;
+  /** The root-entry export under test. */
+  readonly schema: SchemaName;
+  /** Distinguishes several cases for one schema, such as union branches. */
+  readonly variant?: string;
   readonly valid: unknown;
   readonly invalid: unknown;
-  /** Top-level messages carry schemaVersion and get the unknown-version check. */
-  readonly versioned: boolean;
+  /** Dot-joined path every reported issue must sit on (or under); `""` is the value itself. */
+  readonly path: string;
+  /** Message of the issue at `path`, when the path alone does not pin the failing rule. */
+  readonly message?: RegExp;
 }
 
 const cases: Case[] = [
-  { name: "feedback (comment)", schema: feedbackSchema, valid: comment, invalid: { ...comment, text: "   " }, versioned: true },
+  // primitives
+  { schema: "schemaVersionSchema", valid: 1, invalid: "1", path: "" },
+  { schema: "idSchema", valid: "fb_0001", invalid: "_fb_0001", path: "", message: /starting with a letter or digit/ },
+  { schema: "slotNameSchema", valid: "pricing.hero", invalid: "pricing:v2", path: "", message: /1-64 letters/ },
+  { schema: "versionNameSchema", valid: "v2-b", invalid: "v,2", path: "", message: /1-64 letters/ },
+  { schema: "timestampSchema", valid: "2026-11-03T10:00:30+02:00", invalid: "2026-11-03 10:00:30", path: "" },
+  { schema: "pageUrlSchema", valid: "https://app.localhost/pricing", invalid: "javascript:alert(1)", path: "" },
+  { schema: "originSchema", valid: "http://localhost:5173", invalid: "http://localhost:5173/", path: "", message: /http\(s\) origin/ },
+  { schema: "tokenSchema", valid: token, invalid: token.toUpperCase(), path: "", message: /lowercase hex/ },
+  { schema: "sha256Schema", valid: digest, invalid: digest.slice(1), path: "", message: /SHA-256/ },
+  { schema: "pidSchema", valid: 4242, invalid: 0, path: "" },
+  { schema: "absolutePathSchema", valid: "C:\\Users\\dev\\app", invalid: "Users/dev/app", path: "", message: /absolute path/ },
+  // registry
+  { schema: "activeVariantSchema", valid: { slot: "pricing", version: "v2" }, invalid: { slot: "pricing", version: "" }, path: "version" },
   {
-    name: "feedback (choose_variant)",
-    schema: feedbackSchema,
-    valid: chooseVariant,
-    invalid: { ...chooseVariant, choice: undefined },
-    versioned: true,
-  },
-  {
-    name: "feedback draft",
-    schema: feedbackDraftSchema,
-    valid: draft,
-    invalid: { ...draft, target: { ...target, textExcerpt: "x".repeat(201) } },
-    versioned: true,
-  },
-  { name: "feedback target", schema: feedbackTargetSchema, valid: target, invalid: { ...target, selector: "" }, versioned: false },
-  {
-    name: "source location",
-    schema: sourceLocationSchema,
-    valid: sourceLocation,
-    invalid: { ...sourceLocation, path: "src/../../etc/passwd" },
-    versioned: false,
-  },
-  { name: "bounding box", schema: boundingBoxSchema, valid: boundingBox, invalid: { ...boundingBox, width: -1 }, versioned: false },
-  {
-    name: "attachment reference",
-    schema: attachmentRefSchema,
-    valid: screenshot,
-    invalid: { ...screenshot, mediaType: "application/json" },
-    versioned: false,
-  },
-  {
-    name: "evidence window",
-    schema: evidenceWindowSchema,
-    valid: evidenceWindow,
-    invalid: { ...evidenceWindow, end: "2026-11-03T09:59:59.000Z" },
-    versioned: false,
-  },
-  {
-    name: "evidence reference",
-    schema: evidenceRefSchema,
-    valid: { window: evidenceWindow, attachment: evidenceAttachment },
-    invalid: { window: evidenceWindow, attachment: screenshot },
-    versioned: false,
-  },
-  { name: "reply", schema: replySchema, valid: reply, invalid: { ...reply, id: "../rp_0001" }, versioned: false },
-  {
-    name: "active variants",
-    schema: activeVariantsSchema,
+    schema: "activeVariantsSchema",
     valid: comment.activeVariants,
     invalid: [{ slot: "pricing", version: "v1" }, { slot: "pricing", version: "v2" }],
-    versioned: false,
+    path: "",
+    message: /each slot may appear only once/,
   },
-  { name: "slot state", schema: slotStateSchema, valid: slotState, invalid: { ...slotState, activeVersion: "v3" }, versioned: false },
+  { schema: "slotStateSchema", valid: slotState, invalid: { ...slotState, activeVersion: "v3" }, path: "activeVersion" },
+  { schema: "registryWarningSchema", valid: warning, invalid: { ...warning, source: "cookie" }, path: "source" },
   {
-    name: "registry snapshot",
-    schema: registrySnapshotSchema,
+    schema: "registrySnapshotSchema",
     valid: snapshot,
     invalid: { ...snapshot, slots: [slotState, slotState] },
-    versioned: true,
+    path: "slots",
+    message: /slot names must be unique/,
   },
   {
-    name: "variant selection",
-    schema: variantSelectionSchema,
+    schema: "variantSelectionSchema",
     valid: { schemaVersion: 1, slot: "pricing", version: "v2" },
     invalid: { schemaVersion: 1, slot: "pricing:v2", version: "v2" },
-    versioned: true,
+    path: "slot",
+  },
+  { schema: "slotReportSchema", valid: slotReport, invalid: { ...slotReport, pageUrl: "javascript:alert(1)" }, path: "pageUrl" },
+  // feedback
+  { schema: "feedbackKindSchema", valid: "choose_variant", invalid: "vote", path: "" },
+  { schema: "feedbackStatusSchema", valid: "needs-info", invalid: "closed", path: "" },
+  { schema: "boundingBoxSchema", valid: boundingBox, invalid: { ...boundingBox, width: -1 }, path: "width" },
+  {
+    schema: "sourceLocationSchema",
+    valid: sourceLocation,
+    invalid: { ...sourceLocation, path: "src/../../etc/passwd" },
+    path: "path",
+    message: /project-relative/,
+  },
+  { schema: "feedbackTargetSchema", valid: target, invalid: { ...target, selector: "" }, path: "selector" },
+  { schema: "screenshotAttachmentSchema", valid: screenshot, invalid: { ...screenshot, mediaType: "image/jpeg" }, path: "mediaType" },
+  {
+    schema: "evidenceAttachmentSchema",
+    valid: evidenceAttachment,
+    invalid: { ...evidenceAttachment, byteLength: MAX_ATTACHMENT_BYTES + 1 },
+    path: "byteLength",
   },
   {
-    name: "slot report",
-    schema: slotReportSchema,
-    valid: slotReport,
-    invalid: { ...slotReport, pageUrl: "javascript:alert(1)" },
-    versioned: true,
+    schema: "attachmentRefSchema",
+    variant: "screenshot",
+    valid: screenshot,
+    invalid: { ...screenshot, mediaType: "application/json" },
+    path: "mediaType",
   },
-  { name: "daemon.json", schema: daemonInfoSchema, valid: daemonInfo, invalid: { ...daemonInfo, host: "0.0.0.0" }, versioned: true },
   {
-    name: "store lock",
-    schema: storeLockSchema,
+    schema: "attachmentRefSchema",
+    variant: "evidence",
+    valid: evidenceAttachment,
+    invalid: { ...evidenceAttachment, sha256: digest.toUpperCase() },
+    path: "sha256",
+  },
+  {
+    schema: "evidenceWindowSchema",
+    valid: evidenceWindow,
+    invalid: { ...evidenceWindow, end: "2026-11-03T09:59:59.000Z" },
+    path: "end",
+    message: /end must not precede start/,
+  },
+  {
+    schema: "evidenceRefSchema",
+    valid: { window: evidenceWindow, attachment: evidenceAttachment },
+    invalid: { window: evidenceWindow, attachment: screenshot },
+    path: "attachment",
+  },
+  { schema: "replyAuthorSchema", valid: reply.author, invalid: { kind: "bot", name: null }, path: "kind" },
+  { schema: "replySchema", valid: reply, invalid: { ...reply, id: "../rp_0001" }, path: "id" },
+  {
+    schema: "feedbackDraftSchema",
+    variant: "comment",
+    valid: draft,
+    invalid: { ...draft, target: { ...target, textExcerpt: "x".repeat(201) } },
+    path: "target.textExcerpt",
+  },
+  {
+    schema: "feedbackDraftSchema",
+    variant: "choose_variant",
+    valid: draftChoice,
+    invalid: { ...draftChoice, choice: { slot: "pricing" } },
+    path: "choice.version",
+  },
+  {
+    schema: "feedbackSchema",
+    variant: "comment",
+    valid: comment,
+    invalid: { ...comment, text: "   " },
+    path: "text",
+    message: /must not be blank/,
+  },
+  {
+    schema: "feedbackSchema",
+    variant: "choose_variant",
+    valid: chooseVariant,
+    invalid: { ...chooseVariant, choice: undefined },
+    path: "choice",
+  },
+  // daemon
+  { schema: "daemonInfoSchema", valid: daemonInfo, invalid: { ...daemonInfo, host: "0.0.0.0" }, path: "host" },
+  {
+    schema: "storeLockSchema",
     valid: { schemaVersion: 1, pid: 4242, startedAt: createdAt },
     invalid: { schemaVersion: 1, pid: 0, startedAt: createdAt },
-    versioned: true,
+    path: "pid",
   },
   {
-    name: "register origins request",
-    schema: registerOriginsRequestSchema,
+    schema: "registerOriginsRequestSchema",
     valid: { schemaVersion: 1, origins: ["http://localhost:5173", "http://127.0.0.1:5173"] },
-    invalid: { schemaVersion: 1, origins: ["http://localhost:5173/"] },
-    versioned: true,
+    invalid: { schemaVersion: 1, origins: ["http://localhost:5173", "http://localhost:5173/"] },
+    path: "origins.1",
   },
   {
-    name: "register origins response",
-    schema: registerOriginsResponseSchema,
+    schema: "registerOriginsResponseSchema",
     valid: { schemaVersion: 1, origins: ["https://app.localhost"] },
     invalid: { schemaVersion: 1, origins: ["file:///tmp"] },
-    versioned: true,
+    path: "origins.0",
   },
   {
-    name: "feedback list query",
-    schema: feedbackListQuerySchema,
+    schema: "feedbackListQuerySchema",
     valid: { status: "needs-info", kind: "comment", since: createdAt },
-    invalid: { status: "closed" },
-    versioned: false,
+    invalid: { kind: "comment", status: "closed" },
+    path: "status",
   },
   {
-    name: "feedback list response",
-    schema: feedbackListResponseSchema,
+    schema: "feedbackListResponseSchema",
     valid: { schemaVersion: 1, items: [comment, chooseVariant] },
-    invalid: { schemaVersion: 1, items: [{ ...comment, status: "pending" }] },
-    versioned: true,
+    invalid: { schemaVersion: 1, items: [comment, { ...chooseVariant, status: "pending" }] },
+    path: "items.1.status",
   },
   {
-    name: "reply request",
-    schema: replyRequestSchema,
+    schema: "replyRequestSchema",
     valid: { schemaVersion: 1, author: { kind: "user", name: null }, text: "Try v3." },
     invalid: { schemaVersion: 1, author: { kind: "user", name: null }, text: "\n" },
-    versioned: true,
+    path: "text",
+    message: /must not be blank/,
   },
   {
-    name: "status request",
-    schema: statusRequestSchema,
+    schema: "statusRequestSchema",
     valid: { schemaVersion: 1, status: "resolved" },
     invalid: { schemaVersion: 1, status: "closed" },
-    versioned: true,
+    path: "status",
   },
   {
-    name: "slot list response",
-    schema: slotListResponseSchema,
+    schema: "slotListResponseSchema",
     valid: { schemaVersion: 1, pages: [slotReport] },
     invalid: { schemaVersion: 1, pages: [{ ...slotReport, reportedAt: undefined }] },
-    versioned: true,
+    path: "pages.0.reportedAt",
   },
+  { schema: "daemonErrorCodeSchema", valid: "store_locked", invalid: "teapot", path: "" },
   {
-    name: "daemon error response",
-    schema: daemonErrorResponseSchema,
+    schema: "daemonErrorResponseSchema",
     valid: { schemaVersion: 1, error: { code: "forbidden_origin", message: "Origin not allowed" } },
-    invalid: { schemaVersion: 1, error: { code: "teapot", message: "" } },
-    versioned: true,
+    invalid: { schemaVersion: 1, error: { code: "teapot", message: "Origin not allowed" } },
+    path: "error.code",
   },
   {
-    name: "daemon event",
-    schema: daemonEventSchema,
+    schema: "daemonEventSchema",
+    variant: "feedback.created",
+    valid: { schemaVersion: 1, type: "feedback.created", feedback: chooseVariant },
+    invalid: { schemaVersion: 1, type: "feedback.created", feedback: { ...chooseVariant, kind: "vote" } },
+    path: "feedback.kind",
+  },
+  {
+    schema: "daemonEventSchema",
+    variant: "feedback.updated",
     valid: { schemaVersion: 1, type: "feedback.updated", feedback: comment },
-    invalid: { schemaVersion: 1, type: "feedback.deleted", feedback: comment },
-    versioned: true,
+    invalid: { schemaVersion: 1, type: "feedback.updated", report: slotReport },
+    path: "feedback",
+  },
+  {
+    schema: "daemonEventSchema",
+    variant: "slots.reported",
+    valid: { schemaVersion: 1, type: "slots.reported", report: slotReport },
+    invalid: { schemaVersion: 1, type: "slots.reported", report: { ...slotReport, slots: [{ ...slotState, mounts: 0 }] } },
+    path: "report.slots.0.mounts",
   },
 ];
 
-describe.each(cases)("$name", ({ name, schema, valid, invalid, versioned }) => {
+const label = "msg";
+const caseName = ({ schema, variant }: Case) => (variant ? `${schema} (${variant})` : schema);
+const schemaOf = (name: SchemaName) => api[name] as z.ZodType;
+const isVersioned = (value: unknown) => typeof value === "object" && value !== null && "schemaVersion" in value;
+
+function issueOnPath(issue: string, path: string): boolean {
+  const prefix = path ? `${label}.${path}` : label;
+  return issue.startsWith(`${prefix}:`) || issue.startsWith(`${prefix}.`);
+}
+
+describe.each(cases.map((testCase) => ({ ...testCase, name: caseName(testCase) })))("$name", (testCase) => {
+  const schema = schemaOf(testCase.schema);
+
   it("accepts the valid fixture", () => {
-    expect(parseMessage(schema, valid, name)).toEqual(valid);
+    expect(parseMessage(schema, testCase.valid, label)).toEqual(testCase.valid);
   });
 
-  it("rejects the invalid fixture with a typed error", () => {
-    expect(() => parseMessage(schema, invalid, name)).toThrow(InvalidMessageError);
+  it("rejects the invalid fixture on the field it targets", () => {
+    const result = safeParseMessage(schema, testCase.invalid, label);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error).toBeInstanceOf(InvalidMessageError);
+    const { issues } = result.error as InvalidMessageError;
+    expect(issues.length).toBeGreaterThan(0);
+    for (const issue of issues) expect(issueOnPath(issue, testCase.path), issue).toBe(true);
+    if (testCase.message) expect(issues.some((issue) => testCase.message?.test(issue)), issues.join("\n")).toBe(true);
   });
 
-  it.runIf(versioned)("rejects an unknown major version before reading the shape", () => {
-    for (const input of [{ ...(valid as object), schemaVersion: 2 }, { schemaVersion: 2, renamedEverything: true }]) {
-      const result = safeParseMessage(schema, input, name);
+  it.runIf(isVersioned(testCase.valid))("rejects an unknown major version before reading the shape", () => {
+    for (const input of [{ ...(testCase.valid as object), schemaVersion: 2 }, { schemaVersion: 2, renamedEverything: true }]) {
+      const result = safeParseMessage(schema, input, label);
       expect(result.success).toBe(false);
       if (result.success) continue;
       expect(result.error).toBeInstanceOf(UnsupportedSchemaVersionError);
       expect(result.error.code).toBe("unsupported_schema_version");
       expect((result.error as UnsupportedSchemaVersionError).receivedVersion).toBe(2);
+    }
+  });
+});
+
+describe("fixture coverage", () => {
+  it("has a case for every schema the root entry exports", () => {
+    const exported = Object.keys(api).filter((name) => name.endsWith("Schema")).sort();
+    const covered = new Set(cases.map((testCase) => testCase.schema));
+    expect(exported.filter((name) => !covered.has(name as SchemaName))).toEqual([]);
+    expect(exported.length).toBeGreaterThanOrEqual(43);
+  });
+
+  it("has a valid and an invalid fixture for every discriminated-union branch", () => {
+    const unions = Object.entries(api).flatMap(([name, value]): [string, z.ZodDiscriminatedUnion][] =>
+      value instanceof z.ZodDiscriminatedUnion ? [[name, value]] : []);
+    expect(unions.map(([name]) => name).sort())
+      .toEqual(["attachmentRefSchema", "daemonEventSchema", "feedbackDraftSchema", "feedbackSchema"]);
+    for (const [name, union] of unions) {
+      const key = union.def.discriminator;
+      const unionCases = cases.filter((testCase) => testCase.schema === name);
+      for (const option of union.options as z.ZodObject[]) {
+        const tag = (option.shape[key] as z.ZodLiteral).value;
+        const branch = unionCases.filter((testCase) => (testCase.valid as Record<string, unknown>)[key] === tag);
+        expect(branch.map((testCase) => option.safeParse(testCase.valid).success), `${name} ${String(tag)} valid`)
+          .toContain(true);
+        expect(branch.map((testCase) => (testCase.invalid as Record<string, unknown>)[key]), `${name} ${String(tag)} invalid`)
+          .toContain(tag);
+      }
+    }
+  });
+});
+
+describe("nested records", () => {
+  it("rejects a v1 envelope holding a record from another major version as an invalid message", () => {
+    const event = { schemaVersion: 1, type: "feedback.created", feedback: { ...comment, schemaVersion: 2 } };
+    const list = { schemaVersion: 1, items: [comment, { ...chooseVariant, schemaVersion: 2 }] };
+    for (const [schema, input, path] of [
+      [daemonEventSchema, event, "feedback.schemaVersion"],
+      [feedbackListResponseSchema, list, "items.1.schemaVersion"],
+    ] as const) {
+      const result = safeParseMessage(schema, input, label);
+      expect(result.success).toBe(false);
+      if (result.success) continue;
+      expect(result.error).toBeInstanceOf(InvalidMessageError);
+      expect(result.error.code).toBe("invalid_message");
+      const { issues } = result.error as InvalidMessageError;
+      expect(issues.length).toBeGreaterThan(0);
+      for (const issue of issues) expect(issueOnPath(issue, path), issue).toBe(true);
+    }
+  });
+
+  it("rejects an unknown daemon event type on the discriminator", () => {
+    const result = safeParseMessage(daemonEventSchema, { schemaVersion: 1, type: "feedback.deleted", feedback: comment }, label);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      for (const issue of (result.error as InvalidMessageError).issues) expect(issueOnPath(issue, "type"), issue).toBe(true);
     }
   });
 });
