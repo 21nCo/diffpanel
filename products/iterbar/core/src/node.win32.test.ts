@@ -90,16 +90,30 @@ describe("iterbar/node paths on Windows", () => {
     }
   });
 
-  it("accepts a UNC root only when both its server and share are real names, for every separator mix", () => {
-    const names = ["server", "", ".", "..", "?", "a?b"];
-    const isName = (name: string) => name !== "" && name !== "." && name !== ".." && !name.includes("?");
+  it("rejects a UNC root whose server or share contains a character Windows forbids in names", () => {
+    for (const bad of [..."<>:\"|?*", "\u0000", "\u0001", "\u001f"]) {
+      for (const projectRoot of [
+        `\\\\ser${bad}ver\\share\\app`, `\\\\server\\sh${bad}are\\app`, `//server${bad}/share`, `\\\\server/share${bad}`,
+      ]) {
+        expectRejected(projectRoot);
+      }
+    }
+    expectAccepted("\\\\my-server.local\\share$\\app", "\\\\my-server.local\\share$\\");
+  });
+
+  it("accepts a UNC root only when both its server and share are legal names, for every separator mix", () => {
+    const names = ["server", "", ".", "..", "?", "a?b", "a:b", "a*b", "a<b", "a\u0001b"];
+    const isName = (name: string) =>
+      name !== "" && name !== "." && name !== ".." && ![...name].some((c) => '<>:"|?*'.includes(c) || c < " ");
     for (const lead of ["\\\\", "//", "\\/", "/\\"]) {
       for (const server of names) {
-        for (const share of names) {
-          for (const tail of ["", "\\", "/", "\\app", "/app\\x"]) {
-            const projectRoot = `${lead}${server}\\${share}${tail}`;
-            if (isName(server) && isName(share)) expectAccepted(projectRoot, `\\\\${server}\\${share}\\`);
-            else expectRejected(projectRoot);
+        for (const separator of ["\\", "/"]) {
+          for (const share of names) {
+            for (const tail of ["", "\\", "/", "\\app", "/app\\x"]) {
+              const projectRoot = `${lead}${server}${separator}${share}${tail}`;
+              if (isName(server) && isName(share)) expectAccepted(projectRoot, `\\\\${server}\\${share}\\`);
+              else expectRejected(projectRoot);
+            }
           }
         }
       }

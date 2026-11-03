@@ -589,6 +589,7 @@ describe("portable ids", () => {
     const accepted = [
       "/", "/Users/dev/app", "C:\\", "C:\\Users\\dev\\app", "c:/Users/dev/app",
       "\\\\server\\share", "\\\\server\\share\\", "\\\\server\\share\\app", "//server/share/app",
+      "//server/share/x", "\\\\server/share", "//server\\share", "\\\\my-server.local\\share$\\app",
     ];
     const rejected = [
       // relative or drive-relative on Windows
@@ -598,6 +599,10 @@ describe("portable ids", () => {
       "\\\\..\\share", "\\\\server\\..\\app",
       // device namespace: use the equivalent drive or UNC path
       "\\\\?\\C:\\app", "\\\\?\\UNC\\server\\share", "\\\\.\\C:\\app", "\\\\.\\pipe\\iterbar", "//./pipe/iterbar",
+      // a UNC server or share name containing a character Windows forbids in names, or a control character
+      ...[..."<>:\"|?*", "\u0001", "\u001f"].flatMap((bad) => [
+        `\\\\ser${bad}ver\\share`, `\\\\server\\sh${bad}are\\app`, `//server${bad}/share`, `//server/share${bad}`,
+      ]),
     ];
     for (const root of accepted) {
       expect(safeParseMessage(absolutePathSchema, root).success, root).toBe(true);

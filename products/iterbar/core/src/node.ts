@@ -29,7 +29,7 @@ function checkedRoot(projectRoot: string): string {
   }
   throw new IterbarContractError(
     "invalid_project_root",
-    `Project root ${JSON.stringify(projectRoot)} must be an absolute path (drive-qualified or \\\\server\\share on Windows)`,
+    String.raw`Project root ${JSON.stringify(projectRoot)} must be an absolute path (drive-qualified or \\server\share on Windows)`,
   );
 }
 

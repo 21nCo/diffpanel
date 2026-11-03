@@ -42,6 +42,7 @@ changes ship as a new major version.
 - **Layout**: `iterbarLayout` and, from `iterbar/node`, absolute path helpers
   that refuse unsafe ids. They accept the same project roots as
   `absolutePathSchema`: POSIX absolute, or on Windows drive-qualified (`C:\`)
-  or full UNC (`\\server\share`) roots only.
+  or full UNC (`\\server\share`) roots only, whose server and share names
+  avoid the characters Windows forbids (`< > : " | ? *` and controls).
 
 Requires Node.js 22.13 or newer for the Node entry point.

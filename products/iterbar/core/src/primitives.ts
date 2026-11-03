@@ -78,8 +78,11 @@ export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "must be a lowerc
 export const pidSchema = z.number().int().positive();
 
 const POSIX_ROOT = /^\/(?![\\/])/;
-/** A UNC server or share name: not empty, `.`, `..`, or containing `?` (which also excludes `\\?\` and `\\.\`). */
-const UNC_NAME = String.raw`(?!\.\.?(?:[\\/]|$))[^\\/?]+`;
+/**
+ * A UNC server or share name: not empty, `.` or `..`, and free of the characters Windows forbids in names
+ * (`< > : " / \ | ? *` and U+0000-U+001F). Excluding `?` also rejects the device namespaces `\\?\` and `\\.\`.
+ */
+const UNC_NAME = String.raw`(?!\.\.?(?:[\\/]|$))[^\\/<>:"|?*\u0000-\u001f]+`;
 const WINDOWS_ROOT = new RegExp(String.raw`^(?:[A-Za-z]:[\\/]|[\\/]{2}${UNC_NAME}[\\/]${UNC_NAME}(?:[\\/]|$))`);
 
 /**
@@ -103,4 +106,4 @@ export const absolutePathSchema = z
   .string()
   .min(1)
   .max(4096)
-  .refine((value) => isAbsolutePath(value), "must be an absolute path: POSIX, drive-qualified or UNC (\\\\server\\share)");
+  .refine((value) => isAbsolutePath(value), String.raw`must be an absolute path: POSIX, drive-qualified or UNC (\\server\share)`);
