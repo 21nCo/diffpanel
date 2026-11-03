@@ -1,7 +1,8 @@
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { join, normalize, sep } from "node:path";
 import { IterbarContractError } from "./errors.js";
 import type { AttachmentRef } from "./feedback.js";
 import { attachmentFileName, feedbackDirectorySegments, iterbarLayout } from "./layout.js";
+import { isAbsolutePath } from "./primitives.js";
 
 /** Absolute paths of the fixed entries in a project's `.iterbar/` directory. */
 export interface IterbarPaths {
@@ -14,24 +15,22 @@ export interface IterbarPaths {
   readonly feedbackDirectory: string;
 }
 
-/**
- * On Windows, `isAbsolute` also accepts drive-relative roots such as `\work\app`, which each process
- * resolves against its own current drive. Only drive-qualified (`C:\`) and UNC (`\\server\share`)
- * roots name the same directory everywhere.
- */
-function isQualifiedRoot(projectRoot: string): boolean {
-  if (!isAbsolute(projectRoot)) return false;
-  return sep === "/" || /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(projectRoot);
-}
+const platform = sep === "\\" ? "win32" : "posix";
 
+/**
+ * Applies the same root rule as `absolutePathSchema` (see `isAbsolutePath`), limited to this platform's forms,
+ * before and after normalization: on Windows only drive-qualified (`C:\`) and full UNC (`\\server\share`) roots
+ * name the same directory in every process, so the returned paths never depend on the current drive.
+ */
 function checkedRoot(projectRoot: string): string {
-  if (typeof projectRoot !== "string" || !projectRoot || projectRoot.includes("\0") || !isQualifiedRoot(projectRoot)) {
-    throw new IterbarContractError(
-      "invalid_project_root",
-      `Project root ${JSON.stringify(projectRoot)} must be an absolute path (drive-qualified or UNC on Windows)`,
-    );
+  if (isAbsolutePath(projectRoot, platform)) {
+    const root = normalize(projectRoot);
+    if (isAbsolutePath(root, platform)) return root;
   }
-  return normalize(projectRoot);
+  throw new IterbarContractError(
+    "invalid_project_root",
+    `Project root ${JSON.stringify(projectRoot)} must be an absolute path (drive-qualified or \\\\server\\share on Windows)`,
+  );
 }
 
 /** Paths of `.iterbar/` and its fixed entries for an absolute project root. */

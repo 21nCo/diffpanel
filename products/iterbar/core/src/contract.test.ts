@@ -13,6 +13,7 @@ import {
   formatSourceLocation,
   formatVariantParam,
   InvalidMessageError,
+  isAbsolutePath,
   isIterbarContractError,
   IterbarContractError,
   MAX_ATTACHMENT_BYTES,
@@ -131,6 +132,7 @@ const cases: Case[] = [
   { schema: "pidSchema", valid: 4242, invalid: 0, path: "" },
   { schema: "absolutePathSchema", valid: "C:\\Users\\dev\\app", invalid: "Users/dev/app", path: "", message: /absolute path/ },
   { schema: "absolutePathSchema", variant: "NUL", valid: "/Users/dev/app", invalid: "/Users/dev\0app", path: "", message: /absolute path/ },
+  { schema: "absolutePathSchema", variant: "UNC", valid: "\\\\server\\share\\app", invalid: "\\\\server", path: "", message: /absolute path/ },
   // registry
   { schema: "activeVariantSchema", valid: { slot: "pricing", version: "v2" }, invalid: { slot: "pricing", version: "" }, path: "version" },
   {
@@ -581,6 +583,38 @@ describe("portable ids", () => {
       expect(safeParseMessage(feedbackSchema, { ...comment, id }).success, id).toBe(false);
     }
     for (const id of ["console", "com10", "nul_1", "lpt", "fb_0001"]) expect(assertSafeId(id)).toBe(id);
+  });
+
+  it("accepts only project roots that name the same directory in every process", () => {
+    const accepted = [
+      "/", "/Users/dev/app", "C:\\", "C:\\Users\\dev\\app", "c:/Users/dev/app",
+      "\\\\server\\share", "\\\\server\\share\\", "\\\\server\\share\\app", "//server/share/app",
+    ];
+    const rejected = [
+      // relative or drive-relative on Windows
+      "Users/dev/app", "\\Users\\dev", "C:Users", "C:",
+      // UNC without both a server and a share
+      "\\\\", "\\\\server", "\\\\server\\", "//server", "//server/", "/\\server", "\\\\\\server\\share", "///Users/dev",
+      "\\\\..\\share", "\\\\server\\..\\app",
+      // device namespace: use the equivalent drive or UNC path
+      "\\\\?\\C:\\app", "\\\\?\\UNC\\server\\share", "\\\\.\\C:\\app", "\\\\.\\pipe\\iterbar", "//./pipe/iterbar",
+    ];
+    for (const root of accepted) {
+      expect(safeParseMessage(absolutePathSchema, root).success, root).toBe(true);
+      expect(safeParseMessage(daemonInfoSchema, { ...daemonInfo, projectRoot: root }, label).success, root).toBe(true);
+    }
+    for (const root of rejected) {
+      expect(safeParseMessage(absolutePathSchema, root).success, root).toBe(false);
+      const result = safeParseMessage(daemonInfoSchema, { ...daemonInfo, projectRoot: root }, label);
+      expect(result.success, root).toBe(false);
+      if (!result.success) {
+        for (const issue of (result.error as InvalidMessageError).issues) expect(issueOnPath(issue, "projectRoot"), issue).toBe(true);
+      }
+    }
+    expect(isAbsolutePath("C:\\app", "posix")).toBe(false);
+    expect(isAbsolutePath("/app", "win32")).toBe(false);
+    expect([isAbsolutePath("/app", "posix"), isAbsolutePath("C:\\app", "win32"), isAbsolutePath("\\\\s\\sh", "win32")])
+      .toEqual([true, true, true]);
   });
 
   it("rejects a daemon project root containing NUL", () => {

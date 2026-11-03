@@ -8,7 +8,7 @@ export const schemaVersionSchema = z.literal(SCHEMA_VERSION);
  * Lowercase only, so two valid ids never name the same directory on a case-insensitive filesystem, and
  * never a Windows device name (`con`, `nul`, `com1`, ...), which Windows reserves with any extension.
  */
-const ID_PATTERN = /^(?!(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$)[a-z0-9][a-z0-9_-]{0,127}$/;
+const ID_PATTERN = /^(?!(?:con|prn|aux|nul|com\d|lpt\d)$)[a-z0-9][a-z0-9_-]{0,127}$/;
 
 /** True when `value` is a valid record id: safe to use as a single path segment or URL segment on every OS. */
 export function isSafeId(value: string): boolean {
@@ -77,11 +77,30 @@ export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "must be a lowerc
 /** A positive process id. */
 export const pidSchema = z.number().int().positive();
 
-/** True for a POSIX absolute path or a Windows drive or UNC absolute path, without NUL characters. */
-export function isAbsolutePath(value: string): boolean {
-  if (value.includes("\0")) return false;
-  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
+const POSIX_ROOT = /^\/(?![\\/])/;
+/** A UNC server or share name: not empty, `.`, `..`, or containing `?` (which also excludes `\\?\` and `\\.\`). */
+const UNC_NAME = String.raw`(?!\.\.?(?:[\\/]|$))[^\\/?]+`;
+const WINDOWS_ROOT = new RegExp(String.raw`^(?:[A-Za-z]:[\\/]|[\\/]{2}${UNC_NAME}[\\/]${UNC_NAME}(?:[\\/]|$))`);
+
+/**
+ * True for a path that names the same directory in every process, without NUL characters: a POSIX absolute
+ * path (`/app`), a drive-qualified Windows path (`C:\app`, `c:/app`) or a UNC path with both a server and a
+ * share (`\\server\share\app`). Windows resolves the other forms that `path.isAbsolute` accepts against each
+ * process's current drive: drive-relative `\app` and a UNC prefix without a share (`\\server`, `//server`). Device-namespace
+ * paths (`\\?\C:\app`, `\\.\pipe\x`) are rejected too; use the equivalent drive or UNC path. A POSIX path may
+ * not start with `//` or `/\`, which Windows reads as UNC.
+ *
+ * `platform` limits the check to that platform's forms, as `iterbar/node` does; omit it to accept either.
+ */
+export function isAbsolutePath(value: string, platform?: "posix" | "win32"): boolean {
+  if (typeof value !== "string" || value.includes("\0")) return false;
+  if (platform !== "win32" && POSIX_ROOT.test(value)) return true;
+  return platform !== "posix" && WINDOWS_ROOT.test(value);
 }
 
-/** An absolute filesystem path. */
-export const absolutePathSchema = z.string().min(1).max(4096).refine(isAbsolutePath, "must be an absolute path");
+/** An absolute filesystem path that names the same directory in every process; see {@link isAbsolutePath}. */
+export const absolutePathSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .refine((value) => isAbsolutePath(value), "must be an absolute path: POSIX, drive-qualified or UNC (\\\\server\\share)");

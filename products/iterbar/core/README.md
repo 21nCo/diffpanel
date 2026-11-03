@@ -40,6 +40,8 @@ changes ship as a new major version.
   table, request, response, error and WebSocket event schemas, and token
   transport helpers.
 - **Layout**: `iterbarLayout` and, from `iterbar/node`, absolute path helpers
-  that refuse unsafe ids.
+  that refuse unsafe ids. They accept the same project roots as
+  `absolutePathSchema`: POSIX absolute, or on Windows drive-qualified (`C:\`)
+  or full UNC (`\\server\share`) roots only.
 
 Requires Node.js 22.13 or newer for the Node entry point.

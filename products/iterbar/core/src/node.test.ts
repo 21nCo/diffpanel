@@ -1,7 +1,10 @@
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { type AttachmentRef, attachmentFileName, iterbarLayout } from "./index.js";
-import { attachmentPath, feedbackRecordPath, iterbarPaths } from "./node.js";
+import { describe, expect, it, vi } from "vitest";
+import { type AttachmentRef, absolutePathSchema, attachmentFileName, iterbarLayout } from "./index.js";
+import { attachmentPath, attachmentsDirectoryPath, feedbackDirectoryPath, feedbackRecordPath, iterbarPaths } from "./node.js";
+
+// POSIX fixtures: run against Node's posix path implementation on every host (node.win32.test.ts covers Windows).
+vi.mock("node:path", async () => (await vi.importActual<typeof import("node:path")>("node:path")).posix);
 
 const root = join("/", "work", "app");
 
@@ -48,8 +51,22 @@ describe("iterbar/node paths", () => {
   });
 
   it("requires an absolute project root so every process resolves the same directory", () => {
-    for (const projectRoot of ["app", "./app", "", "/app\0x"]) {
-      expect(() => iterbarPaths(projectRoot)).toThrow(expect.objectContaining({ code: "invalid_project_root" }));
+    // Windows-only forms are relative paths on POSIX; a leading `//` or `/\` reads as UNC on Windows.
+    for (const projectRoot of ["app", "./app", "", "/app\0x", "C:\\work\\app", "c:/work/app", "\\\\server\\share", "//server/share", "/\\server"]) {
+      for (const helper of [iterbarPaths, feedbackDirectoryPath, feedbackRecordPath, attachmentsDirectoryPath]) {
+        expect(() => helper(projectRoot, "fb_0001"), `${helper.name}(${JSON.stringify(projectRoot)})`)
+          .toThrow(expect.objectContaining({ code: "invalid_project_root" }));
+      }
+      expect(() => attachmentPath(projectRoot, "fb_0001", { id: "at_1", kind: "evidence" }), projectRoot)
+        .toThrow(expect.objectContaining({ code: "invalid_project_root" }));
+    }
+  });
+
+  it("returns a normalized root that daemon.json readers accept", () => {
+    for (const projectRoot of ["/", "/work/app", "/work/../app/"]) {
+      const paths = iterbarPaths(projectRoot);
+      expect(absolutePathSchema.safeParse(paths.projectRoot).success, projectRoot).toBe(true);
+      expect(paths.daemonFile.startsWith("/") && !paths.daemonFile.startsWith("//"), projectRoot).toBe(true);
     }
   });
 });
