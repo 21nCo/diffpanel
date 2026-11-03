@@ -15,6 +15,6 @@ describe("devroll catalog", () => {
 
   it("freezes the catalog", () => {
     expect(Object.isFrozen(tools)).toBe(true);
-    expect(Object.isFrozen(tools[0])).toBe(true);
+    for (const tool of tools) expect(Object.isFrozen(tool)).toBe(true);
   });
 });

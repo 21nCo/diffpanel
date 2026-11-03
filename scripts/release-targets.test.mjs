@@ -10,11 +10,14 @@ test("every release target has a publish tag trigger and a matching public packa
   const workflow = await readFile(new URL(".github/workflows/publish-tag.yml", root), "utf8");
   const triggers = [...workflow.matchAll(/^\s+- '([a-z0-9-]+)-v\*\.\*\.\*'$/gm)].map((match) => match[1]);
 
-  assert.deepEqual([...triggers].sort(), targets.map((target) => target.slug).sort());
+  const slugs = targets.map((target) => target.slug);
+  assert.equal(new Set(slugs).size, slugs.length, "release target slugs must be unique");
+  assert.equal(new Set(triggers).size, triggers.length, "publish tag triggers must be unique");
+  assert.deepEqual([...triggers].sort(), [...slugs].sort());
   for (const target of targets) {
     const manifest = await readJson(`${target.path}/package.json`);
     assert.equal(manifest.name, target.name, `${target.path} must publish as ${target.name}`);
-    assert.notEqual(manifest.private, true, `${target.name} must not be private`);
+    assert(!manifest.private, `${target.name} must not be private`);
     assert.equal(manifest.repository?.directory, target.path, `${target.name} repository.directory must be ${target.path}`);
   }
 });
