@@ -24,6 +24,7 @@ const packagePaths = [
   "products/diffpanel/git",
   "products/diffpanel/presentation",
   "products/diffpanel/storage",
+  "products/iterbar/core",
 ];
 
 try {
@@ -68,6 +69,8 @@ try {
     import { captureReview } from "@diffpanel/git";
     import { chapterLabels } from "@diffpanel/presentation";
     import { DiffpanelStore } from "@diffpanel/storage";
+    import { feedbackSchema, parseMessage, statusRequestSchema, UnsupportedSchemaVersionError } from "iterbar";
+    import { feedbackRecordPath, iterbarPaths } from "iterbar/node";
 
     const repository = process.argv[2];
     const home = process.argv[3];
@@ -109,6 +112,13 @@ try {
     assert.equal(sha256("diffpanel").length, 64);
     assert.equal(findTool("diffpanel")?.packageName, "diffpanel");
     assert(tools.length >= 1);
+
+    assert.equal(parseMessage(statusRequestSchema, { schemaVersion: 1, status: "done" }).status, "done");
+    assert.throws(() => parseMessage(statusRequestSchema, { schemaVersion: 2, status: "done" }), UnsupportedSchemaVersionError);
+    assert.equal(typeof feedbackSchema.safeParse, "function");
+    assert.equal(iterbarPaths(repository).daemonFile, join(repository, ".iterbar", "daemon.json"));
+    assert.equal(feedbackRecordPath(repository, "fb_1"), join(repository, ".iterbar", "feedback", "fb_1", "feedback.json"));
+    assert.throws(() => feedbackRecordPath(repository, "../fb_1"), { code: "invalid_path_segment" });
   `;
   const consumerScriptPath = join(consumerDirectory, "verify.mjs");
   await writeFile(consumerScriptPath, consumerScript);

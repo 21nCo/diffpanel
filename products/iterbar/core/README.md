@@ -1,0 +1,43 @@
+# iterbar
+
+Versioned (v1) contracts shared by every Iterbar package: zod schemas and
+TypeScript types for feedback, the page variants registry, the local daemon's
+HTTP and WebSocket messages, and the `.iterbar/` directory layout.
+
+```ts
+import { feedbackSchema, parseMessage } from "iterbar";
+
+const feedback = parseMessage(feedbackSchema, JSON.parse(text), "feedback");
+```
+
+The root export is browser-safe. Node.js path helpers for `.iterbar/` are
+available from `iterbar/node`:
+
+```ts
+import { feedbackRecordPath, iterbarPaths } from "iterbar/node";
+```
+
+## Versioning
+
+Every top-level message and file carries `schemaVersion: 1`. `parseMessage`
+rejects any other major version with `UnsupportedSchemaVersionError`
+(`code: "unsupported_schema_version"`) before checking the shape, and reports
+every other mismatch as `InvalidMessageError` (`code: "invalid_message"`).
+Unknown properties are dropped, so additive v1 fields are tolerated; breaking
+changes ship as a new major version.
+
+## Contents
+
+- **Feedback**: `feedbackSchema` (stored record with replies and status),
+  `feedbackDraftSchema` (what the bar sends), targets, source locations,
+  screenshot and evidence attachment references.
+- **Page registry**: `registrySnapshotSchema`, `variantSelectionSchema`,
+  `slotReportSchema`, the `window.__ITERBAR__` page API (`readPageApi`) and the
+  `iterbar` URL parameter codec.
+- **Daemon**: `daemonInfoSchema` (`daemon.json`), `storeLockSchema`, endpoint
+  table, request, response, error and WebSocket event schemas, and token
+  transport helpers.
+- **Layout**: `iterbarLayout` and, from `iterbar/node`, absolute path helpers
+  that refuse unsafe ids.
+
+Requires Node.js 22.13 or newer for the Node entry point.

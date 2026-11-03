@@ -4,5 +4,6 @@
   { "slug": "diffpanel-generation", "path": "products/diffpanel/generation", "name": "@diffpanel/generation" },
   { "slug": "diffpanel-git", "path": "products/diffpanel/git", "name": "@diffpanel/git" },
   { "slug": "diffpanel-presentation", "path": "products/diffpanel/presentation", "name": "@diffpanel/presentation" },
-  { "slug": "diffpanel-storage", "path": "products/diffpanel/storage", "name": "@diffpanel/storage" }
+  { "slug": "diffpanel-storage", "path": "products/diffpanel/storage", "name": "@diffpanel/storage" },
+  { "slug": "iterbar", "path": "products/iterbar/core", "name": "iterbar" }
 ]
