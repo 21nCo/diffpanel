@@ -1,4 +1,4 @@
-import { isAbsolute, join, normalize } from "node:path";
+import { isAbsolute, join, normalize, sep } from "node:path";
 import { IterbarContractError } from "./errors.js";
 import type { AttachmentRef } from "./feedback.js";
 import { attachmentFileName, feedbackDirectorySegments, iterbarLayout } from "./layout.js";
@@ -14,11 +14,21 @@ export interface IterbarPaths {
   readonly feedbackDirectory: string;
 }
 
+/**
+ * On Windows, `isAbsolute` also accepts drive-relative roots such as `\work\app`, which each process
+ * resolves against its own current drive. Only drive-qualified (`C:\`) and UNC (`\\server\share`)
+ * roots name the same directory everywhere.
+ */
+function isQualifiedRoot(projectRoot: string): boolean {
+  if (!isAbsolute(projectRoot)) return false;
+  return sep === "/" || /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/.test(projectRoot);
+}
+
 function checkedRoot(projectRoot: string): string {
-  if (typeof projectRoot !== "string" || !projectRoot || projectRoot.includes("\0") || !isAbsolute(projectRoot)) {
+  if (typeof projectRoot !== "string" || !projectRoot || projectRoot.includes("\0") || !isQualifiedRoot(projectRoot)) {
     throw new IterbarContractError(
       "invalid_project_root",
-      `Project root ${JSON.stringify(projectRoot)} must be an absolute path`,
+      `Project root ${JSON.stringify(projectRoot)} must be an absolute path (drive-qualified or UNC on Windows)`,
     );
   }
   return normalize(projectRoot);

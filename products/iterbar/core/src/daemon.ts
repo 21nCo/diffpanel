@@ -115,7 +115,10 @@ export const statusRequestSchema = z.object({
 /** Response of `GET /slots`: the latest report per page URL. */
 export const slotListResponseSchema = z.object({
   schemaVersion: schemaVersionSchema,
-  pages: z.array(slotReportSchema),
+  pages: z.array(slotReportSchema).refine(
+    (pages) => new Set(pages.map((page) => page.pageUrl)).size === pages.length,
+    "page URLs must be unique",
+  ),
 });
 
 export const daemonErrorCodeSchema = z.enum([

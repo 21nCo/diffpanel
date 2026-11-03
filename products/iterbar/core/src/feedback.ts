@@ -28,14 +28,24 @@ export const boundingBoxSchema = z.object({
   height: z.number().nonnegative(),
 });
 
+// Control characters and the Unicode line and paragraph separators, none of which a source path needs
+// and which `.` in the `data-iterbar-src` parser does not match.
+// eslint-disable-next-line no-control-regex
+const PATH_FORBIDDEN_CHARACTERS = /[\u0000-\u001f\u007f\u2028\u2029]/;
+
 function isRepoRelativePath(value: string): boolean {
   if (value.startsWith("/") || value.includes("\\") || /^[A-Za-z]:/.test(value)) return false;
+  if (PATH_FORBIDDEN_CHARACTERS.test(value)) return false;
   return value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
 }
 
-/** Where an element was written. Line and column are 1-based; the path is relative to the project root, with `/` separators. */
+/**
+ * Where an element was written. Line and column are 1-based; the path is relative to the project root, with
+ * `/` separators and no control characters, so every valid location round-trips through `data-iterbar-src`.
+ */
 export const sourceLocationSchema = z.object({
-  path: z.string().min(1).max(1024).refine(isRepoRelativePath, "must be a project-relative path without '.' or '..' segments"),
+  path: z.string().min(1).max(1024)
+    .refine(isRepoRelativePath, "must be a project-relative path without '.' or '..' segments or control characters"),
   line: z.number().int().positive(),
   column: z.number().int().positive(),
 });
@@ -90,7 +100,9 @@ export const replyAuthorSchema = z.object({
   name: z.string().min(1).max(100).nullable(),
 });
 
-const nonBlankText = z.string().max(20_000).refine((text) => text.trim().length > 0, "must not be blank");
+const isNotBlank = (text: string) => text.trim().length > 0;
+
+const nonBlankText = z.string().max(20_000).refine(isNotBlank, "must not be blank");
 
 export const replySchema = z.object({
   id: idSchema,
@@ -99,7 +111,7 @@ export const replySchema = z.object({
   createdAt: timestampSchema,
 });
 
-const screenshotUnavailableReasonSchema = z.string().min(1).max(500).nullable();
+const screenshotUnavailableReasonSchema = z.string().max(500).refine(isNotBlank, "must not be blank").nullable();
 
 /** Fields shared by a feedback draft and a stored feedback record. */
 const contentFields = {

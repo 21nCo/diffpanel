@@ -19,7 +19,9 @@ import { feedbackRecordPath, iterbarPaths } from "iterbar/node";
 
 ## Versioning
 
-Every top-level message and file carries `schemaVersion: 1`. `parseMessage`
+Every top-level protocol message and schema-backed JSON file (`daemon.json`,
+`store.lock`, `feedback.json`) carries `schemaVersion: 1`; `.gitignore`,
+temporary files and attachment contents are not versioned. `parseMessage`
 rejects any other major version with `UnsupportedSchemaVersionError`
 (`code: "unsupported_schema_version"`) before checking the shape, and reports
 every other mismatch as `InvalidMessageError` (`code: "invalid_message"`).

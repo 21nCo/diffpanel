@@ -58,10 +58,13 @@ const slotStatesSchema = z.array(slotStateSchema).max(256).refine(
   "slot names must be unique",
 );
 
-/** A selection the registry could not honour and replaced with the slot's default. */
+/**
+ * A selection the registry could not honour. A `url` or `storage` selection is replaced with the slot's
+ * default; an `api` selection (from {@link IterbarPageApi.select}) leaves the slot unchanged.
+ */
 export const registryWarningSchema = z.object({
   code: z.enum(["unknown_slot", "unknown_version", "invalid_selection"]),
-  source: z.enum(["url", "storage"]),
+  source: z.enum(["url", "storage", "api"]),
   /** The raw value as it appeared in the source; not necessarily a valid name. */
   value: z.string().max(1024),
   message: z.string().min(1).max(500),
@@ -100,7 +103,7 @@ export type SlotReport = z.infer<typeof slotReportSchema>;
 export interface IterbarPageApi {
   readonly schemaVersion: typeof SCHEMA_VERSION;
   getSnapshot(): RegistrySnapshot;
-  /** Switches a slot in place. Unknown slots or versions are reported as registry warnings, not thrown. */
+  /** Switches a slot in place. Unknown slots or versions are reported as `source: "api"` registry warnings, not thrown. */
   select(selection: VariantSelection): void;
   /** Calls `listener` with a new snapshot after every change; returns the unsubscribe function. */
   subscribe(listener: (snapshot: RegistrySnapshot) => void): () => void;
@@ -132,7 +135,10 @@ export interface ParsedVariantParam {
   readonly invalid: readonly string[];
 }
 
-/** Parses `slot:version,slot:version`. Never throws; malformed entries are returned in `invalid`. */
+/**
+ * Parses `slot:version,slot:version`. Never throws. Surrounding whitespace around a well-formed entry is
+ * ignored, as are blank entries; malformed entries are returned in `invalid` exactly as they appeared.
+ */
 export function parseVariantParam(value: string | null | undefined): ParsedVariantParam {
   const selections = new Map<string, ActiveVariant>();
   const invalid: string[] = [];
@@ -143,7 +149,7 @@ export function parseVariantParam(value: string | null | undefined): ParsedVaria
     const slot = separator === -1 ? "" : trimmed.slice(0, separator);
     const version = separator === -1 ? "" : trimmed.slice(separator + 1);
     if (!isVariantName(slot) || !isVariantName(version)) {
-      invalid.push(trimmed);
+      invalid.push(entry);
       continue;
     }
     selections.delete(slot);

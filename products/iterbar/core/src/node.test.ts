@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { attachmentFileName, iterbarLayout } from "./index.js";
+import { type AttachmentRef, attachmentFileName, iterbarLayout } from "./index.js";
 import { attachmentPath, feedbackRecordPath, iterbarPaths } from "./node.js";
 
 const root = join("/", "work", "app");
@@ -27,6 +27,22 @@ describe("iterbar/node paths", () => {
     for (const id of ["..", "../fb", "fb/x", ".hidden", "", "fb\\x"]) {
       expect(() => feedbackRecordPath(root, id)).toThrow(expect.objectContaining({ code: "invalid_path_segment" }));
       expect(() => attachmentPath(root, "fb_0001", { id, kind: "evidence" }))
+        .toThrow(expect.objectContaining({ code: "invalid_path_segment" }));
+    }
+  });
+
+  it("rejects inherited property names as attachment kinds", () => {
+    for (const kind of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+      const attachment = { id: "at_1", kind } as unknown as Pick<AttachmentRef, "id" | "kind">;
+      expect(() => attachmentFileName(attachment), kind).toThrow(TypeError);
+      expect(() => attachmentPath(root, "fb_0001", attachment), kind).toThrow(TypeError);
+    }
+  });
+
+  it("refuses ids that alias by case or name a Windows device", () => {
+    for (const id of ["FB_0001", "con", "nul", "com1"]) {
+      expect(() => feedbackRecordPath(root, id), id).toThrow(expect.objectContaining({ code: "invalid_path_segment" }));
+      expect(() => attachmentPath(root, "fb_0001", { id, kind: "screenshot" }), id)
         .toThrow(expect.objectContaining({ code: "invalid_path_segment" }));
     }
   });

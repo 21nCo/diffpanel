@@ -74,7 +74,8 @@ export type ParseResult<T> =
  */
 export function assertSupportedSchemaVersion(input: unknown, label = "message"): void {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return;
-  if (!Object.hasOwn(input, "schemaVersion")) return;
+  // `in`, not an own-property check: the schema reads inherited properties too, so the version check must.
+  if (!("schemaVersion" in input)) return;
   const version = (input as { schemaVersion?: unknown }).schemaVersion;
   if (typeof version === "number" && Number.isSafeInteger(version) && version >= 1
     && !SUPPORTED_SCHEMA_VERSIONS.includes(version)) {

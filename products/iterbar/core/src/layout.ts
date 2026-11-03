@@ -36,9 +36,12 @@ const attachmentExtensions = Object.freeze({ screenshot: ".png", evidence: ".jso
 
 /** File name of an attachment inside its feedback item's `attachments/` directory. */
 export function attachmentFileName(attachment: Pick<AttachmentRef, "id" | "kind">): string {
-  const extension = attachmentExtensions[attachment.kind];
-  if (!extension) throw new TypeError(`Unknown attachment kind ${JSON.stringify(attachment.kind)}`);
-  return `${assertSafeId(attachment.id, "attachment id")}${extension}`;
+  const { kind } = attachment;
+  // Own properties only: inherited names such as `__proto__` or `toString` are not attachment kinds.
+  if (typeof kind !== "string" || !Object.hasOwn(attachmentExtensions, kind)) {
+    throw new TypeError(`Unknown attachment kind ${JSON.stringify(kind)}`);
+  }
+  return `${assertSafeId(attachment.id, "attachment id")}${attachmentExtensions[kind]}`;
 }
 
 /** Path segments of a feedback item's directory, relative to the project root. */

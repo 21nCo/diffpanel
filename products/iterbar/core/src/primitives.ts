@@ -4,20 +4,25 @@ import { IterbarContractError, SCHEMA_VERSION } from "./errors.js";
 /** `schemaVersion: 1`, carried by every top-level Iterbar message and file. */
 export const schemaVersionSchema = z.literal(SCHEMA_VERSION);
 
-const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+/**
+ * Lowercase only, so two valid ids never name the same directory on a case-insensitive filesystem, and
+ * never a Windows device name (`con`, `nul`, `com1`, ...), which Windows reserves with any extension.
+ */
+const ID_PATTERN = /^(?!(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$)[a-z0-9][a-z0-9_-]{0,127}$/;
 
-/** True when `value` is a valid record id: safe to use as a single path segment or URL segment. */
+/** True when `value` is a valid record id: safe to use as a single path segment or URL segment on every OS. */
 export function isSafeId(value: string): boolean {
   return ID_PATTERN.test(value);
 }
 
 /**
  * Feedback, reply and attachment ids. They name directories and files under `.iterbar/` and URL path
- * segments, so they are restricted to 1-128 letters, digits, `_` and `-`, starting with a letter or digit.
+ * segments, so they are restricted to 1-128 lowercase letters, digits, `_` and `-`, starting with a letter
+ * or digit, and must not be a Windows device name.
  */
 export const idSchema = z.string().regex(
   ID_PATTERN,
-  "must be 1-128 letters, digits, '_' or '-', starting with a letter or digit",
+  "must be 1-128 lowercase letters, digits, '_' or '-', starting with a letter or digit, and not a Windows device name",
 );
 
 /** Throws `invalid_path_segment` unless `value` is a {@link isSafeId safe id}. */
@@ -72,8 +77,9 @@ export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "must be a lowerc
 /** A positive process id. */
 export const pidSchema = z.number().int().positive();
 
-/** True for a POSIX absolute path or a Windows drive or UNC absolute path. */
+/** True for a POSIX absolute path or a Windows drive or UNC absolute path, without NUL characters. */
 export function isAbsolutePath(value: string): boolean {
+  if (value.includes("\0")) return false;
   return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
 }
 

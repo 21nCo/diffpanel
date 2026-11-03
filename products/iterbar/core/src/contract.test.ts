@@ -3,7 +3,10 @@ import { z } from "zod";
 import * as api from "./index.js";
 import {
   bearerAuthorization,
+  absolutePathSchema,
+  assertSafeId,
   daemonEventSchema,
+  daemonInfoSchema,
   daemonPath,
   feedbackListResponseSchema,
   feedbackSchema,
@@ -20,6 +23,7 @@ import {
   parseVariantParam,
   readPageApi,
   safeParseMessage,
+  sourceLocationSchema,
   statusRequestSchema,
   tokenFromAuthorization,
   tokenFromWebSocketProtocols,
@@ -126,6 +130,7 @@ const cases: Case[] = [
   { schema: "sha256Schema", valid: digest, invalid: digest.slice(1), path: "", message: /SHA-256/ },
   { schema: "pidSchema", valid: 4242, invalid: 0, path: "" },
   { schema: "absolutePathSchema", valid: "C:\\Users\\dev\\app", invalid: "Users/dev/app", path: "", message: /absolute path/ },
+  { schema: "absolutePathSchema", variant: "NUL", valid: "/Users/dev/app", invalid: "/Users/dev\0app", path: "", message: /absolute path/ },
   // registry
   { schema: "activeVariantSchema", valid: { slot: "pricing", version: "v2" }, invalid: { slot: "pricing", version: "" }, path: "version" },
   {
@@ -137,6 +142,13 @@ const cases: Case[] = [
   },
   { schema: "slotStateSchema", valid: slotState, invalid: { ...slotState, activeVersion: "v3" }, path: "activeVersion" },
   { schema: "registryWarningSchema", valid: warning, invalid: { ...warning, source: "cookie" }, path: "source" },
+  {
+    schema: "registryWarningSchema",
+    variant: "api selection",
+    valid: { code: "unknown_slot", source: "api", value: "pricing", message: "No slot pricing on this page" },
+    invalid: { code: "unknown_slot", source: "window", value: "pricing", message: "No slot pricing on this page" },
+    path: "source",
+  },
   {
     schema: "registrySnapshotSchema",
     valid: snapshot,
@@ -161,6 +173,14 @@ const cases: Case[] = [
     invalid: { ...sourceLocation, path: "src/../../etc/passwd" },
     path: "path",
     message: /project-relative/,
+  },
+  {
+    schema: "sourceLocationSchema",
+    variant: "line break",
+    valid: { ...sourceLocation, path: "src/a:b c/ü.tsx" },
+    invalid: { ...sourceLocation, path: "src/App\n.tsx" },
+    path: "path",
+    message: /control characters/,
   },
   { schema: "feedbackTargetSchema", valid: target, invalid: { ...target, selector: "" }, path: "selector" },
   { schema: "screenshotAttachmentSchema", valid: screenshot, invalid: { ...screenshot, mediaType: "image/jpeg" }, path: "mediaType" },
@@ -208,6 +228,14 @@ const cases: Case[] = [
   },
   {
     schema: "feedbackDraftSchema",
+    variant: "comment, blank unavailable reason",
+    valid: { ...draft, screenshotUnavailableReason: null },
+    invalid: { ...draft, screenshotUnavailableReason: "   " },
+    path: "screenshotUnavailableReason",
+    message: /must not be blank/,
+  },
+  {
+    schema: "feedbackDraftSchema",
     variant: "choose_variant",
     valid: draftChoice,
     invalid: { ...draftChoice, choice: { slot: "pricing" } },
@@ -227,6 +255,14 @@ const cases: Case[] = [
     valid: chooseVariant,
     invalid: { ...chooseVariant, choice: undefined },
     path: "choice",
+  },
+  {
+    schema: "feedbackSchema",
+    variant: "choose_variant, blank unavailable reason",
+    valid: { ...chooseVariant, screenshotUnavailableReason: "Page was hidden" },
+    invalid: { ...chooseVariant, screenshotUnavailableReason: "\t\n" },
+    path: "screenshotUnavailableReason",
+    message: /must not be blank/,
   },
   // daemon
   { schema: "daemonInfoSchema", valid: daemonInfo, invalid: { ...daemonInfo, host: "0.0.0.0" }, path: "host" },
@@ -278,6 +314,14 @@ const cases: Case[] = [
     valid: { schemaVersion: 1, pages: [slotReport] },
     invalid: { schemaVersion: 1, pages: [{ ...slotReport, reportedAt: undefined }] },
     path: "pages.0.reportedAt",
+  },
+  {
+    schema: "slotListResponseSchema",
+    variant: "one report per page URL",
+    valid: { schemaVersion: 1, pages: [slotReport, { ...slotReport, pageUrl: "http://localhost:5173/" }] },
+    invalid: { schemaVersion: 1, pages: [slotReport, { ...slotReport, reportedAt: updatedAt }] },
+    path: "pages",
+    message: /page URLs must be unique/,
   },
   { schema: "daemonErrorCodeSchema", valid: "store_locked", invalid: "teapot", path: "" },
   {
@@ -414,6 +458,19 @@ describe("schema versions", () => {
     }
   });
 
+  it("reads an inherited schemaVersion the same way the schema does", () => {
+    const inheriting = (schemaVersion: unknown) => Object.assign(Object.create({ schemaVersion }), { status: "open" });
+    const future = safeParseMessage(statusRequestSchema, inheriting(2), label);
+    expect(future.success || future.error.code).toBe("unsupported_schema_version");
+    expect(parseMessage(statusRequestSchema, inheriting(1))).toEqual({ schemaVersion: 1, status: "open" });
+    const malformed = safeParseMessage(statusRequestSchema, inheriting("1"), label);
+    expect(malformed.success || malformed.error.code).toBe("invalid_message");
+    class FutureRegistry {
+      get schemaVersion() { return 2; }
+    }
+    expect(() => readPageApi({ [PAGE_API_GLOBAL]: new FutureRegistry() })).toThrow(UnsupportedSchemaVersionError);
+  });
+
   it("drops unknown v1 properties so additive fields are tolerated", () => {
     const parsed = parseMessage(statusRequestSchema, { schemaVersion: 1, status: "done", note: "later field" });
     expect(parsed).toEqual({ schemaVersion: 1, status: "done" });
@@ -449,6 +506,30 @@ describe("feedback invariants", () => {
       expect(parseSourceLocation(value)).toBeNull();
     }
   });
+
+  it("round-trips every source location the schema accepts", () => {
+    const codePoints = [...Array.from({ length: 0xa0 }, (_, index) => index), 0x2028, 0x2029, 0xfeff, 0x1f600];
+    for (const codePoint of codePoints) {
+      const location = { path: `src/a${String.fromCodePoint(codePoint)}b.tsx`, line: 7, column: 3 };
+      if (!sourceLocationSchema.safeParse(location).success) continue;
+      expect(parseSourceLocation(formatSourceLocation(location)), `U+${codePoint.toString(16)}`).toEqual(location);
+    }
+    for (const character of ["\r", "\n", "\u2028", "\u2029", "\0"]) {
+      expect(sourceLocationSchema.safeParse({ ...sourceLocation, path: `src/a${character}b.tsx` }).success).toBe(false);
+    }
+  });
+
+  it("rejects a blank screenshotUnavailableReason on every feedback shape, keeping null and real reasons", () => {
+    for (const [schema, base] of [
+      [feedbackSchema, chooseVariant],
+      [api.feedbackDraftSchema, draft],
+      [api.feedbackDraftSchema, draftChoice],
+    ] as const) {
+      expect(safeParseMessage(schema, { ...base, screenshotUnavailableReason: " " }).success).toBe(false);
+      expect(safeParseMessage(schema, { ...base, screenshotUnavailableReason: null }).success).toBe(true);
+      expect(safeParseMessage(schema, { ...base, screenshotUnavailableReason: "Capture timed out" }).success).toBe(true);
+    }
+  });
 });
 
 describe("variant URL parameter", () => {
@@ -458,6 +539,13 @@ describe("variant URL parameter", () => {
       invalid: ["bad", "x:y:z", ":v1"],
     });
     expect(parseVariantParam(null)).toEqual({ selections: [], invalid: [] });
+  });
+
+  it("keeps malformed entries verbatim and ignores blank ones", () => {
+    expect(parseVariantParam(" bad , \t,hero: b ,pricing:v2 ")).toEqual({
+      selections: [{ slot: "pricing", version: "v2" }],
+      invalid: [" bad ", "hero: b "],
+    });
   });
 
   it("formats selections and refuses names that would break the format", () => {
@@ -478,6 +566,30 @@ describe("page API", () => {
   it("rejects a registry from another major version or without the v1 methods", () => {
     expect(() => readPageApi({ [PAGE_API_GLOBAL]: { ...api, schemaVersion: 2 } })).toThrow(UnsupportedSchemaVersionError);
     expect(() => readPageApi({ [PAGE_API_GLOBAL]: { ...api, subscribe: undefined } })).toThrow(/subscribe/);
+  });
+});
+
+describe("portable ids", () => {
+  const unportable = ["fb_A", "FB_0001", "con", "CON", "nul", "aux", "prn", "com1", "lpt9", "com0"];
+
+  it("rejects ids that alias on case-insensitive filesystems or name a Windows device", () => {
+    for (const id of unportable) {
+      expect(safeParseMessage(api.idSchema, id).success, id).toBe(false);
+      expect(() => assertSafeId(id), id).toThrow(expect.objectContaining({ code: "invalid_path_segment" }));
+      expect(() => daemonPath("getFeedback", { feedbackId: id }), id).toThrow(IterbarContractError);
+      expect(() => api.attachmentFileName({ id, kind: "screenshot" }), id).toThrow(IterbarContractError);
+      expect(safeParseMessage(feedbackSchema, { ...comment, id }).success, id).toBe(false);
+    }
+    for (const id of ["console", "com10", "nul_1", "lpt", "fb_0001"]) expect(assertSafeId(id)).toBe(id);
+  });
+
+  it("rejects a daemon project root containing NUL", () => {
+    expect(safeParseMessage(absolutePathSchema, "C:\\app\0x").success).toBe(false);
+    const result = safeParseMessage(daemonInfoSchema, { ...daemonInfo, projectRoot: "/Users/dev\0/app" }, label);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      for (const issue of (result.error as InvalidMessageError).issues) expect(issueOnPath(issue, "projectRoot"), issue).toBe(true);
+    }
   });
 });
 
