@@ -1,0 +1,50 @@
+{
+  "name": "iterbar",
+  "version": "0.0.1",
+  "description": "Versioned feedback, page and daemon protocol contracts for Iterbar.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js",
+      "default": "./dist/node.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/21nCo/devroll.git",
+    "directory": "products/iterbar/core"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/node.ts --format esm --dts --sourcemap --clean",
+    "clean": "rm -rf dist coverage",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.11"
+  }
+}

@@ -9,6 +9,7 @@ on:
       - 'diffpanel-git-v*.*.*'
       - 'diffpanel-presentation-v*.*.*'
       - 'diffpanel-storage-v*.*.*'
+      - 'iterbar-v*.*.*'
   workflow_dispatch:
     inputs:
       release_tag:
