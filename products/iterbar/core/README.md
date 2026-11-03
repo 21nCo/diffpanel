@@ -40,9 +40,13 @@ changes ship as a new major version.
   table, request, response, error and WebSocket event schemas, and token
   transport helpers.
 - **Layout**: `iterbarLayout` and, from `iterbar/node`, absolute path helpers
-  that refuse unsafe ids. They accept the same project roots as
-  `absolutePathSchema`: POSIX absolute, or on Windows drive-qualified (`C:\`)
-  or full UNC (`\\server\share`) roots only, whose server and share names
-  avoid the characters Windows forbids (`< > : " | ? *` and controls).
+  that refuse unsafe ids. A project root is valid for `absolutePathSchema`
+  when it is at most `MAX_ABSOLUTE_PATH_LENGTH` (4096) characters and POSIX
+  absolute, or on Windows drive-qualified (`C:\`) or full UNC
+  (`\\server\share`), whose server and share names avoid the characters
+  Windows forbids (`< > : " | ? *` and controls). The helpers apply that rule
+  to both the given root and its normalized form, so every `projectRoot` they
+  return passes `absolutePathSchema`. They reject a schema-valid root whose
+  normalized form exceeds the bound (Windows appends `\` to a bare UNC share).
 
 Requires Node.js 22.13 or newer for the Node entry point.

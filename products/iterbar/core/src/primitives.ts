@@ -77,6 +77,9 @@ export const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/, "must be a lowerc
 /** A positive process id. */
 export const pidSchema = z.number().int().positive();
 
+/** The longest project root, in UTF-16 code units, that `absolutePathSchema` and `iterbar/node` accept. */
+export const MAX_ABSOLUTE_PATH_LENGTH = 4096;
+
 const POSIX_ROOT = /^\/(?![\\/])/;
 /**
  * A UNC server or share name: not empty, `.` or `..`, and free of the characters Windows forbids in names
@@ -93,10 +96,12 @@ const WINDOWS_ROOT = new RegExp(String.raw`^(?:[A-Za-z]:[\\/]|[\\/]{2}${UNC_NAME
  * paths (`\\?\C:\app`, `\\.\pipe\x`) are rejected too; use the equivalent drive or UNC path. A POSIX path may
  * not start with `//` or `/\`, which Windows reads as UNC.
  *
+ * The path must also be at most {@link MAX_ABSOLUTE_PATH_LENGTH} characters long.
+ *
  * `platform` limits the check to that platform's forms, as `iterbar/node` does; omit it to accept either.
  */
 export function isAbsolutePath(value: string, platform?: "posix" | "win32"): boolean {
-  if (typeof value !== "string" || value.includes("\0")) return false;
+  if (typeof value !== "string" || value.length > MAX_ABSOLUTE_PATH_LENGTH || value.includes("\0")) return false;
   if (platform !== "win32" && POSIX_ROOT.test(value)) return true;
   return platform !== "posix" && WINDOWS_ROOT.test(value);
 }
@@ -104,6 +109,7 @@ export function isAbsolutePath(value: string, platform?: "posix" | "win32"): boo
 /** An absolute filesystem path that names the same directory in every process; see {@link isAbsolutePath}. */
 export const absolutePathSchema = z
   .string()
-  .min(1)
-  .max(4096)
-  .refine((value) => isAbsolutePath(value), String.raw`must be an absolute path: POSIX, drive-qualified or UNC (\\server\share)`);
+  .refine(
+    (value) => isAbsolutePath(value),
+    String.raw`must be an absolute path of at most ${MAX_ABSOLUTE_PATH_LENGTH} characters: POSIX, drive-qualified or UNC (\\server\share)`,
+  );

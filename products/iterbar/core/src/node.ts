@@ -2,7 +2,7 @@ import { join, normalize, sep } from "node:path";
 import { IterbarContractError } from "./errors.js";
 import type { AttachmentRef } from "./feedback.js";
 import { attachmentFileName, feedbackDirectorySegments, iterbarLayout } from "./layout.js";
-import { isAbsolutePath } from "./primitives.js";
+import { isAbsolutePath, MAX_ABSOLUTE_PATH_LENGTH } from "./primitives.js";
 
 /** Absolute paths of the fixed entries in a project's `.iterbar/` directory. */
 export interface IterbarPaths {
@@ -19,8 +19,10 @@ const platform = sep === "\\" ? "win32" : "posix";
 
 /**
  * Applies the same root rule as `absolutePathSchema` (see `isAbsolutePath`), limited to this platform's forms,
- * before and after normalization: on Windows only drive-qualified (`C:\`) and full UNC (`\\server\share`) roots
- * name the same directory in every process, so the returned paths never depend on the current drive.
+ * to both the given root and its normalized form: on Windows only drive-qualified (`C:\`) and full UNC
+ * (`\\server\share`) roots name the same directory in every process, so the returned paths never depend on the
+ * current drive. Both forms must also fit `MAX_ABSOLUTE_PATH_LENGTH`, so every returned `projectRoot` passes
+ * `absolutePathSchema`, even when normalization lengthens a root (Windows appends `\` to a bare UNC share).
  */
 function checkedRoot(projectRoot: string): string {
   if (isAbsolutePath(projectRoot, platform)) {
@@ -29,7 +31,7 @@ function checkedRoot(projectRoot: string): string {
   }
   throw new IterbarContractError(
     "invalid_project_root",
-    String.raw`Project root ${JSON.stringify(projectRoot)} must be an absolute path (drive-qualified or \\server\share on Windows)`,
+    String.raw`Project root ${JSON.stringify(projectRoot)} must be an absolute path of at most ${MAX_ABSOLUTE_PATH_LENGTH} characters (drive-qualified or \\server\share on Windows)`,
   );
 }
 

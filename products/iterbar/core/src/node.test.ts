@@ -1,12 +1,21 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { type AttachmentRef, absolutePathSchema, attachmentFileName, iterbarLayout } from "./index.js";
+import { type AttachmentRef, absolutePathSchema, attachmentFileName, iterbarLayout, MAX_ABSOLUTE_PATH_LENGTH } from "./index.js";
 import { attachmentPath, attachmentsDirectoryPath, feedbackDirectoryPath, feedbackRecordPath, iterbarPaths } from "./node.js";
 
 // POSIX fixtures: run against Node's posix path implementation on every host (node.win32.test.ts covers Windows).
 vi.mock("node:path", async () => (await vi.importActual<typeof import("node:path")>("node:path")).posix);
 
 const root = join("/", "work", "app");
+
+/** Every `iterbar/node` helper that takes a project root, so each one is held to the same root rule. */
+const helpers: Record<string, (projectRoot: string) => string> = {
+  iterbarPaths: (projectRoot) => iterbarPaths(projectRoot).daemonFile,
+  feedbackDirectoryPath: (projectRoot) => feedbackDirectoryPath(projectRoot, "fb_0001"),
+  feedbackRecordPath: (projectRoot) => feedbackRecordPath(projectRoot, "fb_0001"),
+  attachmentsDirectoryPath: (projectRoot) => attachmentsDirectoryPath(projectRoot, "fb_0001"),
+  attachmentPath: (projectRoot) => attachmentPath(projectRoot, "fb_0001", { id: "at_1", kind: "screenshot" }),
+};
 
 describe("iterbar/node paths", () => {
   it("places every fixed entry inside the project's .iterbar directory", () => {
@@ -68,5 +77,23 @@ describe("iterbar/node paths", () => {
       expect(absolutePathSchema.safeParse(paths.projectRoot).success, projectRoot).toBe(true);
       expect(paths.daemonFile.startsWith("/") && !paths.daemonFile.startsWith("//"), projectRoot).toBe(true);
     }
+  });
+
+  it("bounds both the given root and its normalized form at MAX_ABSOLUTE_PATH_LENGTH characters", () => {
+    const longest = `/work/${"a".repeat(MAX_ABSOLUTE_PATH_LENGTH - 6)}`;
+    expect(longest).toHaveLength(MAX_ABSOLUTE_PATH_LENGTH);
+    expect(iterbarPaths(longest).projectRoot).toBe(longest);
+    expect(absolutePathSchema.safeParse(iterbarPaths(longest).projectRoot).success).toBe(true);
+    // Too long as given, or too long as given although it normalizes to the short root "/p".
+    const shrinking = `/p${"/.".repeat(2099)}`;
+    expect(join(shrinking)).toBe("/p");
+    for (const projectRoot of [`${longest}b`, `${longest}/`, shrinking]) {
+      expect(projectRoot.length).toBeGreaterThan(MAX_ABSOLUTE_PATH_LENGTH);
+      for (const [name, helper] of Object.entries(helpers)) {
+        expect(() => helper(projectRoot), `${name}(${projectRoot.length} chars)`)
+          .toThrow(expect.objectContaining({ code: "invalid_project_root" }));
+      }
+    }
+    for (const helper of Object.values(helpers)) expect(helper(longest).startsWith(`${longest}/.iterbar/`)).toBe(true);
   });
 });

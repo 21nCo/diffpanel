@@ -14,6 +14,7 @@ import {
   formatVariantParam,
   InvalidMessageError,
   isAbsolutePath,
+  MAX_ABSOLUTE_PATH_LENGTH,
   isIterbarContractError,
   IterbarContractError,
   MAX_ATTACHMENT_BYTES,
@@ -620,6 +621,27 @@ describe("portable ids", () => {
     expect(isAbsolutePath("/app", "win32")).toBe(false);
     expect([isAbsolutePath("/app", "posix"), isAbsolutePath("C:\\app", "win32"), isAbsolutePath("\\\\s\\sh", "win32")])
       .toEqual([true, true, true]);
+  });
+
+  it("bounds a project root at MAX_ABSOLUTE_PATH_LENGTH characters in every accepted form", () => {
+    expect(MAX_ABSOLUTE_PATH_LENGTH).toBe(4096);
+    const padded = (prefix: string, length: number) => prefix + "a".repeat(length - prefix.length);
+    for (const prefix of ["/", "C:\\", "c:/", "\\\\server\\share\\", "//server/share/"]) {
+      const longest = padded(prefix, MAX_ABSOLUTE_PATH_LENGTH);
+      const tooLong = padded(prefix, MAX_ABSOLUTE_PATH_LENGTH + 1);
+      expect(isAbsolutePath(longest), prefix).toBe(true);
+      expect(isAbsolutePath(tooLong), prefix).toBe(false);
+      expect(safeParseMessage(absolutePathSchema, longest).success, prefix).toBe(true);
+      expect(safeParseMessage(daemonInfoSchema, { ...daemonInfo, projectRoot: longest }, label).success, prefix).toBe(true);
+      expect(safeParseMessage(absolutePathSchema, tooLong).success, prefix).toBe(false);
+      const result = safeParseMessage(daemonInfoSchema, { ...daemonInfo, projectRoot: tooLong }, label);
+      expect(result.success, prefix).toBe(false);
+      if (!result.success) {
+        const { issues } = result.error as InvalidMessageError;
+        expect(issues.length, prefix).toBeGreaterThan(0);
+        for (const issue of issues) expect(issueOnPath(issue, "projectRoot"), issue).toBe(true);
+      }
+    }
   });
 
   it("rejects a daemon project root containing NUL", () => {

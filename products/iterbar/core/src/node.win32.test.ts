@@ -1,6 +1,6 @@
 import { win32 } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { absolutePathSchema } from "./index.js";
+import { absolutePathSchema, MAX_ABSOLUTE_PATH_LENGTH } from "./index.js";
 
 // Run the Node path helpers against Node's own win32 path implementation, as they behave on Windows.
 vi.mock("node:path", async () => (await vi.importActual<typeof import("node:path")>("node:path")).win32);
@@ -118,5 +118,29 @@ describe("iterbar/node paths on Windows", () => {
         }
       }
     }
+  });
+
+  it("bounds both the given root and its normalized form at MAX_ABSOLUTE_PATH_LENGTH characters", () => {
+    const padded = (prefix: string, length: number) => prefix + "a".repeat(length - prefix.length);
+    for (const [prefix, root] of [["C:\\", "C:\\"], ["\\\\server\\share\\", "\\\\server\\share\\"]]) {
+      const longest = padded(prefix!, MAX_ABSOLUTE_PATH_LENGTH);
+      expect(iterbarPaths(longest).projectRoot).toBe(longest);
+      expectAccepted(longest, root!);
+      expectRejected(padded(prefix!, MAX_ABSOLUTE_PATH_LENGTH + 1));
+    }
+    // Over the bound as given, although it normalizes to the short root "C:\p".
+    const shrinking = `C:\\p${"\\.".repeat(2099)}`;
+    expect(win32.normalize(shrinking)).toBe("C:\\p");
+    expectRejected(shrinking);
+
+    // Windows appends a separator to a bare UNC share, so a schema-valid root of exactly the bound grows past it.
+    const bareShare = padded("\\\\server\\", MAX_ABSOLUTE_PATH_LENGTH);
+    expect(absolutePathSchema.safeParse(bareShare).success).toBe(true);
+    expect(win32.normalize(bareShare)).toHaveLength(MAX_ABSOLUTE_PATH_LENGTH + 1);
+    expectRejected(bareShare);
+    // One character shorter, the normalized root fits exactly and is accepted.
+    const fittingShare = bareShare.slice(0, -1);
+    expect(iterbarPaths(fittingShare).projectRoot).toHaveLength(MAX_ABSOLUTE_PATH_LENGTH);
+    expectAccepted(fittingShare, `${fittingShare}\\`);
   });
 });
