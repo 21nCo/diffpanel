@@ -33,8 +33,8 @@ afterEach(async () => {
   expect(unexpected.splice(0)).toEqual([]);
 });
 
-async function start(): Promise<RunningDaemon> {
-  const daemon = await startDaemon({ projectRoot: root, onError: (error) => unexpected.push(error) });
+async function start(now?: () => number): Promise<RunningDaemon> {
+  const daemon = await startDaemon({ projectRoot: root, onError: (error) => unexpected.push(error), ...(now ? { now } : {}) });
   running.push(daemon);
   return daemon;
 }
@@ -153,7 +153,8 @@ describe("feedback API", () => {
     expect(one).toMatchObject({ id: feedback.id, status: "done", replies: [{ text: "Made it larger." }] });
   });
 
-  it("refuses an attachment over 10 MiB with payload_too_large and stores nothing", async () => {
+  // Moves tens of MiB through the daemon.
+  it("refuses an attachment over 10 MiB with payload_too_large and stores nothing", { timeout: 30_000 }, async () => {
     const daemon = await start();
     const atCap = Buffer.from(`"${"a".repeat(MAX_ATTACHMENT_BYTES - 2)}"`);
     expect(atCap.byteLength).toBe(MAX_ATTACHMENT_BYTES);
@@ -174,7 +175,8 @@ describe("feedback API", () => {
     expect(evidence?.attachment.byteLength).toBe(MAX_ATTACHMENT_BYTES);
   });
 
-  it("refuses a body declared larger than the request cap before reading it", async () => {
+  // Moves tens of MiB through the daemon.
+  it("refuses a body declared larger than the request cap before reading it", { timeout: 30_000 }, async () => {
     const daemon = await start();
     const response = await send(daemon.info, {
       method: "POST",
@@ -319,6 +321,57 @@ describe("event stream", () => {
     expect(agentEvents.map((event) => event.type)).toEqual(["feedback.created", "feedback.updated", "feedback.updated", "slots.reported"]);
     expect(agentEvents[1]).toEqual(update);
     agent.close();
+  });
+
+  /** Every event up to a sentinel slot report published after the operations under test. */
+  async function eventsUntilSentinel(daemon: RunningDaemon, client: EventClient): Promise<DaemonEvent[]> {
+    const pageUrl = "http://localhost:5173/sentinel";
+    await postJson(daemon, "/slots", { schemaVersion: 1, pageUrl, reportedAt: "2026-11-03T10:00:00.000Z", slots: [] });
+    const received: DaemonEvent[] = [];
+    for (;;) {
+      const event = await client.next();
+      if (event.type === "slots.reported" && event.report.pageUrl === pageUrl) return received;
+      received.push(event);
+    }
+  }
+
+  it("pushes a status change whose timestamp equals the previous one", async () => {
+    // A wall clock that does not advance: every write lands in the same millisecond.
+    const frozen = Date.parse("2026-11-03T10:00:00.000Z");
+    const daemon = await start(() => frozen);
+    const bar = await events(daemon);
+    const created = JSON.parse((await create(daemon, { feedback: commentDraft, evidence: EVIDENCE })).text) as Feedback;
+    const changed = await postJson(daemon, `/feedback/${created.id}/status`, { schemaVersion: 1, status: "done" });
+    const feedback = (await changed.json()) as Feedback;
+    expect(feedback).toMatchObject({ status: "done", updatedAt: created.updatedAt });
+
+    const received = await eventsUntilSentinel(daemon, bar);
+    expect(received.map((event) => event.type)).toEqual(["feedback.created", "feedback.updated"]);
+    expect(received[1]).toMatchObject({ feedback: { id: created.id, status: "done" } });
+  });
+
+  it("pushes one update per committed status change under concurrent requests", async () => {
+    let now = Date.parse("2026-11-03T10:00:00.000Z");
+    const daemon = await start(() => (now += 1));
+    const bar = await events(daemon);
+    const created = JSON.parse((await create(daemon, { feedback: commentDraft, evidence: EVIDENCE })).text) as Feedback;
+    expect((await bar.next()).type).toBe("feedback.created");
+    const status = (value: string) => postJson(daemon, `/feedback/${created.id}/status`, { schemaVersion: 1, status: value });
+    const reply = { schemaVersion: 1, author: { kind: "agent", name: "Codex" }, text: "Looking." };
+
+    // Replies overlap requests that set the current status: only the replies are updates.
+    const overlapping = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+      index % 2 ? status("open") : postJson(daemon, `/feedback/${created.id}/replies`, reply)));
+    expect(overlapping.map((response) => response.status)).toEqual(Array(8).fill(200));
+    const afterReplies = await eventsUntilSentinel(daemon, bar);
+    expect(afterReplies).toHaveLength(4);
+    expect(afterReplies.every((event) => event.type === "feedback.updated" && event.feedback.status === "open")).toBe(true);
+
+    // Concurrent requests for the same new status commit one change, so exactly one update is pushed.
+    const same = await Promise.all(Array.from({ length: 6 }, () => status("done")));
+    expect(same.map((response) => response.status)).toEqual(Array(6).fill(200));
+    const afterStatus = await eventsUntilSentinel(daemon, bar);
+    expect(afterStatus.map((event) => event.type === "feedback.updated" && event.feedback.status)).toEqual(["done"]);
   });
 
   it("closes event streams with 1001 on shutdown", async () => {

@@ -62,7 +62,8 @@ async function startDev(): Promise<DevProcess & { info: DaemonInfo }> {
   return { ...dev, info };
 }
 
-describe.skipIf(process.platform === "win32")("iterbar dev", () => {
+// Each test spawns the built CLI, which a loaded machine can take seconds to start.
+describe.skipIf(process.platform === "win32")("iterbar dev", { timeout: 30_000 }, () => {
   it("serves the project until SIGTERM, then removes daemon.json and exits 0", async () => {
     const dev = await startDev();
     expect((await send(dev.info, { path: "/feedback", headers: bearer(dev.info.token) })).status).toBe(200);

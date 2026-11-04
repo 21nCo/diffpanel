@@ -17,7 +17,7 @@ import { authorize, authorizePreflight, isPreflight, OriginAllowList } from "./a
 import { removeDaemonFile, writeDaemonFile } from "./daemon-file.js";
 import { EventHub } from "./events.js";
 import { DaemonHttpError, rejectUpgrade, sendEmpty, sendError, toHttpError } from "./http.js";
-import { handleRoute, matchRoute, SlotRegistry } from "./routes.js";
+import { handleRoute, KeyedSerializer, matchRoute, SlotRegistry } from "./routes.js";
 
 /** How long in-flight requests get to finish on shutdown before their connections are closed. */
 const HTTP_SHUTDOWN_GRACE_MS = 2000;
@@ -27,6 +27,8 @@ export interface StartDaemonOptions {
   readonly projectRoot: string;
   /** Receives unexpected errors, which clients only see as `internal`. Defaults to writing them to stderr. */
   readonly onError?: (error: unknown) => void;
+  /** Wall clock in epoch milliseconds for the store's timestamps; defaults to `Date.now`. */
+  readonly now?: () => number;
 }
 
 export interface RunningDaemon {
@@ -67,15 +69,17 @@ class Daemon implements RunningDaemon {
   readonly #server: Server;
   readonly #store: FeedbackStore;
   readonly #events: EventHub;
+  readonly #upgrades: ReadonlySet<Duplex>;
   #closing: Promise<void> | undefined;
   #resolveClosed!: () => void;
 
-  constructor(info: DaemonInfo, server: Server, store: FeedbackStore, events: EventHub) {
+  constructor(info: DaemonInfo, server: Server, store: FeedbackStore, events: EventHub, upgrades: ReadonlySet<Duplex>) {
     this.info = info;
     this.url = `http://${DAEMON_HOST}:${info.port}`;
     this.#server = server;
     this.#store = store;
     this.#events = events;
+    this.#upgrades = upgrades;
     this.closed = new Promise((resolve) => {
       this.#resolveClosed = resolve;
     });
@@ -96,6 +100,9 @@ class Daemon implements RunningDaemon {
       this.#server.closeIdleConnections();
       const force = setTimeout(() => this.#server.closeAllConnections(), HTTP_SHUTDOWN_GRACE_MS);
       await this.#events.close();
+      // Upgrade sockets are outside the HTTP server's connection tracking; any still open (a refused upgrade
+      // whose peer has not read the response) is destroyed, so that shutdown never waits on a peer.
+      for (const socket of this.#upgrades) socket.destroy();
       await serverClosed;
       clearTimeout(force);
       // daemon.json goes before the lock, so a daemon that starts next never has its file removed by this one.
@@ -114,11 +121,14 @@ class Daemon implements RunningDaemon {
  */
 export async function startDaemon(options: StartDaemonOptions): Promise<RunningDaemon> {
   const onError = options.onError ?? defaultOnError;
-  const store = await openFeedbackStore(options.projectRoot);
+  const store = await openFeedbackStore(options.projectRoot, options.now ? { now: options.now } : {});
   const token = randomBytes(32).toString("hex");
   const origins = new OriginAllowList();
   const slots = new SlotRegistry();
+  const statusChanges = new KeyedSerializer();
   const events = new EventHub();
+  // Every socket handed over by an upgrade, until it closes.
+  const upgrades = new Set<Duplex>();
   // The port is known once the server listens; no request is handled before then.
   const policy: { port: number; token: string; origins: OriginAllowList } = { port: 0, token, origins };
   let daemon: Daemon | undefined;
@@ -143,7 +153,7 @@ export async function startDaemon(options: StartDaemonOptions): Promise<RunningD
         throw new DaemonHttpError(405, "invalid_request", "Method not allowed", { allow: route.allow.join(", ") });
       }
       await handleRoute(route.name, {
-        request, response, url: url as URL, params: route.params, headers: cors, store, origins, slots, events,
+        request, response, url: url as URL, params: route.params, headers: cors, store, origins, slots, events, statusChanges,
       });
     } catch (error) {
       const httpError = toHttpError(error);
@@ -157,6 +167,8 @@ export async function startDaemon(options: StartDaemonOptions): Promise<RunningD
   };
 
   const handleUpgrade = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
+    upgrades.add(socket);
+    socket.once("close", () => upgrades.delete(socket));
     const decision = authorize(request.headers, tokenFromWebSocketProtocols(request.headers["sec-websocket-protocol"]), policy);
     if (!decision.allowed) return rejectUpgrade(socket, decision.error, decision.headers);
     if (daemon?.isClosing) return rejectUpgrade(socket, shuttingDown(), decision.headers);
@@ -189,12 +201,13 @@ export async function startDaemon(options: StartDaemonOptions): Promise<RunningD
       startedAt: new Date().toISOString(),
     }, "daemon info");
     await writeDaemonFile(store.paths, info);
-    daemon = new Daemon(info, server, store, events);
+    daemon = new Daemon(info, server, store, events, upgrades);
     return daemon;
   } catch (error) {
     server.close();
     server.closeAllConnections();
     await events.close();
+    for (const socket of upgrades) socket.destroy();
     await store.close();
     throw error;
   }

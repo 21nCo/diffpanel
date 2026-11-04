@@ -1,4 +1,5 @@
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
+import { connect, type Socket } from "node:net";
 import { daemonEventSchema, parseMessageJson, webSocketProtocols, type DaemonEvent, type DaemonInfo } from "iterbar";
 import WebSocket from "ws";
 
@@ -137,4 +138,58 @@ export function connectEvents(info: Pick<DaemonInfo, "port" | "token">, options:
     });
     socket.once("error", reject);
   });
+}
+
+export interface HalfOpenUpgrade {
+  readonly socket: Socket;
+  /** The status line of the daemon's answer. */
+  readonly statusLine: string;
+  /**
+   * Resolves once the daemon has closed the connection completely: its socket is gone, so data the client
+   * keeps sending after the daemon's FIN is reset. A daemon that only ended its side would accept it forever.
+   */
+  readonly closedByDaemon: Promise<void>;
+}
+
+/**
+ * Sends a WebSocket upgrade on a raw socket that never ends its side (`allowHalfOpen`), the way a careless or
+ * hostile local client holds a refused upgrade open, and waits for the daemon's status line.
+ */
+export async function halfOpenUpgrade(info: Pick<DaemonInfo, "port">, headers: Readonly<Record<string, string>>): Promise<HalfOpenUpgrade> {
+  const socket = connect({ host: "127.0.0.1", port: info.port, allowHalfOpen: true });
+  const closedByDaemon = new Promise<void>((resolve) => socket.once("close", () => resolve()));
+  socket.on("error", () => undefined);
+  socket.once("end", () => {
+    const probe = setInterval(() => socket.write("x"), 25);
+    socket.once("close", () => clearInterval(probe));
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once("connect", resolve);
+    socket.once("error", reject);
+  });
+  const lines = Object.entries({
+    host: `127.0.0.1:${info.port}`,
+    connection: "Upgrade",
+    upgrade: "websocket",
+    "sec-websocket-version": "13",
+    "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+    "sec-websocket-protocol": "iterbar.v1",
+    ...headers,
+  }).map(([name, value]) => `${name}: ${value}`);
+  socket.write(`GET /events HTTP/1.1\r\n${lines.join("\r\n")}\r\n\r\n`);
+  const statusLine = await new Promise<string>((resolve, reject) => {
+    let received = "";
+    const onData = (chunk: Buffer) => {
+      received += chunk.toString("latin1");
+      const end = received.indexOf("\r\n");
+      if (end < 0) return;
+      socket.off("data", onData);
+      // Keep reading, so that nothing the daemon sends is left unread in the kernel.
+      socket.resume();
+      resolve(received.slice(0, end));
+    };
+    socket.on("data", onData);
+    socket.once("close", () => reject(new Error(`Closed before a status line: ${JSON.stringify(received)}`)));
+  });
+  return { socket, statusLine, closedByDaemon };
 }

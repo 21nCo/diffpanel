@@ -60,6 +60,25 @@ export class SlotRegistry {
   }
 }
 
+/**
+ * Runs operations one at a time per key. Only the daemon changes a feedback item's status, so a status read and
+ * write run under one key cannot be interleaved with another status change of the same item.
+ */
+export class KeyedSerializer {
+  readonly #tails = new Map<string, Promise<unknown>>();
+
+  run<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#tails.get(key) ?? Promise.resolve();
+    const result = previous.then(operation);
+    const tail = result.catch(() => undefined);
+    this.#tails.set(key, tail);
+    void tail.then(() => {
+      if (this.#tails.get(key) === tail) this.#tails.delete(key);
+    });
+    return result;
+  }
+}
+
 /** Everything a route handler works with. */
 export interface RouteContext {
   readonly request: IncomingMessage;
@@ -72,6 +91,8 @@ export interface RouteContext {
   readonly origins: OriginAllowList;
   readonly slots: SlotRegistry;
   readonly events: EventHub;
+  /** Serializes status changes per feedback id. */
+  readonly statusChanges: KeyedSerializer;
 }
 
 type RouteHandler = (context: RouteContext) => Promise<void>;
@@ -222,12 +243,15 @@ const handlers: Readonly<Record<DaemonEndpointName, RouteHandler>> = {
   async setStatus(context) {
     const { status } = await readJson(context.request, statusRequestSchema, "status request");
     const feedbackId = param(context, "feedbackId");
-    const before = await context.store.get(feedbackId);
-    const feedback = await context.store.setStatus(feedbackId, status);
+    // The prior status is read under the same serialized section as the write, and compared by value: a
+    // timestamp is no revision (two writes can share one), and a reply in between does not change the status.
+    const { feedback, changed } = await context.statusChanges.run(feedbackId, async () => {
+      const before = await context.store.get(feedbackId);
+      const after = await context.store.setStatus(feedbackId, status);
+      return { feedback: after, changed: after.status !== before.status };
+    });
     // Setting the current status changes nothing, so it is not an update.
-    if (feedback.updatedAt !== before.updatedAt) {
-      context.events.publish({ schemaVersion: SCHEMA_VERSION, type: "feedback.updated", feedback });
-    }
+    if (changed) context.events.publish({ schemaVersion: SCHEMA_VERSION, type: "feedback.updated", feedback });
     sendJson(context.response, 200, feedback, context.headers);
   },
 

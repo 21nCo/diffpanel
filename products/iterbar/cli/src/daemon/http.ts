@@ -126,7 +126,14 @@ export function sendError(response: ServerResponse, error: DaemonHttpError, head
   sendJson(response, error.status, errorBody(error.code, error.message), { ...headers, ...error.headers });
 }
 
-/** Answers a refused WebSocket upgrade on the raw socket with a JSON error, then closes it. */
+/** How long a refused upgrade's peer gets to take the error response before its socket is destroyed. */
+export const REJECTED_UPGRADE_LINGER_MS = 1000;
+
+/**
+ * Answers a refused WebSocket upgrade on the raw socket with a JSON error, then destroys the socket once the
+ * response is flushed (or after a short linger for a peer that does not read). An upgraded socket is outside the
+ * HTTP server's connection tracking, so it must never depend on the peer closing its side.
+ */
 export function rejectUpgrade(socket: Duplex, error: DaemonHttpError, headers: OutgoingHttpHeaders = {}): void {
   const data = JSON.stringify(errorBody(error.code, error.message));
   const lines = Object.entries({
@@ -141,6 +148,9 @@ export function rejectUpgrade(socket: Duplex, error: DaemonHttpError, headers: O
     socket.destroy();
     return;
   }
+  const linger = setTimeout(() => socket.destroy(), REJECTED_UPGRADE_LINGER_MS);
+  socket.once("close", () => clearTimeout(linger));
+  socket.once("finish", () => socket.destroy());
   socket.end(`HTTP/1.1 ${error.status} ${STATUS_CODES[error.status] ?? ""}\r\n${lines.join("\r\n")}\r\n\r\n${data}`);
 }
 

@@ -1,10 +1,10 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { daemonInfoSchema, parseMessageJson } from "iterbar";
 import { iterbarPaths } from "iterbar/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { commentDraft, EVIDENCE, PNG, temporaryProject } from "../store/test-support/helpers.js";
 import { startDaemon, type RunningDaemon } from "./daemon.js";
-import { bearer, connectEvents, json, multipart, send } from "./test-support/client.js";
+import { bearer, connectEvents, halfOpenUpgrade, json, multipart, send, type HalfOpenUpgrade } from "./test-support/client.js";
 
 let root: string;
 let cleanup: () => Promise<void>;
@@ -220,6 +220,41 @@ describe("a local process without the token", () => {
     for (const protocols of [[], ["iterbar.v1"], ["iterbar.v1", `iterbar.token.${OTHER_TOKEN}`], [`iterbar.token.${daemon.info.token}`]]) {
       const result = await connectEvents(daemon.info, { protocols });
       expect(result, protocols.join(",")).toMatchObject({ accepted: false, status: 401 });
+    }
+  });
+});
+
+describe("a refused upgrade that its client never closes", () => {
+  /** Resolves with `true` when `promise` settles within `ms`. */
+  const within = (promise: Promise<unknown>, ms: number) =>
+    Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), ms))]);
+
+  it("is closed by the daemon and cannot hold up shutdown, daemon.json removal or the next start", async () => {
+    const daemon = await start();
+    await registerDevOrigin(daemon);
+    const { port, token } = daemon.info;
+    const held: HalfOpenUpgrade[] = [];
+    try {
+      for (const [headers, status] of [
+        [{}, "401"],
+        [{ "sec-websocket-protocol": `iterbar.v1, iterbar.token.${token}`, host: `localhost:${port}` }, "403"],
+        [{ "sec-websocket-protocol": `iterbar.v1, iterbar.token.${token}`, origin: EVIL_ORIGIN }, "403"],
+      ] as const) {
+        const upgrade = await halfOpenUpgrade(daemon.info, headers);
+        held.push(upgrade);
+        expect(upgrade.statusLine, JSON.stringify(headers)).toBe(`HTTP/1.1 ${status} ${status === "401" ? "Unauthorized" : "Forbidden"}`);
+      }
+      // The daemon drops each refused connection itself, while it keeps running.
+      for (const upgrade of held) expect(await within(upgrade.closedByDaemon, 1500)).toBe(true);
+
+      // A refusal that is still pending at shutdown does not hold it up either.
+      held.push(await halfOpenUpgrade(daemon.info, {}));
+      expect(await within(daemon.close(), 1500)).toBe(true);
+      await expect(stat(iterbarPaths(root).daemonFile)).rejects.toMatchObject({ code: "ENOENT" });
+      const next = await start();
+      expect((await send(next.info, { path: "/feedback", headers: bearer(next.info.token) })).status).toBe(200);
+    } finally {
+      for (const upgrade of held) upgrade.socket.destroy();
     }
   });
 });
