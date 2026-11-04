@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { feedbackSchema, MAX_ATTACHMENT_BYTES, parseMessageJson, type AttachmentRef, type Feedback } from "iterbar";
 import { attachmentPath, feedbackRecordPath, iterbarPaths } from "iterbar/node";
@@ -177,6 +177,19 @@ describe("records", () => {
     const pending = Array.from({ length: 5 }, (_, index) => store.reply(item.id, { author: agent, text: `reply ${index}` }));
     await store.close();
     await expect(Promise.all(pending)).resolves.toHaveLength(5);
+    stores.length = 0;
+    await expect((await open()).get(item.id)).resolves.toMatchObject({ replies: { length: 5 } });
+  });
+
+  it("makes every overlapping close wait for pending writes and the lock release", async () => {
+    const store = await open();
+    const item = await store.create(chooseVariantDraft);
+    const pending = Array.from({ length: 5 }, (_, index) => store.reply(item.id, { author: agent, text: `reply ${index}` }));
+    const first = store.close();
+    await store.close();
+    await expect(stat(iterbarPaths(root).lockFile)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(Promise.all(pending)).resolves.toHaveLength(5);
+    await first;
     stores.length = 0;
     await expect((await open()).get(item.id)).resolves.toMatchObject({ replies: { length: 5 } });
   });

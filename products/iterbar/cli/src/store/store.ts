@@ -161,6 +161,7 @@ class FileFeedbackStore implements FeedbackStore {
   readonly #afterAttachmentsWritten: OpenFeedbackStoreOptions["afterAttachmentsWritten"];
   #writes: Promise<unknown> = Promise.resolve();
   #closed = false;
+  #closing: Promise<void> | undefined;
 
   constructor(paths: IterbarPaths, lock: StoreLockHandle, clock: StoreClock, options: OpenFeedbackStoreOptions) {
     this.paths = paths;
@@ -371,11 +372,11 @@ class FileFeedbackStore implements FeedbackStore {
     });
   }
 
-  async close(): Promise<void> {
-    if (this.#closed) return;
+  close(): Promise<void> {
+    // Every call shares one shutdown, so none resolves before the writes drain and the lock is released.
     this.#closed = true;
-    await this.#writes;
-    await this.#lock.release();
+    this.#closing ??= this.#writes.then(() => this.#lock.release());
+    return this.#closing;
   }
 }
 

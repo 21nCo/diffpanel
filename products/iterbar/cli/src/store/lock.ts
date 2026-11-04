@@ -308,14 +308,14 @@ export async function acquireStoreLock(
     try {
       await writeNewFile(candidate, text);
       const identity = await env.fs.identity(candidate);
-      if (await linkNew(env, candidate, lockFile)) return await confirmed(env, lockFile, identity);
+      if (await linkNew(env, candidate, lockFile)) return await confirmed(env, lockFile, identity, text);
       const found = await inspect(env, lockFile);
       if (found.state === "live") {
         owner = found.lock;
         break;
       }
       if (found.state === "stale" && await takeOver(env, lockFile, candidate, found.text)) {
-        return await confirmed(env, lockFile, identity);
+        return await confirmed(env, lockFile, identity, text);
       }
     } catch (error) {
       // ENOENT: the current owner swept `tmp/` while the candidate was in it; try again.
@@ -347,21 +347,40 @@ async function currentOwner(env: LockEnvironment, lockFile: string): Promise<Sto
   }
 }
 
+/**
+ * The newest handle of this process for each lock file and lock text. Two handles in one process write the
+ * same lock text, so the text alone cannot tell them apart: a newer acquisition of the same lock file (possible
+ * only after the older one's lock was removed) supersedes the older handle.
+ */
+const currentHandles = new Map<string, symbol>();
+
 /** The handle of a lock this process has just placed, after checking that it is still in place. */
-async function confirmed(env: LockEnvironment, lockFile: string, identity: FileIdentity): Promise<StoreLockHandle> {
-  const handle = await acquired(env, lockFile, identity);
+async function confirmed(env: LockEnvironment, lockFile: string, identity: FileIdentity, text: string): Promise<StoreLockHandle> {
+  const handle = await acquired(env, lockFile, identity, text);
   await handle.confirmAcquired();
   return handle;
 }
 
-async function acquired(env: LockEnvironment, lockFile: string, identity: FileIdentity): Promise<StoreLockHandle> {
+/**
+ * A handle on the lock file this process placed with contents `text` at `identity`. The lock is this handle's
+ * only while the file has that identity, still reads `text` and no newer handle of this process replaced it.
+ * The identity alone is not enough: Linux file systems reuse a freed inode number at once, so a lock that was
+ * removed and recreated by another process can have this handle's (dev, ino). The text names this process
+ * (pid and start), which no other running process shares.
+ */
+async function acquired(env: LockEnvironment, lockFile: string, identity: FileIdentity, text: string): Promise<StoreLockHandle> {
   await syncDirectory(dirname(lockFile));
+  const key = `${lockFile}\0${text}`;
+  const token = Symbol(lockFile);
+  currentHandles.set(key, token);
   let released = false;
 
   async function holds(): Promise<boolean> {
+    if (released || currentHandles.get(key) !== token) return false;
     try {
       const current = await env.fs.identity(lockFile);
-      return current.dev === identity.dev && current.ino === identity.ino;
+      if (current.dev !== identity.dev || current.ino !== identity.ino) return false;
+      return (await env.fs.readFile(lockFile)) === text;
     } catch (error) {
       if (errnoCode(error) === "ENOENT") return false;
       throw error;
@@ -371,17 +390,19 @@ async function acquired(env: LockEnvironment, lockFile: string, identity: FileId
   return Object.freeze({
     lock: env.lock,
     async assertHeld() {
-      if (released || !(await holds())) {
+      if (!(await holds())) {
         throw new IterbarStoreError("lock_lost", `${lockFile} is no longer held by this process`);
       }
     },
     async confirmAcquired() {
-      if (released || !(await holds())) throw new StoreLockedError(lockFile, await currentOwner(env, lockFile));
+      if (!(await holds())) throw new StoreLockedError(lockFile, await currentOwner(env, lockFile));
     },
     async release() {
       if (released) return;
+      const owned = await holds();
       released = true;
-      if (await holds()) {
+      if (currentHandles.get(key) === token) currentHandles.delete(key);
+      if (owned) {
         await env.fs.remove(lockFile);
         await syncDirectory(dirname(lockFile));
       }

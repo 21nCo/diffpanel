@@ -381,6 +381,15 @@ describe("owner start time when the wall clock is stepped", () => {
 });
 
 describe("acquisition", () => {
+  // Every file reports the same (dev, ino), as a removed lock and its replacement can on ext4.
+  const reusedInode: LockFileSystem = {
+    link,
+    readFile: (path) => readFile(path, "utf8"),
+    rename,
+    remove: (path) => rm(path, { force: true }),
+    identity: async () => ({ dev: 1n, ino: 1n }),
+  };
+
   it("confirms the lock is still this handle's, and names the owner that replaced it", async () => {
     await (await openFeedbackStore(root)).close();
     const { lockFile, tmpDirectory } = iterbarPaths(root);
@@ -392,5 +401,34 @@ describe("acquisition", () => {
     await expect(handle.confirmAcquired()).rejects.toMatchObject({ code: "store_locked", owner: other });
     await handle.release();
     expect(JSON.parse(await readFile(lockFile, "utf8"))).toEqual(other);
+  });
+
+  it("is not fooled when another owner's lock reuses its inode number, as Linux file systems do", async () => {
+    await (await openFeedbackStore(root)).close();
+    const { lockFile, tmpDirectory } = iterbarPaths(root);
+    const handle = await acquireStoreLock(lockFile, tmpDirectory, { fs: reusedInode });
+    await expect(handle.assertHeld()).resolves.toBeUndefined();
+    const other = { schemaVersion: 1, pid: process.ppid, startedAt: "2026-11-04T00:00:00.000Z" };
+    await rm(lockFile);
+    await writeFile(lockFile, `${JSON.stringify(other)}\n`);
+    await expect(handle.assertHeld()).rejects.toMatchObject({ code: "lock_lost" });
+    await expect(handle.confirmAcquired()).rejects.toMatchObject({ code: "store_locked", owner: other });
+    await handle.release();
+    expect(JSON.parse(await readFile(lockFile, "utf8"))).toEqual(other);
+  });
+
+  it("lets a newer handle of this process supersede one whose lock was removed", async () => {
+    await (await openFeedbackStore(root)).close();
+    const { lockFile, tmpDirectory } = iterbarPaths(root);
+    const older = await acquireStoreLock(lockFile, tmpDirectory, { fs: reusedInode });
+    await rm(lockFile);
+    // Same pid and start, so the same lock text, and here the same inode, as Linux may give it.
+    const newer = await acquireStoreLock(lockFile, tmpDirectory, { fs: reusedInode });
+    await expect(older.assertHeld()).rejects.toMatchObject({ code: "lock_lost" });
+    await older.release();
+    await expect(newer.assertHeld()).resolves.toBeUndefined();
+    expect(await readLock()).toEqual(ownLock());
+    await newer.release();
+    await expect(stat(lockFile)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
