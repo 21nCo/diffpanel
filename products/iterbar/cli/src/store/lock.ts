@@ -8,9 +8,11 @@ import { errnoCode, IterbarStoreError, StoreLockedError } from "./errors.js";
 import { removeFile, syncDirectory, temporaryPath, writeNewFile } from "./files.js";
 
 /**
- * How far a live process's observed start time may be from the lock's `startedAt` and still be the owner.
- * `ps` reports whole seconds, and the kernel's start time and Node's time origin differ by the process
- * start-up time. A larger gap means the pid was reused by another process, so the lock is stale.
+ * How much later than the lock's `startedAt` a live process at the lock's pid may have started and still be the
+ * owner, where start times are step-stable. A process that started later was given the pid after the owner
+ * exited. The owner itself starts before its `startedAt` (Node's time origin), by seconds on a loaded host, and
+ * `ps` truncates to whole seconds, so it normally reads earlier; the allowance covers the clock being stepped
+ * back while the owner started.
  */
 export const START_TIME_TOLERANCE_MS = 5_000;
 
@@ -65,11 +67,6 @@ export function parseUtcStartTime(text: string): number | undefined {
 /**
  * When process `pid` started, in epoch milliseconds; `null` when it does not exist and `undefined` when the
  * start time cannot be determined (no `ps`, or output this reader does not understand).
- *
- * Known limit, deferred to ROLL-20: on Linux, procps derives `lstart` from the boot time in `/proc/stat`,
- * which the kernel moves when the wall clock is stepped. After a step of more than
- * {@link START_TIME_TOLERANCE_MS} a live owner's start time no longer matches its lock, so it is judged
- * stale. macOS keeps each process's start time as recorded and is not affected.
  */
 export function processStartTime(pid: number): Promise<number | null | undefined> {
   return new Promise((resolve) => {
@@ -90,21 +87,50 @@ export function processStartTime(pid: number): Promise<number | null | undefined
   });
 }
 
+/** Where the lock protocol learns when a process started. @internal Replaced in tests to simulate platforms. */
+export interface ProcessStartTimes {
+  /**
+   * True when a process's observed start time is the wall-clock time it was recorded at, and stays so when the
+   * wall clock is later stepped. Only then can it be compared with a lock's `startedAt`.
+   */
+  readonly stepStable: boolean;
+  readonly read: (pid: number) => Promise<number | null | undefined>;
+}
+
 /**
- * True when the lock's owner is still running. The pid must exist, and its start time must match the lock's
- * `startedAt`; when the start time cannot be read the owner is presumed alive, so a live owner is never
- * taken over.
+ * This platform's process start times. macOS records each process's start as a wall-clock time at fork and
+ * never moves it. Linux procps instead derives `lstart` from the kernel's boot time, which the kernel moves
+ * whenever the wall clock is stepped (NTP or timesyncd stepping, resuming a VM or WSL, setting the date), and
+ * no step-independent reference relates a process's boot-relative start to the wall-clock `startedAt` in its
+ * lock. So only macOS start times are step-stable; elsewhere they are not used.
  */
-export async function isOwnerAlive(
-  lock: StoreLock,
-  readStartTime: (pid: number) => Promise<number | null | undefined> = processStartTime,
-): Promise<boolean> {
+export function platformStartTimes(platform: NodeJS.Platform = process.platform): ProcessStartTimes {
+  return { stepStable: platform === "darwin", read: processStartTime };
+}
+
+/**
+ * True when the lock's owner may still be running, so the lock must not be taken over. A lock whose pid does
+ * not exist is stale. A lock with this process's pid is stale unless it records this process's start.
+ *
+ * Any other running pid is checked against the lock's `startedAt` only where start times are step-stable
+ * ({@link platformStartTimes}). The owner held its pid from its start until at least `startedAt`, so a process
+ * at that pid now that started before `startedAt` is the owner, however long before: start-up takes seconds on
+ * a loaded host. One that started more than {@link START_TIME_TOLERANCE_MS} after it was given the pid after
+ * the owner exited, so the lock is stale. Where they are not step-stable, or the start time cannot be
+ * read, a running pid is presumed to be the owner: a stepped clock must never let a second writer take over a
+ * live owner. The cost is that when a dead owner's pid is reused by an unrelated process, the store stays
+ * locked until that process exits; {@link StoreLockedError} names the pid so that a user can check it and
+ * delete the lock file.
+ */
+export async function isOwnerAlive(lock: StoreLock, startTimes: ProcessStartTimes = platformStartTimes()): Promise<boolean> {
   if (!pidExists(lock.pid)) return false;
   const recorded = Date.parse(lock.startedAt);
-  const observed = lock.pid === process.pid ? Date.parse(PROCESS_STARTED_AT) : await readStartTime(lock.pid);
+  if (lock.pid === process.pid) return Math.abs(Date.parse(PROCESS_STARTED_AT) - recorded) <= START_TIME_TOLERANCE_MS;
+  if (!startTimes.stepStable) return true;
+  const observed = await startTimes.read(lock.pid);
   if (observed === null) return false;
   if (observed === undefined) return true;
-  return Math.abs(observed - recorded) <= START_TIME_TOLERANCE_MS;
+  return observed - recorded <= START_TIME_TOLERANCE_MS;
 }
 
 /** The file operations of the lock protocol. @internal Replaced in tests to force interleavings. */
@@ -259,22 +285,22 @@ export interface StoreLockHandle {
 }
 
 /**
- * Takes `.iterbar/store.lock` for this process. A lock whose owner is dead (or whose pid now belongs to a
- * process that started at another time) is taken over; a live owner makes this throw {@link StoreLockedError}.
+ * Takes `.iterbar/store.lock` for this process. A lock whose owner is dead (see {@link isOwnerAlive}) is taken
+ * over; a live owner makes this throw {@link StoreLockedError}.
  *
  * The lock is written completely to `tmpDirectory`, then hard-linked into place, which fails if a lock exists,
  * or renamed over a stale lock under a takeover claim (see {@link takeOver}). Either way readers never see a
  * partial lock, and of any number of racing processes exactly one acquires it. The lock file is checked to
  * still be this process's before this returns.
  *
- * `environment` is a test seam (@internal); callers leave it out.
+ * `environment` is a test seam (@internal) whose parts replace the defaults; callers leave it out.
  */
 export async function acquireStoreLock(
   lockFile: string,
   tmpDirectory: string,
-  environment?: LockEnvironment,
+  environment?: Partial<LockEnvironment>,
 ): Promise<StoreLockHandle> {
-  const env = environment ?? defaultEnvironment();
+  const env: LockEnvironment = { ...defaultEnvironment(), ...environment };
   const text = `${JSON.stringify(env.lock)}\n`;
   let owner: StoreLock | null = null;
   for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt += 1) {

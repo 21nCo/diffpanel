@@ -43,7 +43,8 @@ export class StoreLockedError extends IterbarStoreError {
     super(
       "store_locked",
       owner
-        ? `${lockFile} is held by process ${owner.pid} (started ${owner.startedAt}); stop it or use its daemon`
+        ? `${lockFile} is held by process ${owner.pid} (started ${owner.startedAt}); stop it or use its daemon. `
+          + `If process ${owner.pid} is not Iterbar, it reused the pid of an Iterbar process that died: delete ${lockFile}`
         : `${lockFile} is being acquired by another process`,
     );
     this.name = "StoreLockedError";

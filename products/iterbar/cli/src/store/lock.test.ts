@@ -7,12 +7,14 @@ import {
   isOwnerAlive,
   ownLock,
   parseUtcStartTime,
+  platformStartTimes,
   processStartTime,
   PROCESS_STARTED_AT,
   START_TIME_TOLERANCE_MS,
   takeoverClaimPath,
   type LockEnvironment,
   type LockFileSystem,
+  type ProcessStartTimes,
 } from "./lock.js";
 import { openFeedbackStore, type FeedbackStore } from "./store.js";
 import { deadPid, StoreProcess, temporaryProject } from "./test-support/helpers.js";
@@ -20,6 +22,8 @@ import { deadPid, StoreProcess, temporaryProject } from "./test-support/helpers.
 let root: string;
 let cleanup: () => Promise<void>;
 const processes: StoreProcess[] = [];
+/** For tests that spawn processes, which take seconds on a loaded host. */
+const SPAWN_TIMEOUT_MS = 30_000;
 const stores: FeedbackStore[] = [];
 
 beforeEach(async () => {
@@ -136,17 +140,26 @@ describe("stale locks", () => {
     await writeLock({ schemaVersion: 1, pid: await deadPid(), startedAt: PROCESS_STARTED_AT });
     await open();
     expect(await readLock()).toEqual(ownLock());
-  });
+  }, SPAWN_TIMEOUT_MS);
 
-  it("takes over a lock whose pid now belongs to a process that started at another time", async () => {
+  it("takes over a lock whose pid now belongs to a process that started at another time, where start times are step-stable", async () => {
     const other = startProcess();
     const { pid } = await other.next("ready");
     const reused = { schemaVersion: 1, pid: pid as number, startedAt: "2020-01-01T00:00:00.000Z" } as const;
-    expect(await isOwnerAlive(reused)).toBe(false);
     await writeLock(reused);
-    await open();
-    expect(await readLock()).toEqual(ownLock());
-  });
+    if (platformStartTimes().stepStable) {
+      expect(await isOwnerAlive(reused)).toBe(false);
+      await open();
+      expect(await readLock()).toEqual(ownLock());
+    } else {
+      // Linux: a running pid is presumed to be the owner, so the store stays locked, naming the pid.
+      expect(await isOwnerAlive(reused)).toBe(true);
+      const error = await openFeedbackStore(root).then(() => null, (thrown: unknown) => thrown);
+      expect(error).toMatchObject({ code: "store_locked", owner: reused });
+      expect((error as Error).message).toContain(`If process ${pid} is not Iterbar`);
+      expect(await readLock()).toEqual(reused);
+    }
+  }, SPAWN_TIMEOUT_MS);
 
   it("clears a takeover claim abandoned by a dead process, and waits for one held by a live process", async () => {
     const stale = JSON.stringify({ schemaVersion: 1, pid: await deadPid(), startedAt: PROCESS_STARTED_AT });
@@ -160,7 +173,7 @@ describe("stale locks", () => {
     await writeFile(claim, JSON.stringify({ schemaVersion: 1, pid: await deadPid(), startedAt: PROCESS_STARTED_AT }));
     await open();
     expect(await readLock()).toEqual(ownLock());
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("takes over a malformed lock", async () => {
     await writeLock("{\"schemaVersion\":1,\"pid\":");
@@ -173,7 +186,7 @@ describe("stale locks", () => {
     await writeLock(newer);
     await expect(openFeedbackStore(root)).rejects.toMatchObject({ code: "unsupported_schema_version" });
     expect(await readLock()).toEqual(newer);
-  });
+  }, SPAWN_TIMEOUT_MS);
 });
 
 /** A promise and the function that resolves it. */
@@ -289,23 +302,81 @@ describe("owner start time", () => {
     const owner = { schemaVersion: 1, pid: process.ppid, startedAt: "2026-11-01T06:30:00.400Z" } as const;
     // What `TZ=UTC0 ps -o lstart=` prints for a process started at 01:30:00 EST.
     const startTime = async () => parseUtcStartTime("Sun Nov  1 06:30:00 2026");
-    expect(await isOwnerAlive(owner, startTime)).toBe(true);
-    expect(await isOwnerAlive({ ...owner, startedAt: "2026-11-01T05:30:00.400Z" }, startTime)).toBe(false);
+    const startTimes = { stepStable: true, read: startTime };
+    expect(await isOwnerAlive(owner, startTimes)).toBe(true);
+    expect(await isOwnerAlive({ ...owner, startedAt: "2026-11-01T05:30:00.400Z" }, startTimes)).toBe(false);
   });
 
   it("asks ps for the start time in UTC, so it matches the process's own clock in any time zone", async () => {
     for (const zone of ["America/New_York", "Asia/Kolkata", "Pacific/Kiritimati"]) {
       process.env.TZ = zone;
-      const observed = await processStartTime(process.pid);
-      expect(Math.abs((observed as number) - Date.parse(PROCESS_STARTED_AT))).toBeLessThanOrEqual(START_TIME_TOLERANCE_MS);
+      // The kernel's start precedes Node's time origin by the start-up time; a time zone error would be 30 min or more.
+      const gap = (await processStartTime(process.pid) as number) - Date.parse(PROCESS_STARTED_AT);
+      expect(gap).toBeLessThanOrEqual(START_TIME_TOLERANCE_MS);
+      expect(gap).toBeGreaterThan(-10 * 60_000);
     }
     expect(await processStartTime(await deadPid())).toBeNull();
-  });
+  }, SPAWN_TIMEOUT_MS);
 
   it("presumes the owner alive when ps output cannot be read", async () => {
     const owner = { schemaVersion: 1, pid: process.ppid, startedAt: "2020-01-01T00:00:00.000Z" } as const;
-    expect(await isOwnerAlive(owner, async () => undefined)).toBe(true);
-    expect(await isOwnerAlive(owner, async () => null)).toBe(false);
+    expect(await isOwnerAlive(owner, { stepStable: true, read: async () => undefined })).toBe(true);
+    expect(await isOwnerAlive(owner, { stepStable: true, read: async () => null })).toBe(false);
+  });
+
+  it("judges a lock with this process's pid by this process's own start time", async () => {
+    const neverRead: ProcessStartTimes = { stepStable: false, read: async () => { throw new Error("not read"); } };
+    expect(await isOwnerAlive(ownLock(), neverRead)).toBe(true);
+    expect(await isOwnerAlive({ ...ownLock(), startedAt: "2020-01-01T00:00:00.000Z" }, neverRead)).toBe(false);
+  });
+});
+
+describe("owner start time when the wall clock is stepped", () => {
+  // A live owner (this test's parent process) and the start time ps reports for it after the wall clock was
+  // stepped by `step` since it started: on Linux procps moves lstart with the kernel's boot time.
+  const owner = { schemaVersion: 1, pid: process.ppid, startedAt: "2026-11-04T09:00:00.000Z" } as const;
+  const stepped = (platform: NodeJS.Platform, step: number): ProcessStartTimes => ({
+    ...platformStartTimes(platform),
+    read: async (pid) => (pid === owner.pid ? Date.parse(owner.startedAt) + step : null),
+  });
+  const steps = [60_000, -60_000, -3_600_000];
+
+  it("only compares start times on macOS, where they are step-stable", () => {
+    expect(platformStartTimes("darwin").stepStable).toBe(true);
+    for (const platform of ["linux", "freebsd", "win32"] as const) expect(platformStartTimes(platform).stepStable).toBe(false);
+  });
+
+  it.each(steps)("keeps a live Linux owner after a %i ms step, and a second opener gets store_locked", async (step) => {
+    expect(await isOwnerAlive(owner, stepped("linux", step))).toBe(true);
+    await writeLock(owner);
+    const { lockFile, tmpDirectory } = iterbarPaths(root);
+    const opener = acquireStoreLock(lockFile, tmpDirectory, {
+      isOwnerAlive: (lock) => isOwnerAlive(lock, stepped("linux", step)),
+    });
+    await expect(opener).rejects.toMatchObject({ name: "StoreLockedError", code: "store_locked", owner });
+    expect(await readLock()).toEqual(owner);
+    expect((await readdir(tmpDirectory)).filter((name) => name.endsWith(".claim"))).toEqual([]);
+  });
+
+  it("presumes a running Linux pid is the owner even when its start time cannot be read", async () => {
+    expect(await isOwnerAlive(owner, { stepStable: false, read: async () => null })).toBe(true);
+    expect(await isOwnerAlive({ ...owner, pid: await deadPid() }, stepped("linux", 0))).toBe(false);
+  }, SPAWN_TIMEOUT_MS);
+
+  it("still tells a reused pid from its owner by start time on macOS", async () => {
+    // macOS start times do not move with the clock, so a later start is another process given the pid later.
+    for (const later of [START_TIME_TOLERANCE_MS + 1_000, 60_000, 3_600_000]) {
+      expect(await isOwnerAlive(owner, stepped("darwin", later))).toBe(false);
+    }
+    expect(await isOwnerAlive(owner, stepped("darwin", START_TIME_TOLERANCE_MS))).toBe(true);
+  });
+
+  it("keeps a macOS owner whose start-up took longer than the tolerance before Node recorded startedAt", async () => {
+    // Under heavy load the kernel's start precedes performance.timeOrigin by seconds; a reused pid can only
+    // have started after the owner exited, which is after its startedAt.
+    for (const earlier of [-1_000, -(START_TIME_TOLERANCE_MS + 2_500), -60_000, -3_600_000]) {
+      expect(await isOwnerAlive(owner, stepped("darwin", earlier))).toBe(true);
+    }
   });
 });
 
