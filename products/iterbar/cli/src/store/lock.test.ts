@@ -450,6 +450,64 @@ describe("acquisition", () => {
     await next.release();
   }, SPAWN_TIMEOUT_MS);
 
+  it.each(["the candidate after a fresh link", "its own claim after a takeover", "an abandoned claim after a takeover"] as const)(
+    "returns a usable handle when removing %s fails, and the next open sweeps it",
+    async (leftover) => {
+      await (await openFeedbackStore(root)).close();
+      const { lockFile, tmpDirectory } = iterbarPaths(root);
+      const dead = (pid: number) => JSON.stringify({ schemaVersion: 1, pid, startedAt: PROCESS_STARTED_AT });
+      const stale = dead(900_001);
+      let failing: (path: string) => boolean = (path) => /[/\\]lock-[^/\\]+\.tmp$/.test(path);
+      if (leftover !== "the candidate after a fresh link") await writeFile(lockFile, stale);
+      if (leftover === "its own claim after a takeover") {
+        const claim = takeoverClaimPath(tmpDirectory, stale);
+        failing = (path) => path === claim;
+      }
+      if (leftover === "an abandoned claim after a takeover") {
+        const abandoned = takeoverClaimPath(tmpDirectory, stale);
+        await writeFile(abandoned, dead(900_002));
+        failing = (path) => path === abandoned;
+      }
+      // Fails the removal, once, after this process's lock is in place.
+      let published = false;
+      let failed = false;
+      const fs: LockFileSystem = {
+        ...reusedInode,
+        identity: async (target) => {
+          const { dev, ino } = await stat(target, { bigint: true });
+          return { dev, ino };
+        },
+        link: async (existing, target) => {
+          await link(existing, target);
+          if (target === lockFile) published = true;
+        },
+        rename: async (source, target) => {
+          await rename(source, target);
+          if (target === lockFile) published = true;
+        },
+        remove: async (target) => {
+          if (published && !failed && failing(target)) {
+            failed = true;
+            throw Object.assign(new Error("injected removal failure"), { code: "EIO" });
+          }
+          await rm(target, { force: true });
+        },
+      };
+      const isAlive = async (lock: StoreLock) => lock.pid === process.pid;
+      const handle = await acquireStoreLock(lockFile, tmpDirectory, { fs, isOwnerAlive: isAlive });
+      expect(failed).toBe(true);
+      await expect(handle.assertHeld()).resolves.toBeUndefined();
+      expect(await readLock()).toEqual(ownLock());
+      expect((await readdir(tmpDirectory)).length).toBeGreaterThan(0);
+      await handle.release();
+      await expect(stat(lockFile)).rejects.toMatchObject({ code: "ENOENT" });
+      await open();
+      expect(await readLock()).toEqual(ownLock());
+      expect(await readdir(tmpDirectory)).toEqual([]);
+    },
+    SPAWN_TIMEOUT_MS,
+  );
+
   it("lets a newer handle of this process supersede one whose lock was removed", async () => {
     await (await openFeedbackStore(root)).close();
     const { lockFile, tmpDirectory } = iterbarPaths(root);

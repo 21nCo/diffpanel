@@ -26,20 +26,22 @@ export async function syncDirectory(directory: string): Promise<void> {
 }
 
 /**
- * Creates a new file that must not exist yet, writes all of `data` and flushes it to disk. Throws `EEXIST`,
- * leaving the existing file alone, when `path` exists; a file this call created but could not finish is removed.
+ * Creates a new file that must not exist yet, writes all of `data`, flushes it to disk and closes it. Throws
+ * `EEXIST`, leaving the existing file alone, when `path` exists. A file this call created but could not finish,
+ * closing included, is removed and the original error rethrown.
  */
 export async function writeNewFile(path: string, data: string | Uint8Array, mode = 0o644): Promise<void> {
   const handle = await open(path, "wx", mode);
   try {
     await handle.writeFile(data);
     await handle.sync();
+    await handle.close();
   } catch (error) {
+    // Closes the handle after a failed write or flush; after a failed close, the handle is closed already.
     await handle.close().catch(() => undefined);
-    await removeFile(path);
+    await removeFile(path).catch(() => undefined);
     throw error;
   }
-  await handle.close();
 }
 
 /** Removes a file, ignoring one that is already gone. */

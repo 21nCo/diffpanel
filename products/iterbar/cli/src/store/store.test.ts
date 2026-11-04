@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { crc32 } from "node:zlib";
 import { feedbackSchema, MAX_ATTACHMENT_BYTES, parseMessageJson, type AttachmentRef, type Feedback } from "iterbar";
 import { attachmentPath, feedbackRecordPath, iterbarPaths } from "iterbar/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -300,9 +301,19 @@ describe("rejected requests", () => {
     await rejects(store.create(chooseVariantDraft, { evidence: EVIDENCE }), "invalid_request");
     await rejects(store.create(chooseVariantDraft, { screenshot: PNG }), "invalid_request");
     await rejects(store.create(commentDraft, { screenshot: Buffer.from("GIF89a"), evidence: EVIDENCE }), "invalid_request");
-    // A PNG signature alone, a truncated image, a bad chunk CRC, a missing IHDR, IDAT or IEND, and trailing bytes.
+    // A PNG signature alone, a truncated image, a bad chunk CRC, a missing IHDR, IDAT or IEND, a second IHDR,
+    // a nonempty IEND (with a valid CRC) and trailing bytes.
     const chunks = (bytes: Buffer) => [bytes.subarray(0, 33), bytes.subarray(33, 58), bytes.subarray(58)] as const;
     const [head, idat, iend] = chunks(PNG);
+    const chunk = (type: string, data: Buffer) => {
+      const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
+      const crc = Buffer.alloc(4);
+      crc.writeUInt32BE(crc32(body));
+      const length = Buffer.alloc(4);
+      length.writeUInt32BE(data.byteLength);
+      return Buffer.concat([length, body, crc]);
+    };
+    expect(chunk("IEND", Buffer.alloc(0))).toEqual(iend);
     const badCrc = Buffer.from(PNG);
     badCrc.writeUInt8(badCrc.readUInt8(PNG.byteLength - 13) ^ 0xff, PNG.byteLength - 13);
     for (const screenshot of [
@@ -313,6 +324,8 @@ describe("rejected requests", () => {
       Buffer.concat([PNG.subarray(0, 8), idat, iend]),
       Buffer.concat([head, iend]),
       Buffer.concat([head, idat]),
+      Buffer.concat([head, head.subarray(8), idat, iend]),
+      Buffer.concat([head, idat, chunk("IEND", Buffer.from("x"))]),
       Buffer.concat([PNG, Buffer.from([0])]),
     ]) {
       await rejects(store.create(commentDraft, { screenshot, evidence: EVIDENCE }), "invalid_request");

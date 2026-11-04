@@ -178,15 +178,27 @@ async function takeOver(env: LockEnvironment, lockFile: string, candidate: strin
     replaced = true;
     return true;
   } finally {
-    // This process's own claim always goes. The abandoned generations go only once the stale lock is gone:
-    // while it is in place they keep the next contender on the chain past them.
-    await env.fs.remove(claim);
     if (replaced) {
+      // This process's lock is in place, so the spent claims go without failing (see removeLeftover). The
+      // abandoned generations go only now that the stale lock is gone: while it was in place they kept the
+      // next contender on the chain past them.
+      await removeLeftover(env, claim);
       for (let generation = 0; generation < abandoned.length; generation += 1) {
-        await env.fs.remove(takeoverClaimPath(tmpDirectory, staleText, abandoned.slice(0, generation)));
+        await removeLeftover(env, takeoverClaimPath(tmpDirectory, staleText, abandoned.slice(0, generation)));
       }
+    } else {
+      await env.fs.remove(claim);
     }
   }
+}
+
+/**
+ * Removes a file that acquisition left in `tmp/`, ignoring a failure. Once this process's lock is in place a
+ * failure here must not fail acquisition, which would leave the store locked with no handle to release it;
+ * whatever stays behind is removed by the owner's sweep of `tmp/` when the store is next opened.
+ */
+async function removeLeftover(env: LockEnvironment, path: string): Promise<void> {
+  await env.fs.remove(path).catch(() => undefined);
 }
 
 function delay(ms: number): Promise<void> {
@@ -218,7 +230,9 @@ export interface StoreLockHandle {
  * The lock is written completely to `tmpDirectory`, then hard-linked into place, which fails if a lock exists,
  * or renamed over a stale lock under a takeover claim (see {@link takeOver}). Either way readers never see a
  * partial lock, and of any number of racing processes exactly one acquires it. The lock file is checked to
- * still be this process's before this returns.
+ * still be this process's before this returns. Once this process's lock is in place, acquisition either
+ * returns its handle or releases the lock (if it is still this process's) and rethrows: removing the files it
+ * leaves in `tmp/` cannot fail it (see {@link removeLeftover}).
  *
  * `environment` is a test seam (@internal) whose parts replace the defaults; callers leave it out.
  */
@@ -251,7 +265,7 @@ export async function acquireStoreLock(
       if (errnoCode(error) !== "ENOENT") throw error;
     } finally {
       // A candidate that could not be created exclusively is not this process's file.
-      if (written) await removeFile(candidate);
+      if (written) await removeLeftover(env, candidate);
     }
   }
   throw new StoreLockedError(lockFile, owner);

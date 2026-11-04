@@ -1,8 +1,9 @@
-import { open, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { iterbarPaths } from "iterbar/node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createFileAtomic } from "./files.js";
+import { createFileAtomic, writeFileAtomic } from "./files.js";
+import { acquireStoreLock } from "./lock.js";
 import { openFeedbackStore } from "./store.js";
 import { temporaryProject } from "./test-support/helpers.js";
 
@@ -58,5 +59,48 @@ describe("createFileAtomic", () => {
     const store = await openFeedbackStore(root);
     expect(await readFile(iterbarPaths(root).gitignoreFile, "utf8")).toBe("*\n");
     await store.close();
+  });
+});
+
+/** Makes closing the next temporary file whose name starts with `label-` fail after it has really closed. */
+async function failCloseOnce(label: string): Promise<Error> {
+  const actual = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).open;
+  const injected = Object.assign(new Error("injected close failure"), { code: "EIO" });
+  let failed = false;
+  vi.mocked(open).mockImplementation(async (path, ...rest) => {
+    const handle = await actual(path, ...rest);
+    if (!failed && new RegExp(`[/\\\\]${label}-[^/\\\\]+\\.tmp$`).test(String(path))) {
+      failed = true;
+      const close = handle.close.bind(handle);
+      handle.close = async () => {
+        await close();
+        throw injected;
+      };
+    }
+    return handle;
+  });
+  return injected;
+}
+
+describe("a temporary file whose close fails", () => {
+  it.each(["writeFileAtomic", "createFileAtomic"] as const)("is removed by %s, which rethrows the failure", async (operation) => {
+    const tmpDirectory = join(root, "tmp");
+    await mkdir(tmpDirectory);
+    const target = join(root, "target");
+    const injected = await failCloseOnce(operation === "writeFileAtomic" ? "write" : "create");
+    const write = operation === "writeFileAtomic" ? writeFileAtomic : createFileAtomic;
+    await expect(write(tmpDirectory, target, "data")).rejects.toBe(injected);
+    expect(await readdir(tmpDirectory)).toEqual([]);
+    await expect(stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("is removed when it is a lock candidate, and acquisition rethrows the failure", async () => {
+    await (await openFeedbackStore(root)).close();
+    const { lockFile, tmpDirectory } = iterbarPaths(root);
+    const injected = await failCloseOnce("lock");
+    await expect(acquireStoreLock(lockFile, tmpDirectory)).rejects.toBe(injected);
+    expect(await readdir(tmpDirectory)).toEqual([]);
+    await expect(stat(lockFile)).rejects.toMatchObject({ code: "ENOENT" });
+    await (await acquireStoreLock(lockFile, tmpDirectory)).release();
   });
 });

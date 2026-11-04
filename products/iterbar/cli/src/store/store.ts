@@ -153,28 +153,43 @@ function checkAttachmentBytes(name: string, data: unknown): Buffer {
   return bytes;
 }
 
+interface PngChunk {
+  readonly type: string;
+  readonly data: Buffer;
+  /** The offset just past the chunk's CRC. */
+  readonly end: number;
+}
+
+/** The chunk at `offset` of `bytes`, or `null` when it does not fit in `bytes` or its CRC does not match. */
+function pngChunkAt(bytes: Buffer, offset: number): PngChunk | null {
+  if (offset + 12 > bytes.byteLength) return null;
+  const length = bytes.readUInt32BE(offset);
+  const end = offset + 12 + length;
+  if (length > 0x7fffffff || end > bytes.byteLength) return null;
+  if (bytes.readUInt32BE(end - 4) !== crc32(bytes.subarray(offset + 4, end - 4))) return null;
+  return { type: bytes.toString("latin1", offset + 4, offset + 8), data: bytes.subarray(offset + 8, end - 4), end };
+}
+
+/** A 13-byte IHDR of a non-empty image. */
+function isPngHeader(chunk: PngChunk): boolean {
+  return chunk.type === "IHDR" && chunk.data.byteLength === 13 && chunk.data.readUInt32BE(0) !== 0
+    && chunk.data.readUInt32BE(4) !== 0;
+}
+
 /**
  * True when `bytes` is a structurally complete PNG: the signature, then chunks whose lengths fit and whose
- * CRCs match, starting with a 13-byte IHDR of a non-empty image, with at least one IDAT, and ending with IEND
- * exactly at the end of the data. The image data itself is not decoded.
+ * CRCs match, starting with a 13-byte IHDR of a non-empty image (the only IHDR), with at least one IDAT, and
+ * ending with an empty IEND exactly at the end of the data. The image data itself is not decoded.
  */
 function isPng(bytes: Buffer): boolean {
   if (bytes.byteLength < PNG_SIGNATURE.length || PNG_SIGNATURE.some((byte, index) => bytes[index] !== byte)) return false;
-  let offset = PNG_SIGNATURE.length;
+  const header = pngChunkAt(bytes, PNG_SIGNATURE.length);
+  if (header === null || !isPngHeader(header)) return false;
   let sawData = false;
-  for (let index = 0; offset + 12 <= bytes.byteLength; index += 1) {
-    const length = bytes.readUInt32BE(offset);
-    const end = offset + 12 + length;
-    if (length > 0x7fffffff || end > bytes.byteLength) return false;
-    const type = bytes.toString("latin1", offset + 4, offset + 8);
-    if (bytes.readUInt32BE(end - 4) !== crc32(bytes.subarray(offset + 4, end - 4))) return false;
-    if ((index === 0) !== (type === "IHDR")) return false;
-    if (type === "IHDR" && (length !== 13 || bytes.readUInt32BE(offset + 8) === 0 || bytes.readUInt32BE(offset + 12) === 0)) {
-      return false;
-    }
-    if (type === "IDAT") sawData = true;
-    if (type === "IEND") return sawData && end === bytes.byteLength;
-    offset = end;
+  for (let chunk = pngChunkAt(bytes, header.end); chunk !== null; chunk = pngChunkAt(bytes, chunk.end)) {
+    if (chunk.type === "IHDR") return false;
+    if (chunk.type === "IEND") return chunk.data.byteLength === 0 && sawData && chunk.end === bytes.byteLength;
+    sawData ||= chunk.type === "IDAT";
   }
   return false;
 }
