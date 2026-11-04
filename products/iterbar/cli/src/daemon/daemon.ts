@@ -25,7 +25,10 @@ const HTTP_SHUTDOWN_GRACE_MS = 2000;
 export interface StartDaemonOptions {
   /** Absolute path of the project whose `.iterbar/` store the daemon serves. It must exist. */
   readonly projectRoot: string;
-  /** Receives unexpected errors, which clients only see as `internal`. Defaults to writing them to stderr. */
+  /**
+   * Receives unexpected errors, which clients only see as `internal`. Defaults to writing them to stderr. An
+   * exception it throws is ignored: reporting never changes what a client, or the caller of `startDaemon`, sees.
+   */
   readonly onError?: (error: unknown) => void;
   /** Wall clock in epoch milliseconds for the store's timestamps; defaults to `Date.now`. */
   readonly now?: () => number;
@@ -120,7 +123,14 @@ class Daemon implements RunningDaemon {
  * `.iterbar/daemon.json` (mode 0600), replacing one that an earlier daemon left behind.
  */
 export async function startDaemon(options: StartDaemonOptions): Promise<RunningDaemon> {
-  const onError = options.onError ?? defaultOnError;
+  const reporter = options.onError ?? defaultOnError;
+  const onError = (error: unknown) => {
+    try {
+      reporter(error);
+    } catch {
+      // A failing reporter must not replace the error being reported or skip the response or cleanup after it.
+    }
+  };
   const store = await openFeedbackStore(options.projectRoot, options.now ? { now: options.now } : {});
   const token = randomBytes(32).toString("hex");
   const origins = new OriginAllowList();
