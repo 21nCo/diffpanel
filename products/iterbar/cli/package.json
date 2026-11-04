@@ -1,0 +1,33 @@
+{
+  "name": "@iterbar/cli",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Iterbar command line, daemon and local feedback store.",
+  "type": "module",
+  "exports": {
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "import": "./dist/store.js",
+      "default": "./dist/store.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsup --entry.store src/store/index.ts --format esm --dts --sourcemap --clean",
+    "clean": "rm -rf dist coverage",
+    "lint": "eslint src",
+    "test": "pnpm --filter @iterbar/cli... build && vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "iterbar": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.11"
+  }
+}
