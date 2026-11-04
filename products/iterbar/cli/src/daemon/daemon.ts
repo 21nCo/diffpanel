@@ -26,8 +26,10 @@ export interface StartDaemonOptions {
   /** Absolute path of the project whose `.iterbar/` store the daemon serves. It must exist. */
   readonly projectRoot: string;
   /**
-   * Receives unexpected errors, which clients only see as `internal`. Defaults to writing them to stderr. An
-   * exception it throws is ignored: reporting never changes what a client, or the caller of `startDaemon`, sees.
+   * Receives unexpected errors, which clients only see as `internal`. Defaults to writing them to stderr. It may
+   * be async; it is never awaited, and its failure is ignored, whether it throws or returns a promise (or
+   * thenable) that rejects. Reporting never changes what a client, or the caller of `startDaemon`, sees, and never
+   * crashes the process with an unhandled rejection.
    */
   readonly onError?: (error: unknown) => void;
   /** Wall clock in epoch milliseconds for the store's timestamps; defaults to `Date.now`. */
@@ -49,6 +51,10 @@ export interface RunningDaemon {
 }
 
 const shuttingDown = () => new DaemonHttpError(503, "internal", "The daemon is shutting down", { connection: "close" });
+
+function ignoreReporterFailure(): void {
+  // A reporter's own failure has nowhere further to go.
+}
 
 function defaultOnError(error: unknown): void {
   process.stderr.write(`iterbar daemon: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
@@ -124,11 +130,17 @@ class Daemon implements RunningDaemon {
  */
 export async function startDaemon(options: StartDaemonOptions): Promise<RunningDaemon> {
   const reporter = options.onError ?? defaultOnError;
-  const onError = (error: unknown) => {
+  // A failing reporter must not replace the error being reported, skip the response or cleanup after it, or
+  // crash the process with an unhandled rejection. Reporting is not awaited, so neither is its outcome.
+  const onError = (error: unknown): void => {
     try {
-      reporter(error);
+      const result: unknown = reporter(error);
+      // Promise.resolve also adopts a thenable, and turns a `then` that throws into a rejection handled here.
+      if ((typeof result === "object" && result !== null) || typeof result === "function") {
+        Promise.resolve(result).then(undefined, ignoreReporterFailure);
+      }
     } catch {
-      // A failing reporter must not replace the error being reported or skip the response or cleanup after it.
+      // Ignored, as above.
     }
   };
   const store = await openFeedbackStore(options.projectRoot, options.now ? { now: options.now } : {});
