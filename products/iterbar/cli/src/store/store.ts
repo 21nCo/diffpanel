@@ -445,10 +445,12 @@ export async function openFeedbackStore(projectRoot: string, options: OpenFeedba
   await ensureDirectory(paths.tmpDirectory);
   await ensureGitignore(paths);
   await ensureDirectory(paths.feedbackDirectory);
+  // Acquisition ends by checking that store.lock is still this process's, so the sweep runs as the owner.
   const lock = await acquireStoreLock(paths.lockFile, paths.tmpDirectory);
   try {
     const clock = new StoreClock(options.now);
     await sweep(paths, clock);
+    await lock.confirmAcquired();
     return new FileFeedbackStore(paths, lock, clock, options);
   } catch (error) {
     await lock.release();

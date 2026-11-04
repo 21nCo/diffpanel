@@ -17,6 +17,9 @@ export const START_TIME_TOLERANCE_MS = 5_000;
 /** Attempts before giving up when the lock keeps changing under this process. */
 const MAX_ACQUIRE_ATTEMPTS = 8;
 
+/** Claim generations followed before giving up: each one is a claimant that died during a takeover. */
+const MAX_CLAIM_GENERATIONS = 64;
+
 /** How long to wait while another live process is taking over the same stale lock. */
 const TAKEOVER_BACKOFF_MS = 25;
 
@@ -38,16 +41,42 @@ function pidExists(pid: number): boolean {
   }
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const LSTART = /^[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/;
+
+/**
+ * Parses `ps -o lstart=` output (`Wed Nov  4 09:45:12 2026`, the same on macOS and procps in the C locale)
+ * as UTC; `undefined` for anything else. `ps` must run with `TZ=UTC0`: a local wall time cannot be read back
+ * without its zone (the hour repeated when daylight saving time ends is ambiguous), and `ps` and V8 may read a
+ * `TZ` value differently.
+ */
+export function parseUtcStartTime(text: string): number | undefined {
+  const match = LSTART.exec(text.trim());
+  if (!match) return undefined;
+  const [, month, day, hours, minutes, seconds, year] = match;
+  const monthIndex = MONTHS.indexOf(month as string);
+  if (monthIndex < 0) return undefined;
+  const ms = Date.UTC(Number(year), monthIndex, Number(day), Number(hours), Number(minutes), Number(seconds));
+  const date = new Date(ms);
+  // Reject what Date.UTC would silently roll over, such as Feb 30.
+  return date.getUTCMonth() === monthIndex && date.getUTCDate() === Number(day) ? ms : undefined;
+}
+
 /**
  * When process `pid` started, in epoch milliseconds; `null` when it does not exist and `undefined` when the
  * start time cannot be determined (no `ps`, or output this reader does not understand).
+ *
+ * Known limit, deferred to ROLL-20: on Linux, procps derives `lstart` from the boot time in `/proc/stat`,
+ * which the kernel moves when the wall clock is stepped. After a step of more than
+ * {@link START_TIME_TOLERANCE_MS} a live owner's start time no longer matches its lock, so it is judged
+ * stale. macOS keeps each process's start time as recorded and is not affected.
  */
 export function processStartTime(pid: number): Promise<number | null | undefined> {
   return new Promise((resolve) => {
     execFile(
       "ps",
       ["-o", "lstart=", "-p", String(pid)],
-      { env: { ...process.env, LC_ALL: "C", LANG: "C" }, timeout: 5_000 },
+      { env: { ...process.env, LC_ALL: "C", LANG: "C", TZ: "UTC0" }, timeout: 5_000 },
       (error, stdout) => {
         const text = String(stdout).trim();
         if (error) {
@@ -55,9 +84,7 @@ export function processStartTime(pid: number): Promise<number | null | undefined
           resolve((error as { code?: unknown }).code === 1 && text === "" ? null : undefined);
           return;
         }
-        // `Wed Nov  4 09:45:12 2026` in local time, on macOS and procps alike.
-        const ms = Date.parse(text);
-        resolve(text !== "" && Number.isFinite(ms) ? ms : undefined);
+        resolve(parseUtcStartTime(text));
       },
     );
   });
@@ -68,23 +95,62 @@ export function processStartTime(pid: number): Promise<number | null | undefined
  * `startedAt`; when the start time cannot be read the owner is presumed alive, so a live owner is never
  * taken over.
  */
-export async function isOwnerAlive(lock: StoreLock): Promise<boolean> {
+export async function isOwnerAlive(
+  lock: StoreLock,
+  readStartTime: (pid: number) => Promise<number | null | undefined> = processStartTime,
+): Promise<boolean> {
   if (!pidExists(lock.pid)) return false;
   const recorded = Date.parse(lock.startedAt);
-  const observed = lock.pid === process.pid ? Date.parse(PROCESS_STARTED_AT) : await processStartTime(lock.pid);
+  const observed = lock.pid === process.pid ? Date.parse(PROCESS_STARTED_AT) : await readStartTime(lock.pid);
   if (observed === null) return false;
   if (observed === undefined) return true;
   return Math.abs(observed - recorded) <= START_TIME_TOLERANCE_MS;
 }
 
+/** The file operations of the lock protocol. @internal Replaced in tests to force interleavings. */
+export interface LockFileSystem {
+  link(existing: string, target: string): Promise<void>;
+  readFile(path: string): Promise<string>;
+  rename(source: string, target: string): Promise<void>;
+  remove(path: string): Promise<void>;
+  identity(path: string): Promise<FileIdentity>;
+}
+
+export interface FileIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
+}
+
+const nodeLockFileSystem: LockFileSystem = {
+  link,
+  readFile: (path) => readFile(path, "utf8"),
+  rename,
+  remove: removeFile,
+  identity: async (path) => {
+    const { dev, ino } = await stat(path, { bigint: true });
+    return { dev, ino };
+  },
+};
+
+/** @internal Who this process is to the lock protocol, and how it reaches the file system. */
+export interface LockEnvironment {
+  readonly lock: StoreLock;
+  readonly isOwnerAlive: (lock: StoreLock) => Promise<boolean>;
+  readonly fs: LockFileSystem;
+}
+
+function defaultEnvironment(): LockEnvironment {
+  return { lock: ownLock(), isOwnerAlive: (lock) => isOwnerAlive(lock), fs: nodeLockFileSystem };
+}
+
 type Inspection = { readonly state: "missing" } | { readonly state: "live"; readonly lock: StoreLock }
   | { readonly state: "stale"; readonly text: string };
 
-/** Reads and judges a lock file: missing, held by a live owner, or stale (dead owner or malformed). */
-async function inspect(path: string): Promise<Inspection> {
+/** Reads and judges a lock or claim file: missing, held by a live owner, or stale (dead owner or malformed). */
+async function inspect(env: LockEnvironment, path: string): Promise<Inspection> {
   let text: string;
   try {
-    text = await readFile(path, "utf8");
+    text = await env.fs.readFile(path);
   } catch (error) {
     if (errnoCode(error) === "ENOENT") return { state: "missing" };
     throw error;
@@ -99,15 +165,25 @@ async function inspect(path: string): Promise<Inspection> {
     if (error instanceof InvalidMessageError) return { state: "stale", text };
     throw error;
   }
-  return await isOwnerAlive(lock) ? { state: "live", lock } : { state: "stale", text };
+  return await env.isOwnerAlive(lock) ? { state: "live", lock } : { state: "stale", text };
+}
+
+function digest(...parts: string[]): string {
+  const hash = createHash("sha256");
+  for (const part of parts) hash.update(`${Buffer.byteLength(part)}:${part}`);
+  return hash.digest("hex");
 }
 
 /**
- * The claim on replacing one particular stale lock, in `tmp/`: named after the stale lock's contents, which are
- * unique to its (dead) owner, and holding the claimant's own lock so an abandoned claim can be recognised.
+ * The claim on replacing one particular stale lock, in `tmp/`. Generation 0 is named after the stale lock's
+ * contents, which are unique to its (dead) owner. When a claimant dies holding generation `n`, generation
+ * `n + 1` is named after generation `n`'s name and the dead claimant's lock (`abandonedClaims[n]`), so every
+ * generation is a fresh file that a contender wins by an exclusive link; an abandoned claim is never removed.
  */
-export function takeoverClaimPath(tmpDirectory: string, staleText: string): string {
-  return join(tmpDirectory, `takeover-${createHash("sha256").update(staleText).digest("hex").slice(0, 32)}.claim`);
+export function takeoverClaimPath(tmpDirectory: string, staleText: string, abandonedClaims: readonly string[] = []): string {
+  let key = digest("store.lock", staleText);
+  for (const claimText of abandonedClaims) key = digest(key, claimText);
+  return join(tmpDirectory, `takeover-${key.slice(0, 32)}.claim`);
 }
 
 /**
@@ -115,31 +191,52 @@ export function takeoverClaimPath(tmpDirectory: string, staleText: string): stri
  * Returns `true` when this process now owns the lock.
  *
  * `store.lock` is never removed during a takeover, so no other process can link a lock into a gap. Instead the
- * contenders that judged the same lock stale race to hard-link a claim named after it, which exactly one wins.
- * Only a claimant may replace that lock, so the winner re-reads `store.lock`: if it is still the stale lock it
- * renames its candidate over it, atomically; if not, another contender already took over and it backs off. A
- * claim whose claimant died is removed, so a crash during a takeover does not block the store for good.
+ * contenders that judged the same lock stale race to hard-link a claim on it, which exactly one wins. Only a
+ * claimant may replace that lock, so the winner re-reads `store.lock`: if it is still the stale lock it renames
+ * its candidate over it, atomically; if not, another contender already took over and it backs off.
  *
- * Residual: if a claimant dies holding a claim and two processes then remove that abandoned claim at the same
- * moment, both may claim and replace the lock; the one replaced first fails its next write with `lock_lost`.
+ * A claimant that dies leaves its claim behind. Its claim is never unlinked by a contender, which could delete
+ * a live claim linked at the same path after the inspection; contenders instead race for the next generation
+ * of the claim ({@link takeoverClaimPath}), which only exists once the previous claimant is dead. So at most
+ * one live claimant exists per stale lock. The claims are removed only after the stale lock is gone, when a
+ * claim on it can no longer replace anything.
  */
-async function takeOver(lockFile: string, candidate: string, staleText: string): Promise<boolean> {
-  const claim = takeoverClaimPath(dirname(candidate), staleText);
-  try {
-    await link(candidate, claim);
-  } catch (error) {
-    if (errnoCode(error) !== "EEXIST") throw error;
-    const claimant = await inspect(claim);
-    if (claimant.state === "stale") await removeFile(claim);
-    else if (claimant.state === "live") await delay(TAKEOVER_BACKOFF_MS);
-    return false;
+async function takeOver(env: LockEnvironment, lockFile: string, candidate: string, staleText: string): Promise<boolean> {
+  const tmpDirectory = dirname(candidate);
+  const abandoned: string[] = [];
+  let claim = takeoverClaimPath(tmpDirectory, staleText);
+  for (;;) {
+    try {
+      await env.fs.link(candidate, claim);
+      break;
+    } catch (error) {
+      if (errnoCode(error) !== "EEXIST") throw error;
+    }
+    const claimant = await inspect(env, claim);
+    if (claimant.state === "live") {
+      await delay(TAKEOVER_BACKOFF_MS);
+      return false;
+    }
+    // Missing: its claimant gave up or finished, so start over from store.lock.
+    if (claimant.state === "missing" || abandoned.length + 1 >= MAX_CLAIM_GENERATIONS) return false;
+    abandoned.push(claimant.text);
+    claim = takeoverClaimPath(tmpDirectory, staleText, abandoned);
   }
+  let replaced = false;
   try {
-    if ((await readFile(lockFile, "utf8").catch(() => null)) !== staleText) return false;
-    await rename(candidate, lockFile);
+    if ((await env.fs.readFile(lockFile).catch(() => null)) !== staleText) return false;
+    await env.fs.rename(candidate, lockFile);
+    replaced = true;
     return true;
   } finally {
-    await removeFile(claim);
+    // This process's own claim always goes. The abandoned generations go only once the stale lock is gone:
+    // while it is in place they keep the next contender on the chain past them.
+    await env.fs.remove(claim);
+    if (replaced) {
+      for (let generation = 0; generation < abandoned.length; generation += 1) {
+        await env.fs.remove(takeoverClaimPath(tmpDirectory, staleText, abandoned.slice(0, generation)));
+      }
+    }
   }
 }
 
@@ -152,6 +249,11 @@ export interface StoreLockHandle {
   readonly lock: StoreLock;
   /** Throws `lock_lost` unless the lock file is still the one this handle created. */
   assertHeld(): Promise<void>;
+  /**
+   * Throws {@link StoreLockedError} naming the current owner unless the lock file is still the one this handle
+   * created. For the end of acquisition, when losing the lock means another process owns the store.
+   */
+  confirmAcquired(): Promise<void>;
   /** Removes the lock file if this handle still owns it. Idempotent. */
   release(): Promise<void>;
 }
@@ -162,25 +264,32 @@ export interface StoreLockHandle {
  *
  * The lock is written completely to `tmpDirectory`, then hard-linked into place, which fails if a lock exists,
  * or renamed over a stale lock under a takeover claim (see {@link takeOver}). Either way readers never see a
- * partial lock, and of any number of racing processes exactly one acquires it.
+ * partial lock, and of any number of racing processes exactly one acquires it. The lock file is checked to
+ * still be this process's before this returns.
+ *
+ * `environment` is a test seam (@internal); callers leave it out.
  */
-export async function acquireStoreLock(lockFile: string, tmpDirectory: string): Promise<StoreLockHandle> {
-  const lock = ownLock();
-  const text = `${JSON.stringify(lock)}\n`;
+export async function acquireStoreLock(
+  lockFile: string,
+  tmpDirectory: string,
+  environment?: LockEnvironment,
+): Promise<StoreLockHandle> {
+  const env = environment ?? defaultEnvironment();
+  const text = `${JSON.stringify(env.lock)}\n`;
   let owner: StoreLock | null = null;
   for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt += 1) {
     const candidate = temporaryPath(tmpDirectory, "lock");
     try {
       await writeNewFile(candidate, text);
-      const identity = await stat(candidate, { bigint: true });
-      if (await linkNew(candidate, lockFile)) return await acquired(lockFile, lock, identity);
-      const found = await inspect(lockFile);
+      const identity = await env.fs.identity(candidate);
+      if (await linkNew(env, candidate, lockFile)) return await confirmed(env, lockFile, identity);
+      const found = await inspect(env, lockFile);
       if (found.state === "live") {
         owner = found.lock;
         break;
       }
-      if (found.state === "stale" && await takeOver(lockFile, candidate, found.text)) {
-        return await acquired(lockFile, lock, identity);
+      if (found.state === "stale" && await takeOver(env, lockFile, candidate, found.text)) {
+        return await confirmed(env, lockFile, identity);
       }
     } catch (error) {
       // ENOENT: the current owner swept `tmp/` while the candidate was in it; try again.
@@ -193,9 +302,9 @@ export async function acquireStoreLock(lockFile: string, tmpDirectory: string): 
 }
 
 /** Hard-links `source` to `target`; `false` when `target` exists. */
-async function linkNew(source: string, target: string): Promise<boolean> {
+async function linkNew(env: LockEnvironment, source: string, target: string): Promise<boolean> {
   try {
-    await link(source, target);
+    await env.fs.link(source, target);
     return true;
   } catch (error) {
     if (errnoCode(error) === "EEXIST") return false;
@@ -203,18 +312,29 @@ async function linkNew(source: string, target: string): Promise<boolean> {
   }
 }
 
-interface FileIdentity {
-  readonly dev: bigint;
-  readonly ino: bigint;
+/** The current owner of the lock file, when it is a readable lock. */
+async function currentOwner(env: LockEnvironment, lockFile: string): Promise<StoreLock | null> {
+  try {
+    return parseMessageJson(storeLockSchema, await env.fs.readFile(lockFile), "store lock");
+  } catch {
+    return null;
+  }
 }
 
-async function acquired(lockFile: string, lock: StoreLock, identity: FileIdentity): Promise<StoreLockHandle> {
+/** The handle of a lock this process has just placed, after checking that it is still in place. */
+async function confirmed(env: LockEnvironment, lockFile: string, identity: FileIdentity): Promise<StoreLockHandle> {
+  const handle = await acquired(env, lockFile, identity);
+  await handle.confirmAcquired();
+  return handle;
+}
+
+async function acquired(env: LockEnvironment, lockFile: string, identity: FileIdentity): Promise<StoreLockHandle> {
   await syncDirectory(dirname(lockFile));
   let released = false;
 
   async function holds(): Promise<boolean> {
     try {
-      const current = await stat(lockFile, { bigint: true });
+      const current = await env.fs.identity(lockFile);
       return current.dev === identity.dev && current.ino === identity.ino;
     } catch (error) {
       if (errnoCode(error) === "ENOENT") return false;
@@ -223,17 +343,20 @@ async function acquired(lockFile: string, lock: StoreLock, identity: FileIdentit
   }
 
   return Object.freeze({
-    lock,
+    lock: env.lock,
     async assertHeld() {
       if (released || !(await holds())) {
         throw new IterbarStoreError("lock_lost", `${lockFile} is no longer held by this process`);
       }
     },
+    async confirmAcquired() {
+      if (released || !(await holds())) throw new StoreLockedError(lockFile, await currentOwner(env, lockFile));
+    },
     async release() {
       if (released) return;
       released = true;
       if (await holds()) {
-        await removeFile(lockFile);
+        await env.fs.remove(lockFile);
         await syncDirectory(dirname(lockFile));
       }
     },

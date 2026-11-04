@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { feedbackSchema, MAX_ATTACHMENT_BYTES, parseMessageJson, type Feedback } from "iterbar";
-import { feedbackRecordPath, iterbarPaths } from "iterbar/node";
+import { feedbackSchema, MAX_ATTACHMENT_BYTES, parseMessageJson, type AttachmentRef, type Feedback } from "iterbar";
+import { attachmentPath, feedbackRecordPath, iterbarPaths } from "iterbar/node";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openFeedbackStore, type FeedbackStore, type OpenFeedbackStoreOptions } from "./store.js";
 import { chooseVariantDraft, commentDraft, EVIDENCE, PNG, temporaryProject } from "./test-support/helpers.js";
@@ -157,6 +157,39 @@ describe("records", () => {
     const { replies } = await store.get(item.id);
     expect(replies.map((reply) => reply.text).sort()).toEqual(Array.from({ length: 20 }, (_, index) => `reply ${index}`).sort());
     expect(new Set(replies.map((reply) => reply.id)).size).toBe(20);
+  });
+  it("applies concurrent replies and status changes in call order without losing any", async () => {
+    const store = await open();
+    const item = await store.create(chooseVariantDraft);
+    const statuses = ["working", "needs-info", "done", "resolved"] as const;
+    await Promise.all(statuses.flatMap((status, index) => [
+      store.reply(item.id, { author: agent, text: `reply ${index}` }),
+      store.setStatus(item.id, status),
+    ]));
+    const stored = await store.get(item.id);
+    expect(stored.replies.map((reply) => reply.text)).toEqual(["reply 0", "reply 1", "reply 2", "reply 3"]);
+    expect(stored.status).toBe("resolved");
+  });
+
+  it("finishes pending writes before close releases the lock", async () => {
+    const store = await open();
+    const item = await store.create(chooseVariantDraft);
+    const pending = Array.from({ length: 5 }, (_, index) => store.reply(item.id, { author: agent, text: `reply ${index}` }));
+    await store.close();
+    await expect(Promise.all(pending)).resolves.toHaveLength(5);
+    stores.length = 0;
+    await expect((await open()).get(item.id)).resolves.toMatchObject({ replies: { length: 5 } });
+  });
+
+  it("reports corrupt_store for a referenced attachment that is missing or altered", async () => {
+    const store = await open();
+    const item = await store.create(commentDraft, { screenshot: PNG, evidence: EVIDENCE });
+    const screenshot = item.screenshot as AttachmentRef;
+    const evidence = item.evidence?.attachment as AttachmentRef;
+    await writeFile(attachmentPath(root, item.id, screenshot), Buffer.concat([PNG, Buffer.from([0])]));
+    await rm(attachmentPath(root, item.id, evidence));
+    await expect(store.readAttachment(item.id, screenshot.id)).rejects.toMatchObject({ code: "corrupt_store" });
+    await expect(store.readAttachment(item.id, evidence.id)).rejects.toMatchObject({ code: "corrupt_store" });
   });
 });
 
