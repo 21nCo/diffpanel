@@ -417,6 +417,56 @@ describe("acquisition", () => {
     expect(JSON.parse(await readFile(lockFile, "utf8"))).toEqual(other);
   });
 
+  it("releases once however many release() calls overlap, never removing a successor's lock", async () => {
+    await (await openFeedbackStore(root)).close();
+    const { lockFile, tmpDirectory } = iterbarPaths(root);
+    // The next read of the lock file, once armed, completes and then waits for the test to let it return.
+    let armed = false;
+    let paused!: () => void;
+    const reached = new Promise<void>((resolve) => (paused = resolve));
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    const fs: LockFileSystem = {
+      ...reusedInode,
+      identity: async (path) => {
+        const { dev, ino } = await stat(path, { bigint: true });
+        return { dev, ino };
+      },
+      readFile: async (path) => {
+        const text = await readFile(path, "utf8");
+        if (armed && path === lockFile) {
+          armed = false;
+          paused();
+          await gate;
+        }
+        return text;
+      },
+    };
+    const handle = await acquireStoreLock(lockFile, tmpDirectory, { fs });
+    armed = true;
+    const first = handle.release();
+    await reached; // The first call has read this handle's lock and is about to act on it.
+    const second = handle.release();
+    const secondSettledEarly = await Promise.race([
+      second.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
+    ]);
+    await expect(handle.assertHeld()).rejects.toMatchObject({ code: "lock_lost" });
+    // Had a call removed the lock already, another process would take it now.
+    const successor = `${JSON.stringify({ schemaVersion: 1, pid: process.ppid, startedAt: "2026-11-04T00:00:00.000Z" })}\n`;
+    const successorPlaced = await stat(lockFile).then(() => false, async () => {
+      await writeFile(lockFile, successor);
+      return true;
+    });
+    resume();
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+    if (successorPlaced) expect(await readFile(lockFile, "utf8").catch(() => "(store.lock missing)")).toBe(successor);
+    else await expect(stat(lockFile)).rejects.toMatchObject({ code: "ENOENT" });
+    // Every call settles only once the lock is released, so no successor could take it any earlier.
+    expect(secondSettledEarly).toBe(false);
+    expect(successorPlaced).toBe(false);
+  });
+
   it("lets a newer handle of this process supersede one whose lock was removed", async () => {
     await (await openFeedbackStore(root)).close();
     const { lockFile, tmpDirectory } = iterbarPaths(root);

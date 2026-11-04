@@ -280,7 +280,11 @@ export interface StoreLockHandle {
    * created. For the end of acquisition, when losing the lock means another process owns the store.
    */
   confirmAcquired(): Promise<void>;
-  /** Removes the lock file if this handle still owns it. Idempotent. */
+  /**
+   * Removes the lock file if this handle still owns it. Idempotent: every call returns the same promise, which
+   * settles once the lock file is removed (or found not to be this handle's). The handle stops holding the lock
+   * as soon as the first call is made.
+   */
   release(): Promise<void>;
 }
 
@@ -373,10 +377,11 @@ async function acquired(env: LockEnvironment, lockFile: string, identity: FileId
   const key = `${lockFile}\0${text}`;
   const token = Symbol(lockFile);
   currentHandles.set(key, token);
-  let released = false;
+  let releasing: Promise<void> | null = null;
 
-  async function holds(): Promise<boolean> {
-    if (released || currentHandles.get(key) !== token) return false;
+  /** Whether the lock file is still the one this handle placed (see above), ignoring any release. */
+  async function inPlace(): Promise<boolean> {
+    if (currentHandles.get(key) !== token) return false;
     try {
       const current = await env.fs.identity(lockFile);
       if (current.dev !== identity.dev || current.ino !== identity.ino) return false;
@@ -384,6 +389,29 @@ async function acquired(env: LockEnvironment, lockFile: string, identity: FileId
     } catch (error) {
       if (errnoCode(error) === "ENOENT") return false;
       throw error;
+    }
+  }
+
+  /** Whether this handle holds the lock: in place, and no release has begun before or during the check. */
+  async function holds(): Promise<boolean> {
+    if (releasing !== null) return false;
+    const inPlaceNow = await inPlace();
+    return inPlaceNow && releasing === null;
+  }
+
+  /**
+   * The one release of this handle. Every release() call shares it, so no call can act on an earlier
+   * observation after another call removed the lock and a successor took it. The handle stays this process's
+   * current one until the file is removed, so a newer handle of this process placed meanwhile is never removed.
+   */
+  async function releaseOnce(): Promise<void> {
+    try {
+      if (await inPlace()) {
+        await env.fs.remove(lockFile);
+        await syncDirectory(dirname(lockFile));
+      }
+    } finally {
+      if (currentHandles.get(key) === token) currentHandles.delete(key);
     }
   }
 
@@ -397,15 +425,9 @@ async function acquired(env: LockEnvironment, lockFile: string, identity: FileId
     async confirmAcquired() {
       if (!(await holds())) throw new StoreLockedError(lockFile, await currentOwner(env, lockFile));
     },
-    async release() {
-      if (released) return;
-      const owned = await holds();
-      released = true;
-      if (currentHandles.get(key) === token) currentHandles.delete(key);
-      if (owned) {
-        await env.fs.remove(lockFile);
-        await syncDirectory(dirname(lockFile));
-      }
+    release() {
+      releasing ??= releaseOnce();
+      return releasing;
     },
   });
 }
