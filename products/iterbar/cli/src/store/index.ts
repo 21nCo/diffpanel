@@ -9,11 +9,7 @@ export {
   acquireStoreLock,
   isOwnerAlive,
   ownLock,
-  parseUtcStartTime,
-  platformStartTimes,
   PROCESS_STARTED_AT,
-  START_TIME_TOLERANCE_MS,
-  type ProcessStartTimes,
   type StoreLockHandle,
 } from "./lock.js";
 export {

@@ -1,4 +1,3 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { link, readFile, rename, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -6,15 +5,6 @@ import { performance } from "node:perf_hooks";
 import { InvalidMessageError, parseMessageJson, SCHEMA_VERSION, storeLockSchema, type StoreLock } from "iterbar";
 import { errnoCode, IterbarStoreError, StoreLockedError } from "./errors.js";
 import { removeFile, syncDirectory, temporaryPath, writeNewFile } from "./files.js";
-
-/**
- * How much later than the lock's `startedAt` a live process at the lock's pid may have started and still be the
- * owner, where start times are step-stable. A process that started later was given the pid after the owner
- * exited. The owner itself starts before its `startedAt` (Node's time origin), by seconds on a loaded host, and
- * `ps` truncates to whole seconds, so it normally reads earlier; the allowance covers the clock being stepped
- * back while the owner started.
- */
-export const START_TIME_TOLERANCE_MS = 5_000;
 
 /** Attempts before giving up when the lock keeps changing under this process. */
 const MAX_ACQUIRE_ATTEMPTS = 8;
@@ -33,104 +23,35 @@ export function ownLock(): StoreLock {
   return { schemaVersion: SCHEMA_VERSION, pid: process.pid, startedAt: PROCESS_STARTED_AT };
 }
 
+/** False only when no process has `pid`: any other probe failure (EPERM, EIO, ...) proves nothing. */
 function pidExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    // EPERM: the process exists but belongs to another user.
-    return errnoCode(error) === "EPERM";
+    return errnoCode(error) !== "ESRCH";
   }
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const LSTART = /^[A-Z][a-z]{2}\s+([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})$/;
-
 /**
- * Parses `ps -o lstart=` output (`Wed Nov  4 09:45:12 2026`, the same on macOS and procps in the C locale)
- * as UTC; `undefined` for anything else. `ps` must run with `TZ=UTC0`: a local wall time cannot be read back
- * without its zone (the hour repeated when daylight saving time ends is ambiguous), and `ps` and V8 may read a
- * `TZ` value differently.
- */
-export function parseUtcStartTime(text: string): number | undefined {
-  const match = LSTART.exec(text.trim());
-  if (!match) return undefined;
-  const [, month, day, hours, minutes, seconds, year] = match;
-  const monthIndex = MONTHS.indexOf(month as string);
-  if (monthIndex < 0) return undefined;
-  const ms = Date.UTC(Number(year), monthIndex, Number(day), Number(hours), Number(minutes), Number(seconds));
-  const date = new Date(ms);
-  // Reject what Date.UTC would silently roll over, such as Feb 30.
-  return date.getUTCMonth() === monthIndex && date.getUTCDate() === Number(day) ? ms : undefined;
-}
-
-/**
- * When process `pid` started, in epoch milliseconds; `null` when it does not exist and `undefined` when the
- * start time cannot be determined (no `ps`, or output this reader does not understand).
- */
-export function processStartTime(pid: number): Promise<number | null | undefined> {
-  return new Promise((resolve) => {
-    execFile(
-      "ps",
-      ["-o", "lstart=", "-p", String(pid)],
-      { env: { ...process.env, LC_ALL: "C", LANG: "C", TZ: "UTC0" }, timeout: 5_000 },
-      (error, stdout) => {
-        const text = String(stdout).trim();
-        if (error) {
-          // `ps -p` exits 1 with no output when the process does not exist.
-          resolve((error as { code?: unknown }).code === 1 && text === "" ? null : undefined);
-          return;
-        }
-        resolve(parseUtcStartTime(text));
-      },
-    );
-  });
-}
-
-/** Where the lock protocol learns when a process started. @internal Replaced in tests to simulate platforms. */
-export interface ProcessStartTimes {
-  /**
-   * True when a process's observed start time is the wall-clock time it was recorded at, and stays so when the
-   * wall clock is later stepped. Only then can it be compared with a lock's `startedAt`.
-   */
-  readonly stepStable: boolean;
-  readonly read: (pid: number) => Promise<number | null | undefined>;
-}
-
-/**
- * This platform's process start times. macOS records each process's start as a wall-clock time at fork and
- * never moves it. Linux procps instead derives `lstart` from the kernel's boot time, which the kernel moves
- * whenever the wall clock is stepped (NTP or timesyncd stepping, resuming a VM or WSL, setting the date), and
- * no step-independent reference relates a process's boot-relative start to the wall-clock `startedAt` in its
- * lock. So only macOS start times are step-stable; elsewhere they are not used.
- */
-export function platformStartTimes(platform: NodeJS.Platform = process.platform): ProcessStartTimes {
-  return { stepStable: platform === "darwin", read: processStartTime };
-}
-
-/**
- * True when the lock's owner may still be running, so the lock must not be taken over. A lock whose pid does
- * not exist is stale. A lock with this process's pid is stale unless it records this process's start.
+ * True when the lock's owner may still be running, so the lock must not be taken over. Only a lock whose pid
+ * does not exist is stale, and a lock with this process's pid is stale unless it records this process's start
+ * (the pid was then an earlier process's, which has exited).
  *
- * Any other running pid is checked against the lock's `startedAt` only where start times are step-stable
- * ({@link platformStartTimes}). The owner held its pid from its start until at least `startedAt`, so a process
- * at that pid now that started before `startedAt` is the owner, however long before: start-up takes seconds on
- * a loaded host. One that started more than {@link START_TIME_TOLERANCE_MS} after it was given the pid after
- * the owner exited, so the lock is stale. Where they are not step-stable, or the start time cannot be
- * read, a running pid is presumed to be the owner: a stepped clock must never let a second writer take over a
- * live owner. The cost is that when a dead owner's pid is reused by an unrelated process, the store stays
- * locked until that process exits; {@link StoreLockedError} names the pid so that a user can check it and
- * delete the lock file.
+ * Any other running pid is presumed to be the owner, whatever start time the lock records: process start times
+ * cannot be compared with `startedAt` reliably (Linux derives them from a boot time that moves when the wall
+ * clock is stepped, and on any platform the clock can be stepped while a process starts), and a misjudged live
+ * owner would let a second writer in. The cost is that when a dead owner's pid is reused by an unrelated
+ * process, the store stays locked until that process exits; {@link StoreLockedError} names the pid so that a
+ * user can check it and delete the lock file.
+ *
+ * Pids are only meaningful within one PID namespace, so every writer of a store must run in the same one (one
+ * host and kernel, not two containers or a container and its host sharing the directory). Opening a store
+ * from several namespaces, kernels or hosts at once is not supported (ROLL-20).
  */
-export async function isOwnerAlive(lock: StoreLock, startTimes: ProcessStartTimes = platformStartTimes()): Promise<boolean> {
+export async function isOwnerAlive(lock: StoreLock): Promise<boolean> {
   if (!pidExists(lock.pid)) return false;
-  const recorded = Date.parse(lock.startedAt);
-  if (lock.pid === process.pid) return Math.abs(Date.parse(PROCESS_STARTED_AT) - recorded) <= START_TIME_TOLERANCE_MS;
-  if (!startTimes.stepStable) return true;
-  const observed = await startTimes.read(lock.pid);
-  if (observed === null) return false;
-  if (observed === undefined) return true;
-  return observed - recorded <= START_TIME_TOLERANCE_MS;
+  return lock.pid !== process.pid || Date.parse(lock.startedAt) === Date.parse(PROCESS_STARTED_AT);
 }
 
 /** The file operations of the lock protocol. @internal Replaced in tests to force interleavings. */
@@ -140,6 +61,7 @@ export interface LockFileSystem {
   rename(source: string, target: string): Promise<void>;
   remove(path: string): Promise<void>;
   identity(path: string): Promise<FileIdentity>;
+  syncDirectory(path: string): Promise<void>;
 }
 
 export interface FileIdentity {
@@ -156,6 +78,7 @@ const nodeLockFileSystem: LockFileSystem = {
     const { dev, ino } = await stat(path, { bigint: true });
     return { dev, ino };
   },
+  syncDirectory,
 };
 
 /** @internal Who this process is to the lock protocol, and how it reaches the file system. */
@@ -309,8 +232,10 @@ export async function acquireStoreLock(
   let owner: StoreLock | null = null;
   for (let attempt = 0; attempt < MAX_ACQUIRE_ATTEMPTS; attempt += 1) {
     const candidate = temporaryPath(tmpDirectory, "lock");
+    let written = false;
     try {
       await writeNewFile(candidate, text);
+      written = true;
       const identity = await env.fs.identity(candidate);
       if (await linkNew(env, candidate, lockFile)) return await confirmed(env, lockFile, identity, text);
       const found = await inspect(env, lockFile);
@@ -325,7 +250,8 @@ export async function acquireStoreLock(
       // ENOENT: the current owner swept `tmp/` while the candidate was in it; try again.
       if (errnoCode(error) !== "ENOENT") throw error;
     } finally {
-      await removeFile(candidate);
+      // A candidate that could not be created exclusively is not this process's file.
+      if (written) await removeFile(candidate);
     }
   }
   throw new StoreLockedError(lockFile, owner);
@@ -358,11 +284,21 @@ async function currentOwner(env: LockEnvironment, lockFile: string): Promise<Sto
  */
 const currentHandles = new Map<string, symbol>();
 
-/** The handle of a lock this process has just placed, after checking that it is still in place. */
+/**
+ * The handle of a lock this process has just placed, once it is flushed and checked to be still in place.
+ * If either fails, the lock is released (only if it is still this handle's) before the error is rethrown, so
+ * it does not keep the store locked with no handle left to release it.
+ */
 async function confirmed(env: LockEnvironment, lockFile: string, identity: FileIdentity, text: string): Promise<StoreLockHandle> {
-  const handle = await acquired(env, lockFile, identity, text);
-  await handle.confirmAcquired();
-  return handle;
+  const handle = acquired(env, lockFile, identity, text);
+  try {
+    await env.fs.syncDirectory(dirname(lockFile));
+    await handle.confirmAcquired();
+    return handle;
+  } catch (error) {
+    await handle.release().catch(() => undefined);
+    throw error;
+  }
 }
 
 /**
@@ -372,8 +308,7 @@ async function confirmed(env: LockEnvironment, lockFile: string, identity: FileI
  * removed and recreated by another process can have this handle's (dev, ino). The text names this process
  * (pid and start), which no other running process shares.
  */
-async function acquired(env: LockEnvironment, lockFile: string, identity: FileIdentity, text: string): Promise<StoreLockHandle> {
-  await syncDirectory(dirname(lockFile));
+function acquired(env: LockEnvironment, lockFile: string, identity: FileIdentity, text: string): StoreLockHandle {
   const key = `${lockFile}\0${text}`;
   const token = Symbol(lockFile);
   currentHandles.set(key, token);
@@ -408,7 +343,7 @@ async function acquired(env: LockEnvironment, lockFile: string, identity: FileId
     try {
       if (await inPlace()) {
         await env.fs.remove(lockFile);
-        await syncDirectory(dirname(lockFile));
+        await env.fs.syncDirectory(dirname(lockFile));
       }
     } finally {
       if (currentHandles.get(key) === token) currentHandles.delete(key);

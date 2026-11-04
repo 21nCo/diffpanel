@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { crc32 } from "node:zlib";
 import {
   assertSafeId,
   attachmentFileName,
@@ -15,6 +16,7 @@ import {
   MAX_ATTACHMENT_BYTES,
   parseMessage,
   parseMessageJson,
+  replySchema,
   type AttachmentRef,
   type EvidenceAttachment,
   type Feedback,
@@ -49,6 +51,15 @@ export interface FeedbackFiles {
 export interface ReplyInput {
   readonly author: ReplyAuthor;
   readonly text: string;
+}
+
+/**
+ * A record as read: the feedback, and the JSON object it was parsed from, which also holds any fields this
+ * version does not know (additive v1 fields from a newer writer), so that rewriting the record keeps them.
+ */
+interface StoredRecord {
+  readonly feedback: Feedback;
+  readonly json: Record<string, unknown>;
 }
 
 /** An attachment's stored reference and its verified contents. */
@@ -127,24 +138,54 @@ function sha256(data: Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
-function checkAttachmentBytes(name: string, data: unknown): Uint8Array {
+/**
+ * A private copy of an attachment, checked for size. The copy is what is validated, hashed and written: the
+ * caller keeps its buffer and may change it while the write waits for earlier ones.
+ */
+function checkAttachmentBytes(name: string, data: unknown): Buffer {
   if (!(data instanceof Uint8Array)) throw new IterbarStoreError("invalid_request", `${name} must be a Uint8Array`);
-  if (data.byteLength === 0) throw new IterbarStoreError("invalid_request", `${name} is empty`);
-  if (data.byteLength > MAX_ATTACHMENT_BYTES) {
-    throw new IterbarStoreError("payload_too_large", `${name} is ${data.byteLength} bytes; the limit is ${MAX_ATTACHMENT_BYTES}`);
-  }
-  return data;
-}
-
-function checkScreenshot(data: unknown): Uint8Array {
-  const bytes = checkAttachmentBytes("screenshot", data);
-  if (bytes.byteLength < PNG_SIGNATURE.length || PNG_SIGNATURE.some((byte, index) => bytes[index] !== byte)) {
-    throw new IterbarStoreError("invalid_request", "screenshot is not a PNG image");
-  }
+  const tooLarge = (byteLength: number) =>
+    new IterbarStoreError("payload_too_large", `${name} is ${byteLength} bytes; the limit is ${MAX_ATTACHMENT_BYTES}`);
+  if (data.byteLength > MAX_ATTACHMENT_BYTES) throw tooLarge(data.byteLength);
+  const bytes = Buffer.from(data);
+  if (bytes.byteLength === 0) throw new IterbarStoreError("invalid_request", `${name} is empty`);
+  if (bytes.byteLength > MAX_ATTACHMENT_BYTES) throw tooLarge(bytes.byteLength);
   return bytes;
 }
 
-function checkEvidence(data: unknown): Uint8Array {
+/**
+ * True when `bytes` is a structurally complete PNG: the signature, then chunks whose lengths fit and whose
+ * CRCs match, starting with a 13-byte IHDR of a non-empty image, with at least one IDAT, and ending with IEND
+ * exactly at the end of the data. The image data itself is not decoded.
+ */
+function isPng(bytes: Buffer): boolean {
+  if (bytes.byteLength < PNG_SIGNATURE.length || PNG_SIGNATURE.some((byte, index) => bytes[index] !== byte)) return false;
+  let offset = PNG_SIGNATURE.length;
+  let sawData = false;
+  for (let index = 0; offset + 12 <= bytes.byteLength; index += 1) {
+    const length = bytes.readUInt32BE(offset);
+    const end = offset + 12 + length;
+    if (length > 0x7fffffff || end > bytes.byteLength) return false;
+    const type = bytes.toString("latin1", offset + 4, offset + 8);
+    if (bytes.readUInt32BE(end - 4) !== crc32(bytes.subarray(offset + 4, end - 4))) return false;
+    if ((index === 0) !== (type === "IHDR")) return false;
+    if (type === "IHDR" && (length !== 13 || bytes.readUInt32BE(offset + 8) === 0 || bytes.readUInt32BE(offset + 12) === 0)) {
+      return false;
+    }
+    if (type === "IDAT") sawData = true;
+    if (type === "IEND") return sawData && end === bytes.byteLength;
+    offset = end;
+  }
+  return false;
+}
+
+function checkScreenshot(data: unknown): Buffer {
+  const bytes = checkAttachmentBytes("screenshot", data);
+  if (!isPng(bytes)) throw new IterbarStoreError("invalid_request", "screenshot is not a complete PNG image");
+  return bytes;
+}
+
+function checkEvidence(data: unknown): Buffer {
   const bytes = checkAttachmentBytes("evidence", data);
   try {
     JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
@@ -190,7 +231,7 @@ class FileFeedbackStore implements FeedbackStore {
   }
 
   /** Reads a record; `null` when its directory or `feedback.json` does not exist (yet). */
-  async #read(feedbackId: string): Promise<Feedback | null> {
+  async #read(feedbackId: string): Promise<StoredRecord | null> {
     const path = feedbackRecordPath(this.#root, feedbackId);
     let text: string;
     try {
@@ -200,8 +241,11 @@ class FileFeedbackStore implements FeedbackStore {
       throw error;
     }
     let feedback: Feedback;
+    let json: Record<string, unknown>;
     try {
       feedback = parseMessageJson(feedbackSchema, text, "feedback");
+      // A valid record is a JSON object.
+      json = JSON.parse(text) as Record<string, unknown>;
     } catch (error) {
       if (error instanceof InvalidMessageError) {
         throw new IterbarStoreError("corrupt_store", `${path} is not a valid feedback record: ${error.message}`, { cause: error });
@@ -211,17 +255,28 @@ class FileFeedbackStore implements FeedbackStore {
     if (feedback.id !== feedbackId) {
       throw new IterbarStoreError("corrupt_store", `${path} holds feedback ${JSON.stringify(feedback.id)}`);
     }
-    return feedback;
+    return { feedback, json };
   }
 
-  async #require(feedbackId: string): Promise<Feedback> {
-    const feedback = await this.#read(feedbackId);
-    if (!feedback) throw new IterbarStoreError("not_found", `Feedback ${feedbackId} does not exist`);
-    return feedback;
+  async #require(feedbackId: string): Promise<StoredRecord> {
+    const record = await this.#read(feedbackId);
+    if (!record) throw new IterbarStoreError("not_found", `Feedback ${feedbackId} does not exist`);
+    return record;
   }
 
-  async #writeRecord(feedback: Feedback): Promise<void> {
-    await writeFileAtomic(this.paths.tmpDirectory, feedbackRecordPath(this.#root, feedback.id), `${JSON.stringify(feedback, null, 2)}\n`);
+  async #writeRecord(id: string, record: object): Promise<void> {
+    await writeFileAtomic(this.paths.tmpDirectory, feedbackRecordPath(this.#root, id), `${JSON.stringify(record, null, 2)}\n`);
+  }
+
+  /**
+   * Rewrites a record with `changes` applied to the JSON it was read from, so fields this version does not
+   * know, at any depth, are kept. Returns the changed feedback as this version reads it.
+   */
+  async #update(current: StoredRecord, changes: Partial<Record<keyof Feedback, unknown>>): Promise<Feedback> {
+    const json = { ...current.json, ...changes };
+    const feedback = parseMessage(feedbackSchema, json, "feedback");
+    await this.#writeRecord(feedback.id, json);
+    return feedback;
   }
 
   async list(query: FeedbackListQuery = {}): Promise<Feedback[]> {
@@ -231,7 +286,7 @@ class FileFeedbackStore implements FeedbackStore {
     const items: Feedback[] = [];
     for (const entry of await listDirectory(this.paths.feedbackDirectory)) {
       if (!entry.isDirectory() || !isSafeId(entry.name)) continue;
-      const feedback = await this.#read(entry.name);
+      const feedback = (await this.#read(entry.name))?.feedback;
       if (!feedback) continue;
       if (filter.status !== undefined && feedback.status !== filter.status) continue;
       if (filter.kind !== undefined && feedback.kind !== filter.kind) continue;
@@ -244,17 +299,17 @@ class FileFeedbackStore implements FeedbackStore {
 
   async get(feedbackId: string): Promise<Feedback> {
     this.#assertOpen();
-    return this.#require(feedbackId);
+    return (await this.#require(feedbackId)).feedback;
   }
 
   async attachments(feedbackId: string): Promise<AttachmentRef[]> {
     this.#assertOpen();
-    return referencedAttachments(await this.#require(feedbackId));
+    return referencedAttachments((await this.#require(feedbackId)).feedback);
   }
 
   async readAttachment(feedbackId: string, attachmentId: string): Promise<AttachmentContent> {
     this.#assertOpen();
-    const attachment = referencedAttachments(await this.#require(feedbackId)).find((ref) => ref.id === attachmentId);
+    const attachment = referencedAttachments((await this.#require(feedbackId)).feedback).find((ref) => ref.id === attachmentId);
     if (!attachment) {
       throw new IterbarStoreError("not_found", `Feedback ${feedbackId} has no attachment ${attachmentId}`);
     }
@@ -323,7 +378,7 @@ class FileFeedbackStore implements FeedbackStore {
         if (screenshot && screenshotData) await this.#writeAttachment(id, screenshot, screenshotData);
         if (evidenceAttachment && evidenceData) await this.#writeAttachment(id, evidenceAttachment, evidenceData);
         await this.#afterAttachmentsWritten?.(id);
-        await this.#writeRecord(feedback);
+        await this.#writeRecord(id, feedback);
       } catch (error) {
         await rm(directory, { recursive: true, force: true });
         throw error;
@@ -344,14 +399,14 @@ class FileFeedbackStore implements FeedbackStore {
       const current = await this.#require(feedbackId);
       const tick = this.#clock.tick();
       const timestamp = formatTimestamp(tick);
-      const reply = { id: formatId("reply", tick), author: input?.author, text: input?.text, createdAt: timestamp };
-      const feedback = parseMessage(
-        feedbackSchema,
-        { ...current, replies: [...current.replies, reply], updatedAt: timestamp },
-        "feedback",
+      // Parsed on its own, so that only reply fields are stored, never other properties of the caller's input.
+      const reply = parseMessage(
+        replySchema,
+        { id: formatId("reply", tick), author: input?.author, text: input?.text, createdAt: timestamp },
+        "reply",
       );
-      await this.#writeRecord(feedback);
-      return feedback;
+      // The schema has checked that the stored replies are an array.
+      return this.#update(current, { replies: [...(current.json.replies as unknown[]), reply], updatedAt: timestamp });
     });
   }
 
@@ -361,14 +416,8 @@ class FileFeedbackStore implements FeedbackStore {
     const next = parseMessage(feedbackStatusSchema, status, "status");
     return this.#exclusive(async () => {
       const current = await this.#require(feedbackId);
-      if (current.status === next) return current;
-      const feedback = parseMessage(
-        feedbackSchema,
-        { ...current, status: next, updatedAt: formatTimestamp(this.#clock.tick()) },
-        "feedback",
-      );
-      await this.#writeRecord(feedback);
-      return feedback;
+      if (current.feedback.status === next) return current.feedback;
+      return this.#update(current, { status: next, updatedAt: formatTimestamp(this.#clock.tick()) });
     });
   }
 

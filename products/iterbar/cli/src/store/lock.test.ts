@@ -1,21 +1,17 @@
 import { link, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import type { StoreLock } from "iterbar";
 import { iterbarPaths } from "iterbar/node";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acquireStoreLock,
   isOwnerAlive,
   ownLock,
-  parseUtcStartTime,
-  platformStartTimes,
-  processStartTime,
   PROCESS_STARTED_AT,
-  START_TIME_TOLERANCE_MS,
   takeoverClaimPath,
   type LockEnvironment,
   type LockFileSystem,
-  type ProcessStartTimes,
 } from "./lock.js";
+import { syncDirectory } from "./files.js";
 import { openFeedbackStore, type FeedbackStore } from "./store.js";
 import { deadPid, StoreProcess, temporaryProject } from "./test-support/helpers.js";
 
@@ -142,22 +138,21 @@ describe("stale locks", () => {
     expect(await readLock()).toEqual(ownLock());
   }, SPAWN_TIMEOUT_MS);
 
-  it("takes over a lock whose pid now belongs to a process that started at another time, where start times are step-stable", async () => {
+  it("presumes a running pid is the owner whatever start time its lock records, and names it", async () => {
     const other = startProcess();
     const { pid } = await other.next("ready");
-    const reused = { schemaVersion: 1, pid: pid as number, startedAt: "2020-01-01T00:00:00.000Z" } as const;
-    await writeLock(reused);
-    if (platformStartTimes().stepStable) {
-      expect(await isOwnerAlive(reused)).toBe(false);
-      await open();
-      expect(await readLock()).toEqual(ownLock());
-    } else {
-      // Linux: a running pid is presumed to be the owner, so the store stays locked, naming the pid.
-      expect(await isOwnerAlive(reused)).toBe(true);
+    // A start well before, a few seconds after (a clock stepped back during start-up) and long after the
+    // process's real start: none of them may let a second writer in while the pid runs.
+    for (const startedAt of ["2020-01-01T00:00:00.000Z", new Date(Date.now() + 6_000).toISOString(), "2099-01-01T00:00:00.000Z"]) {
+      const owner = { schemaVersion: 1, pid: pid as number, startedAt } as const;
+      await writeLock(owner);
+      const before = await readFile(iterbarPaths(root).lockFile, "utf8");
+      expect(await isOwnerAlive(owner)).toBe(true);
       const error = await openFeedbackStore(root).then(() => null, (thrown: unknown) => thrown);
-      expect(error).toMatchObject({ code: "store_locked", owner: reused });
+      expect(error).toMatchObject({ code: "store_locked", owner });
       expect((error as Error).message).toContain(`If process ${pid} is not Iterbar`);
-      expect(await readLock()).toEqual(reused);
+      expect(await readFile(iterbarPaths(root).lockFile, "utf8")).toBe(before);
+      await rm(iterbarPaths(root).lockFile);
     }
   }, SPAWN_TIMEOUT_MS);
 
@@ -255,6 +250,7 @@ describe("takeover claims between two contenders", () => {
           const { dev, ino } = await stat(path, { bigint: true });
           return { dev, ino };
         },
+        syncDirectory,
       };
       alive.add(pid);
       return {
@@ -279,104 +275,43 @@ describe("takeover claims between two contenders", () => {
   });
 });
 
-describe("owner start time", () => {
-  const originalTz = process.env.TZ;
+describe("owner liveness probe", () => {
   afterEach(() => {
-    if (originalTz === undefined) delete process.env.TZ;
-    else process.env.TZ = originalTz;
+    vi.restoreAllMocks();
   });
 
-  it("reads ps lstart output as UTC whatever this process's time zone", () => {
-    process.env.TZ = "America/New_York";
-    // A daemon started at 01:30 EST on the day daylight saving time ends, the second 01:30 in New York.
-    // Read as local time this is ambiguous, and Date.parse picks 01:30 EDT, an hour early.
-    expect(parseUtcStartTime("Sun Nov  1 06:30:00 2026")).toBe(Date.parse("2026-11-01T06:30:00Z"));
-    expect(parseUtcStartTime("Wed Nov 4 09:45:12 2026\n")).toBe(Date.parse("2026-11-04T09:45:12Z"));
-    for (const text of ["", "garbage", "Sun Feb 30 06:30:00 2026", "Sun Foo  1 06:30:00 2026", "2026-11-01T06:30:00Z"]) {
-      expect(parseUtcStartTime(text)).toBeUndefined();
-    }
+  /** Makes `process.kill(pid, 0)` for the lock's pid fail with `code`. */
+  function probeFails(code: string): void {
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (pid === process.ppid && signal === 0) throw Object.assign(new Error(code), { code });
+      return kill(pid, signal);
+    });
+  }
+
+  const owner = { schemaVersion: 1, pid: process.ppid, startedAt: "2026-11-04T09:00:00.000Z" } as const;
+
+  it.each(["EPERM", "EIO", "EINVAL"])("keeps the owner when the probe fails with %s, and a second opener gets store_locked", async (code) => {
+    await writeLock(owner);
+    const before = await readFile(iterbarPaths(root).lockFile, "utf8");
+    probeFails(code);
+    expect(await isOwnerAlive(owner)).toBe(true);
+    await expect(openFeedbackStore(root)).rejects.toMatchObject({ code: "store_locked", owner });
+    expect(await readFile(iterbarPaths(root).lockFile, "utf8")).toBe(before);
   });
 
-  it("keeps a live owner whose recorded start time falls in the hour repeated when daylight saving time ends", async () => {
-    process.env.TZ = "America/New_York";
-    const owner = { schemaVersion: 1, pid: process.ppid, startedAt: "2026-11-01T06:30:00.400Z" } as const;
-    // What `TZ=UTC0 ps -o lstart=` prints for a process started at 01:30:00 EST.
-    const startTime = async () => parseUtcStartTime("Sun Nov  1 06:30:00 2026");
-    const startTimes = { stepStable: true, read: startTime };
-    expect(await isOwnerAlive(owner, startTimes)).toBe(true);
-    expect(await isOwnerAlive({ ...owner, startedAt: "2026-11-01T05:30:00.400Z" }, startTimes)).toBe(false);
-  });
-
-  it("asks ps for the start time in UTC, so it matches the process's own clock in any time zone", async () => {
-    for (const zone of ["America/New_York", "Asia/Kolkata", "Pacific/Kiritimati"]) {
-      process.env.TZ = zone;
-      // The kernel's start precedes Node's time origin by the start-up time; a time zone error would be 30 min or more.
-      const gap = (await processStartTime(process.pid) as number) - Date.parse(PROCESS_STARTED_AT);
-      expect(gap).toBeLessThanOrEqual(START_TIME_TOLERANCE_MS);
-      expect(gap).toBeGreaterThan(-10 * 60_000);
-    }
-    expect(await processStartTime(await deadPid())).toBeNull();
-  }, SPAWN_TIMEOUT_MS);
-
-  it("presumes the owner alive when ps output cannot be read", async () => {
-    const owner = { schemaVersion: 1, pid: process.ppid, startedAt: "2020-01-01T00:00:00.000Z" } as const;
-    expect(await isOwnerAlive(owner, { stepStable: true, read: async () => undefined })).toBe(true);
-    expect(await isOwnerAlive(owner, { stepStable: true, read: async () => null })).toBe(false);
+  it("takes over only when the probe reports ESRCH, no such process", async () => {
+    await writeLock(owner);
+    probeFails("ESRCH");
+    expect(await isOwnerAlive(owner)).toBe(false);
+    await open();
+    expect(await readLock()).toEqual(ownLock());
   });
 
   it("judges a lock with this process's pid by this process's own start time", async () => {
-    const neverRead: ProcessStartTimes = { stepStable: false, read: async () => { throw new Error("not read"); } };
-    expect(await isOwnerAlive(ownLock(), neverRead)).toBe(true);
-    expect(await isOwnerAlive({ ...ownLock(), startedAt: "2020-01-01T00:00:00.000Z" }, neverRead)).toBe(false);
-  });
-});
-
-describe("owner start time when the wall clock is stepped", () => {
-  // A live owner (this test's parent process) and the start time ps reports for it after the wall clock was
-  // stepped by `step` since it started: on Linux procps moves lstart with the kernel's boot time.
-  const owner = { schemaVersion: 1, pid: process.ppid, startedAt: "2026-11-04T09:00:00.000Z" } as const;
-  const stepped = (platform: NodeJS.Platform, step: number): ProcessStartTimes => ({
-    ...platformStartTimes(platform),
-    read: async (pid) => (pid === owner.pid ? Date.parse(owner.startedAt) + step : null),
-  });
-  const steps = [60_000, -60_000, -3_600_000];
-
-  it("only compares start times on macOS, where they are step-stable", () => {
-    expect(platformStartTimes("darwin").stepStable).toBe(true);
-    for (const platform of ["linux", "freebsd", "win32"] as const) expect(platformStartTimes(platform).stepStable).toBe(false);
-  });
-
-  it.each(steps)("keeps a live Linux owner after a %i ms step, and a second opener gets store_locked", async (step) => {
-    expect(await isOwnerAlive(owner, stepped("linux", step))).toBe(true);
-    await writeLock(owner);
-    const { lockFile, tmpDirectory } = iterbarPaths(root);
-    const opener = acquireStoreLock(lockFile, tmpDirectory, {
-      isOwnerAlive: (lock) => isOwnerAlive(lock, stepped("linux", step)),
-    });
-    await expect(opener).rejects.toMatchObject({ name: "StoreLockedError", code: "store_locked", owner });
-    expect(await readLock()).toEqual(owner);
-    expect((await readdir(tmpDirectory)).filter((name) => name.endsWith(".claim"))).toEqual([]);
-  });
-
-  it("presumes a running Linux pid is the owner even when its start time cannot be read", async () => {
-    expect(await isOwnerAlive(owner, { stepStable: false, read: async () => null })).toBe(true);
-    expect(await isOwnerAlive({ ...owner, pid: await deadPid() }, stepped("linux", 0))).toBe(false);
-  }, SPAWN_TIMEOUT_MS);
-
-  it("still tells a reused pid from its owner by start time on macOS", async () => {
-    // macOS start times do not move with the clock, so a later start is another process given the pid later.
-    for (const later of [START_TIME_TOLERANCE_MS + 1_000, 60_000, 3_600_000]) {
-      expect(await isOwnerAlive(owner, stepped("darwin", later))).toBe(false);
-    }
-    expect(await isOwnerAlive(owner, stepped("darwin", START_TIME_TOLERANCE_MS))).toBe(true);
-  });
-
-  it("keeps a macOS owner whose start-up took longer than the tolerance before Node recorded startedAt", async () => {
-    // Under heavy load the kernel's start precedes performance.timeOrigin by seconds; a reused pid can only
-    // have started after the owner exited, which is after its startedAt.
-    for (const earlier of [-1_000, -(START_TIME_TOLERANCE_MS + 2_500), -60_000, -3_600_000]) {
-      expect(await isOwnerAlive(owner, stepped("darwin", earlier))).toBe(true);
-    }
+    expect(await isOwnerAlive(ownLock())).toBe(true);
+    expect(await isOwnerAlive({ ...ownLock(), startedAt: "2020-01-01T00:00:00.000Z" })).toBe(false);
+    expect(await isOwnerAlive({ ...ownLock(), startedAt: new Date(Date.parse(PROCESS_STARTED_AT) + 1_000).toISOString() })).toBe(false);
   });
 });
 
@@ -388,6 +323,7 @@ describe("acquisition", () => {
     rename,
     remove: (path) => rm(path, { force: true }),
     identity: async () => ({ dev: 1n, ino: 1n }),
+    syncDirectory,
   };
 
   it("confirms the lock is still this handle's, and names the owner that replaced it", async () => {
@@ -466,6 +402,53 @@ describe("acquisition", () => {
     expect(secondSettledEarly).toBe(false);
     expect(successorPlaced).toBe(false);
   });
+
+  it.each([
+    ["a fresh lock", "fsync"],
+    ["a fresh lock", "confirmation"],
+    ["a stale lock taken over", "fsync"],
+    ["a stale lock taken over", "confirmation"],
+  ] as const)("removes %s it placed when its %s fails, so the next acquisition succeeds", async (path, failure) => {
+    if (path === "a fresh lock") await (await openFeedbackStore(root)).close();
+    else await writeLock({ schemaVersion: 1, pid: await deadPid(), startedAt: PROCESS_STARTED_AT });
+    const { lockFile, tmpDirectory } = iterbarPaths(root);
+    const injected = Object.assign(new Error(`injected ${failure} failure`), { code: "EIO" });
+    // Fails once, at the first fsync of .iterbar/ or the first read of store.lock after this lock is in place.
+    let published = false;
+    let failed = false;
+    const failOnce = (operation: "fsync" | "confirmation") => {
+      if (published && !failed && operation === failure) {
+        failed = true;
+        throw injected;
+      }
+    };
+    const fs: LockFileSystem = {
+      ...reusedInode,
+      identity: async (target) => {
+        const { dev, ino } = await stat(target, { bigint: true });
+        return { dev, ino };
+      },
+      link: async (existing, target) => {
+        await link(existing, target);
+        if (target === lockFile) published = true;
+      },
+      rename: async (source, target) => {
+        await rename(source, target);
+        if (target === lockFile) published = true;
+      },
+      readFile: async (target) => {
+        if (target === lockFile) failOnce("confirmation");
+        return readFile(target, "utf8");
+      },
+      syncDirectory: async () => failOnce("fsync"),
+    };
+    await expect(acquireStoreLock(lockFile, tmpDirectory, { fs })).rejects.toBe(injected);
+    expect(failed).toBe(true);
+    await expect(stat(lockFile)).rejects.toMatchObject({ code: "ENOENT" });
+    const next = await acquireStoreLock(lockFile, tmpDirectory);
+    expect(await readLock()).toEqual(ownLock());
+    await next.release();
+  }, SPAWN_TIMEOUT_MS);
 
   it("lets a newer handle of this process supersede one whose lock was removed", async () => {
     await (await openFeedbackStore(root)).close();

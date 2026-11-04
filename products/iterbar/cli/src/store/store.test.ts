@@ -194,6 +194,53 @@ describe("records", () => {
     await expect((await open()).get(item.id)).resolves.toMatchObject({ replies: { length: 5 } });
   });
 
+  it("stores the attachment bytes it was given, whatever the caller does to its buffers afterwards", async () => {
+    let store = await open();
+    // The first create holds the write queue, so the second is validated now and written later.
+    let resume!: () => void;
+    const paused = new Promise<void>((resolve) => (resume = resolve));
+    store = await reopen(store, { afterAttachmentsWritten: () => paused });
+    const first = store.create(commentDraft, { evidence: EVIDENCE });
+    const screenshot = Buffer.from(PNG);
+    const evidence = Buffer.from(EVIDENCE);
+    const second = store.create(commentDraft, { screenshot, evidence });
+    screenshot.fill(0);
+    evidence.write("{not json");
+    resume();
+    await first;
+    const item = await second;
+    expect(item.screenshot).toMatchObject({ byteLength: PNG.byteLength, sha256: sha256(PNG) });
+    expect(item.evidence?.attachment).toMatchObject({ byteLength: EVIDENCE.byteLength, sha256: sha256(EVIDENCE) });
+    store = await reopen(store);
+    expect((await store.readAttachment(item.id, item.screenshot?.id as string)).data).toEqual(PNG);
+    expect((await store.readAttachment(item.id, item.evidence?.attachment.id as string)).data).toEqual(EVIDENCE);
+  });
+
+  it("keeps fields it does not know, from a newer v1 writer, when it adds a reply or changes the status", async () => {
+    let store = await open();
+    const item = await store.create(commentDraft, { evidence: EVIDENCE });
+    await store.reply(item.id, { author: agent, text: "First" });
+    const recordPath = feedbackRecordPath(root, item.id);
+    type Json = Record<string, unknown> & { target: Record<string, unknown>; replies: Array<Record<string, unknown>> };
+    const extended = JSON.parse(await readFile(recordPath, "utf8")) as Json;
+    extended.labels = ["ui"];
+    extended.target.frame = { name: "checkout" };
+    extended.replies[0] = { ...extended.replies[0], editedAt: "2026-11-04T10:05:00.000Z" };
+    await writeFile(recordPath, JSON.stringify(extended));
+
+    store = await reopen(store);
+    await store.reply(item.id, { author: { ...agent, token: "not stored" }, text: "Second" } as never);
+    const updated = await store.setStatus(item.id, "done");
+    expect(updated).toEqual(await store.get(item.id));
+    store = await reopen(store);
+    const onDisk = JSON.parse(await readFile(recordPath, "utf8")) as Json;
+    expect(onDisk).toMatchObject({ labels: ["ui"], target: { frame: { name: "checkout" } }, status: "done" });
+    expect(onDisk.replies.map((reply) => [reply.text, reply.editedAt]))
+      .toEqual([["First", "2026-11-04T10:05:00.000Z"], ["Second", undefined]]);
+    expect(onDisk.replies[1]?.author).toEqual(agent);
+    expect(await store.get(item.id)).toEqual(updated);
+  });
+
   it("reports corrupt_store for a referenced attachment that is missing or altered", async () => {
     const store = await open();
     const item = await store.create(commentDraft, { screenshot: PNG, evidence: EVIDENCE });
@@ -253,6 +300,23 @@ describe("rejected requests", () => {
     await rejects(store.create(chooseVariantDraft, { evidence: EVIDENCE }), "invalid_request");
     await rejects(store.create(chooseVariantDraft, { screenshot: PNG }), "invalid_request");
     await rejects(store.create(commentDraft, { screenshot: Buffer.from("GIF89a"), evidence: EVIDENCE }), "invalid_request");
+    // A PNG signature alone, a truncated image, a bad chunk CRC, a missing IHDR, IDAT or IEND, and trailing bytes.
+    const chunks = (bytes: Buffer) => [bytes.subarray(0, 33), bytes.subarray(33, 58), bytes.subarray(58)] as const;
+    const [head, idat, iend] = chunks(PNG);
+    const badCrc = Buffer.from(PNG);
+    badCrc.writeUInt8(badCrc.readUInt8(PNG.byteLength - 13) ^ 0xff, PNG.byteLength - 13);
+    for (const screenshot of [
+      PNG.subarray(0, 8),
+      PNG.subarray(0, 29),
+      PNG.subarray(0, PNG.byteLength - 1),
+      badCrc,
+      Buffer.concat([PNG.subarray(0, 8), idat, iend]),
+      Buffer.concat([head, iend]),
+      Buffer.concat([head, idat]),
+      Buffer.concat([PNG, Buffer.from([0])]),
+    ]) {
+      await rejects(store.create(commentDraft, { screenshot, evidence: EVIDENCE }), "invalid_request");
+    }
     await rejects(store.create(commentDraft, { evidence: Buffer.from("{not json") }), "invalid_request");
     await rejects(store.create(commentDraft, { evidence: new Uint8Array(0) }), "invalid_request");
     const tooLarge = Buffer.concat([PNG, Buffer.alloc(MAX_ATTACHMENT_BYTES + 1 - PNG.byteLength)]);

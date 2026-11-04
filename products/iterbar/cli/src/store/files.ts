@@ -25,15 +25,21 @@ export async function syncDirectory(directory: string): Promise<void> {
   }
 }
 
-/** Creates a new file that must not exist yet, writes all of `data` and flushes it to disk. */
+/**
+ * Creates a new file that must not exist yet, writes all of `data` and flushes it to disk. Throws `EEXIST`,
+ * leaving the existing file alone, when `path` exists; a file this call created but could not finish is removed.
+ */
 export async function writeNewFile(path: string, data: string | Uint8Array, mode = 0o644): Promise<void> {
   const handle = await open(path, "wx", mode);
   try {
     await handle.writeFile(data);
     await handle.sync();
-  } finally {
-    await handle.close();
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    await removeFile(path);
+    throw error;
   }
+  await handle.close();
 }
 
 /** Removes a file, ignoring one that is already gone. */
@@ -47,8 +53,8 @@ export async function removeFile(path: string): Promise<void> {
  */
 export async function writeFileAtomic(tmpDirectory: string, target: string, data: string | Uint8Array): Promise<void> {
   const temporary = temporaryPath(tmpDirectory, "write");
+  await writeNewFile(temporary, data);
   try {
-    await writeNewFile(temporary, data);
     await rename(temporary, target);
   } catch (error) {
     await removeFile(temporary);
@@ -59,12 +65,13 @@ export async function writeFileAtomic(tmpDirectory: string, target: string, data
 
 /**
  * Atomically creates `target` only if it does not exist: the complete file is hard-linked into place, so
- * readers never see it partially written. Returns `false` when `target` already exists.
+ * readers never see it partially written. Returns `false` when `target` already exists. A temporary name that
+ * is already taken throws `EEXIST` instead: it says nothing about `target`.
  */
 export async function createFileAtomic(tmpDirectory: string, target: string, data: string | Uint8Array): Promise<boolean> {
   const temporary = temporaryPath(tmpDirectory, "create");
+  await writeNewFile(temporary, data);
   try {
-    await writeNewFile(temporary, data);
     await link(temporary, target);
   } catch (error) {
     if (errnoCode(error) === "EEXIST") return false;

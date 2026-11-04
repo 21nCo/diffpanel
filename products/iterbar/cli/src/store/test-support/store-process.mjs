@@ -32,7 +32,8 @@ try {
 print({ event: "acquired", pid: process.pid });
 
 if (mode === "crash-after-attachments") {
-  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  // A complete 1x1 PNG, the same as PNG in helpers.ts.
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64");
   await store.create(JSON.parse(draftJson), { screenshot: png, evidence: Buffer.from('{"events":[]}') });
 } else {
   while ((await nextLine()) !== undefined);

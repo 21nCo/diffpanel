@@ -91,10 +91,9 @@ export async function deadPid(): Promise<number> {
   return child.pid as number;
 }
 
-export const PNG = Buffer.concat([
-  Buffer.from("89504e470d0a1a0a", "hex"),
-  Buffer.from("0000000d4948445200000001000000010806000000", "hex"),
-]);
+/** A complete 1x1 PNG image (signature, IHDR, IDAT and IEND, with valid CRCs). */
+const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+export const PNG = Buffer.from(PNG_BASE64, "base64");
 export const EVIDENCE = Buffer.from(JSON.stringify({ events: [{ type: "console", level: "warn", text: "slow" }] }));
 
 const content = {
