@@ -6,7 +6,7 @@ import { WebSocket, WebSocketServer } from "ws";
 /** Largest message a client may send; clients send no application messages, so anything bigger is abuse. */
 const MAX_CLIENT_MESSAGE_BYTES = 1024;
 
-/** A client that has fallen this far behind is disconnected rather than buffered without bound. */
+/** Most bytes buffered for one client; a client an event would take past it is disconnected instead. */
 const MAX_BUFFERED_BYTES = 8 * 1024 * 1024;
 
 /** How long clients get to answer the closing handshake on shutdown before their sockets are dropped. */
@@ -15,8 +15,14 @@ const CLOSE_GRACE_MS = 1000;
 /** WebSocket close code for a server going away. */
 const GOING_AWAY = 1001;
 
+export interface EventHubOptions {
+  /** Most bytes buffered for one client; defaults to {@link MAX_BUFFERED_BYTES}. */
+  readonly maxBufferedBytes?: number;
+}
+
 /** The `/events` WebSocket clients and the daemon events pushed to them. */
 export class EventHub {
+  readonly #maxBufferedBytes: number;
   readonly #server = new WebSocketServer({
     noServer: true,
     clientTracking: true,
@@ -25,6 +31,10 @@ export class EventHub {
     // Selects `iterbar.v1`; the token protocol a client also offers is never echoed back.
     handleProtocols: (protocols) => (protocols.has(WEBSOCKET_SUBPROTOCOL) ? WEBSOCKET_SUBPROTOCOL : false),
   });
+
+  constructor(options: EventHubOptions = {}) {
+    this.#maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
+  }
 
   /** Completes an already-authorized upgrade. */
   accept(request: IncomingMessage, socket: Duplex, head: Buffer): void {
@@ -35,12 +45,16 @@ export class EventHub {
     });
   }
 
-  /** Sends an event to every connected client. */
+  /**
+   * Sends an event to every connected client. A client whose buffered bytes plus this event would exceed the
+   * limit is disconnected instead, so no client ever has more than the limit buffered; the others still get it.
+   */
   publish(event: DaemonEvent): void {
     const data = JSON.stringify(event);
+    const bytes = Buffer.byteLength(data);
     for (const client of this.#server.clients) {
       if (client.readyState !== WebSocket.OPEN) continue;
-      if (client.bufferedAmount > MAX_BUFFERED_BYTES) {
+      if (client.bufferedAmount + bytes > this.#maxBufferedBytes) {
         client.terminate();
         continue;
       }

@@ -46,13 +46,21 @@ export const MAX_SLOT_PAGES = 256;
 export class SlotRegistry {
   readonly #pages = new Map<string, SlotReport>();
 
-  report(report: SlotReport): void {
+  /**
+   * Keeps `report` as its page's current state unless the page already has a report with a later `reportedAt`
+   * (one that arrived first despite being made later). Of two reports with the same `reportedAt`, the one that
+   * arrives last is kept. Returns whether the report was kept.
+   */
+  report(report: SlotReport): boolean {
+    const current = this.#pages.get(report.pageUrl);
+    if (current && Date.parse(current.reportedAt) > Date.parse(report.reportedAt)) return false;
     this.#pages.delete(report.pageUrl);
     this.#pages.set(report.pageUrl, report);
     for (const pageUrl of this.#pages.keys()) {
       if (this.#pages.size <= MAX_SLOT_PAGES) break;
       this.#pages.delete(pageUrl);
     }
+    return true;
   }
 
   list(): SlotReport[] {
@@ -257,8 +265,10 @@ const handlers: Readonly<Record<DaemonEndpointName, RouteHandler>> = {
 
   async reportSlots(context) {
     const report = await readJson(context.request, slotReportSchema, "slot report");
-    context.slots.report(report);
-    context.events.publish({ schemaVersion: SCHEMA_VERSION, type: "slots.reported", report });
+    // A report superseded by a later one is acknowledged but neither kept nor pushed as the page's state.
+    if (context.slots.report(report)) {
+      context.events.publish({ schemaVersion: SCHEMA_VERSION, type: "slots.reported", report });
+    }
     sendEmpty(context.response, 204, context.headers);
   },
 

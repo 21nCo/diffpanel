@@ -208,7 +208,15 @@ export async function startDaemon(options: StartDaemonOptions): Promise<RunningD
     server.closeAllConnections();
     await events.close();
     for (const socket of upgrades) socket.destroy();
-    await store.close();
+    try {
+      // Publication can fail after the rename (syncing the directory); a daemon.json carrying this start's token
+      // describes a daemon that never started, so it goes before the lock does. Another daemon's file stays.
+      await removeDaemonFile(store.paths, token);
+    } catch (cleanupError) {
+      onError(cleanupError);
+    } finally {
+      await store.close();
+    }
     throw error;
   }
 }

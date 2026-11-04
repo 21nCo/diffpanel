@@ -284,6 +284,33 @@ describe("slots", () => {
       ["http://localhost:5173/pricing", "v2"],
     ]);
   });
+
+  it("keeps a page's newest report when an older one arrives later, and pushes only kept reports", async () => {
+    const daemon = await start();
+    const client = await events(daemon);
+    const pageUrl = "http://localhost:5173/pricing";
+    const slot = { slot: "pricing", versions: ["v1", "v2", "v3"], defaultVersion: "v1", mounts: 1 };
+    const report = (activeVersion: string, reportedAt: string) =>
+      ({ schemaVersion: 1, pageUrl, reportedAt, slots: [{ ...slot, activeVersion }] });
+    const newer = report("v2", "2026-11-03T10:00:02.000Z");
+    // Made a second before `newer` (written with an offset, so the instants are compared, not the strings) but
+    // delivered after it.
+    const older = report("v1", "2026-11-03T11:00:01.000+01:00");
+    const sameInstant = report("v3", "2026-11-03T11:00:02.000+01:00");
+    const activeVersion = async () => {
+      const { pages } = (await (await call(daemon, "/slots")).json()) as { pages: Array<{ slots: Array<{ activeVersion: string }> }> };
+      return pages.map((page) => page.slots[0]?.activeVersion);
+    };
+
+    for (const body of [newer, older]) expect((await postJson(daemon, "/slots", body)).status).toBe(204);
+    expect(await activeVersion()).toEqual(["v2"]);
+    // Of two reports made at the same instant, the one that arrives last is the page's state.
+    expect((await postJson(daemon, "/slots", sameInstant)).status).toBe(204);
+    expect(await activeVersion()).toEqual(["v3"]);
+
+    expect(await client.next()).toMatchObject({ type: "slots.reported", report: newer });
+    expect(await client.next()).toMatchObject({ type: "slots.reported", report: sameInstant });
+  });
 });
 
 describe("event stream", () => {
