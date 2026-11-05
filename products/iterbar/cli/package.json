@@ -4,28 +4,38 @@
   "private": true,
   "description": "Iterbar command line, daemon and local feedback store.",
   "type": "module",
+  "bin": {
+    "iterbar": "./dist/cli.js"
+  },
   "exports": {
     "./store": {
       "types": "./dist/store.d.ts",
       "import": "./dist/store.js",
       "default": "./dist/store.js"
+    },
+    "./daemon": {
+      "types": "./dist/daemon.d.ts",
+      "import": "./dist/daemon.js",
+      "default": "./dist/daemon.js"
     }
   },
   "engines": {
     "node": ">=22.13"
   },
   "scripts": {
-    "build": "tsup --entry.store src/store/index.ts --format esm --dts --sourcemap --clean",
+    "build": "tsup --entry.store src/store/index.ts --entry.daemon src/daemon/index.ts --entry.cli src/cli.ts --format esm --dts --sourcemap --clean",
     "clean": "rm -rf dist coverage",
     "lint": "eslint src",
     "test": "pnpm --filter @iterbar/cli... build && vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "iterbar": "workspace:*"
+    "iterbar": "workspace:*",
+    "ws": "^8.22.1"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
+    "@types/ws": "^8.18.2",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
     "vitest": "^4.1.11"
