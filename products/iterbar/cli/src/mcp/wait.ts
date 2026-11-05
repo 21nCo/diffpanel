@@ -42,7 +42,7 @@ export interface WaitResult {
   readonly events: readonly FeedbackEvent[];
   /**
    * Pass this to the next wait so that nothing in between is missed or returned twice. Missing only when a wait without
-   * a cursor timed out before its first listing completed, so that nothing was acknowledged.
+   * a cursor timed out before its baseline listings completed, so that nothing was handed over.
    */
   readonly cursor: FeedbackCursor | undefined;
 }
@@ -128,15 +128,15 @@ function delay(ms: number, signal: AbortSignal, register?: (wake: () => void) =>
  * Without a cursor, the wait first takes a baseline: one listing whose events count as seen, then a second complete
  * listing that returns whatever was committed after the first and makes the cursor compact (an earlier observed commit
  * covers everything before it). Once the second listing completes, every exit hands back a cursor that resumes from it:
- * the deadline, an event stream that cannot be reopened, and a failure, which carries it in its details. Only the first
- * listing obeys the deadline; the second is bounded by the daemon request timeout so that the deadline can never leave
- * an acknowledged baseline without a cursor. A failure of the second listing itself (the daemon went away between the
- * two) has no cursor to carry: the agent recovers with an unfiltered `list_feedback`, which shows everything.
+ * the deadline, an event stream that cannot be reopened, and a failure, which carries it in its details. When the
+ * deadline or a failure ends the wait before the second listing completes, nothing was handed to the agent and there is
+ * no cursor: the agent recovers with an unfiltered `list_feedback`, which shows everything.
  *
  * A stream that closes is reopened when the daemon is still there (or was restarted); when it is gone, the wait fails
- * with `daemon_unavailable`. The deadline holds whatever happens after the baseline: it is checked on every turn of the
- * loop, however many events keep arriving, and it aborts the daemon request in flight; the wait then returns the cursor
- * of its last complete listing, so nothing a cut-short listing would have found is lost.
+ * with `daemon_unavailable`. The deadline bounds every daemon request the wait makes: it is checked on every turn of the
+ * loop, however many events keep arriving, and it aborts the request in flight. A listing it cuts short returns the
+ * cursor of the last complete one, so nothing the cut-short listing would have found is lost; extra listings that
+ * compact a cursor stop at the deadline instead (see {@link checkFrom}).
  */
 export async function waitForFeedback(client: DaemonClient, options: WaitOptions): Promise<WaitResult> {
   const wait = new FeedbackWait(client, options);
@@ -180,7 +180,7 @@ class FeedbackWait {
     if (!this.cursor) {
       // Listed before subscribing: whatever the baseline misses is committed later and found by a later listing.
       const baseline = baselineCursor(await this.client.listFeedback({}, this.requests));
-      const arrived = await this.check(baseline, this.signal);
+      const arrived = await this.check(baseline);
       if (arrived) return arrived;
     }
     this.wakeups.attach(await this.client.openEvents(this.requests));
@@ -209,8 +209,8 @@ class FeedbackWait {
   }
 
   /** Lists what can be new after `from` (see {@link checkFrom}); the cursor then covers this listing too. */
-  private async check(from: FeedbackCursor, bound: AbortSignal = this.requests): Promise<WaitResult | null> {
-    const checked = await checkFrom(this.client, from, bound, this.signal);
+  private async check(from: FeedbackCursor): Promise<WaitResult | null> {
+    const checked = await checkFrom(this.client, from, this.requests, this.signal);
     this.cursor = checked.cursor;
     return checked.result;
   }
@@ -230,19 +230,30 @@ function startHeartbeat(options: WaitOptions, started: number): ReturnType<typeo
 }
 
 /**
- * Lists what can be new after `from`, bounded by `bound`, and observes it. A listing that needs compacting found new
- * events (an issued cursor is small, and only new events grow it), so the wait is about to return them: those extra
- * listings are bounded by `signal` (cancellation) and the daemon request timeout, not the deadline, and a failure
- * among them throws before any cursor is returned, which leaves the wait at `from` and acknowledges none of them.
+ * Lists what can be new after `from`, bounded by `requests` (cancellation and the deadline), and observes it. A listing
+ * that needs compacting found new events (an issued cursor is small, and only new events grow it), so the wait is about
+ * to return them. The extra listings that compact the cursor obey the deadline too: one that it cuts short ends the
+ * compaction, and {@link observe} then forgets the keys the cursor cannot hold, so the events found so far are
+ * returned with a cursor that may hand some of them over again but skips none. A daemon failure among them throws
+ * before any cursor is returned, which leaves the wait at `from` and acknowledges none of them.
  */
 async function checkFrom(
   client: DaemonClient,
   from: FeedbackCursor,
-  bound: AbortSignal,
+  requests: AbortSignal,
   signal: AbortSignal,
 ): Promise<{ result: WaitResult | null; cursor: FeedbackCursor }> {
-  const list = (since: string | undefined, by: AbortSignal) => client.listFeedback(since === undefined ? {} : { since }, by);
-  const observed = await observe(from, await list(cursorSince(from), bound), (since) => list(since, signal));
+  const list = (since: string | undefined) => client.listFeedback(since === undefined ? {} : { since }, requests);
+  const relist = async (since: string | undefined): Promise<Feedback[] | undefined> => {
+    try {
+      return await list(since);
+    } catch (error) {
+      // Only the deadline stops compacting; a cancellation or a daemon failure fails the wait.
+      if (signal.aborted || !requests.aborted || error instanceof IterbarToolError) throw error;
+      return undefined;
+    }
+  };
+  const observed = await observe(from, await list(cursorSince(from)), relist);
   const { events, cursor } = observed;
   if (!events.length) return { result: null, cursor };
   const ids = new Set(events.map((event) => event.feedbackId));

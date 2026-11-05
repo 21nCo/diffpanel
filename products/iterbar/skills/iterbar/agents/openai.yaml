@@ -1,4 +1,4 @@
 interface:
   display_name: "Iterbar"
   short_description: "Iterate on UI variants from dev-bar feedback"
-  default_prompt: "Use $iterbar to work through the open Iterbar feedback on this project."
+  default_prompt: "Use $iterbar to handle the Iterbar feedback that still needs you on this project, then wait for more."

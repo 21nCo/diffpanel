@@ -3,7 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { Feedback } from "iterbar";
+import type { Feedback, FeedbackListQuery } from "iterbar";
 import { afterEach, describe, expect, it } from "vitest";
 import { MAX_CURSOR_SEEN } from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
@@ -16,9 +16,9 @@ afterEach(async () => {
 });
 
 /** The official SDK client connected in memory to the Iterbar tools over a daemon client whose listings the test supplies. */
-async function connect(list: () => Feedback[]): Promise<Client> {
+async function connect(list: (query: FeedbackListQuery, signal?: AbortSignal) => Feedback[] | Promise<Feedback[]>): Promise<Client> {
   const daemon = {
-    listFeedback: async () => list(),
+    listFeedback: async (query: FeedbackListQuery = {}, signal?: AbortSignal) => list(query, signal),
     openEvents: async () => Object.assign(new EventEmitter(), { terminate: () => undefined }),
   } as unknown as DaemonClient;
   const server = new McpServer({ name: "iterbar", version: "0.0.0" });
@@ -68,5 +68,35 @@ describe("list_feedback cursors after a burst", { timeout: 60_000 }, () => {
       const next = await ok(client, "list_feedback", { cursor: listed.cursor });
       expect(next.events).toEqual([]);
     }
+  });
+});
+
+describe("wait_for_feedback at its deadline", { timeout: 30_000 }, () => {
+  it("returns no cursor when its second baseline listing stalls, and an unfiltered listing then shows what arrived once", async () => {
+    const base = Date.now() - 60_000;
+    const a = feedbackItem("feedback-a", base);
+    const b = feedbackItem("feedback-b", base + 10);
+    let listings = 0;
+    const client = await connect(async (_query, signal) => {
+      listings += 1;
+      if (listings === 1) return [a];
+      if (listings === 2) {
+        // feedback-b commits while the second baseline listing stalls far past the deadline.
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(resolve, 4_000);
+          signal?.addEventListener("abort", () => (clearTimeout(timer), reject(signal.reason as Error)), { once: true });
+        });
+      }
+      return [a, b];
+    });
+    const started = Date.now();
+    const first = await ok(client, "wait_for_feedback", { timeoutSeconds: 1 });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(first).toEqual({ outcome: "timeout", items: [], events: [] });
+    // The documented recovery: an unfiltered listing shows every item, and its cursor counts them as seen.
+    const listed = await ok(client, "list_feedback", {});
+    expect((listed.items as Feedback[]).map((item) => item.id)).toEqual(["feedback-a", "feedback-b"]);
+    const quiet = await ok(client, "wait_for_feedback", { cursor: listed.cursor, timeoutSeconds: 0 });
+    expect(quiet).toMatchObject({ outcome: "timeout", events: [] });
   });
 });

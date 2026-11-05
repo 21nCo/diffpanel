@@ -155,20 +155,22 @@ export interface Observation {
  * {@link MAX_CURSOR_SEEN} events between two listings would make it too large. Each extra listing, from `relist`
  * (which must list every item updated at or after the `since` it is given), raises the watermark to the previous
  * listing's newest commit and leaves by key only what was committed after that; whatever new events it finds are
- * returned too. After {@link MAX_COMPACTIONS} listings that still leave too many keys (events committed faster than
- * the daemon lists them), the cursor forgets the keys it cannot hold, so those events may be handed over again but are
- * never skipped.
+ * returned too. When `relist` gives `undefined` (no time is left for it), or after {@link MAX_COMPACTIONS} listings
+ * that still leave too many keys (events committed faster than the daemon lists them), the cursor forgets the keys it
+ * cannot hold, so those events may be handed over again but are never skipped.
  */
 export async function observe(
   from: FeedbackCursor,
   items: readonly Feedback[],
-  relist: (since: string | undefined) => Promise<Feedback[]>,
+  relist: (since: string | undefined) => Promise<Feedback[] | undefined>,
 ): Promise<Observation> {
   const events = unseenEvents(from, items);
   const latest = new Map(items.map((item) => [item.id, item]));
   let cursor = observeListing(from, items);
   for (let round = 0; cursor.seen.size > MAX_CURSOR_SEEN && round < MAX_COMPACTIONS; round += 1) {
+    // Each relist depends on the cursor the previous one left, so they run one after another.
     const more = await relist(cursorSince(cursor));
+    if (!more) break;
     events.push(...unseenEvents(cursor, more));
     for (const item of more) latest.set(item.id, item);
     cursor = observeListing(cursor, more);
@@ -194,6 +196,7 @@ export function encodeCursor(cursor: FeedbackCursor): string {
   return Buffer.from(JSON.stringify({ v: 1, w: cursor.watermark, c: cursor.committed, s: [...cursor.seen].sort(compareText) })).toString("base64url");
 }
 
+/** The cursor an agent passed back; anything no tool issued is refused as `invalid_request`. */
 export function decodeCursor(value: string): FeedbackCursor {
   let json: unknown;
   try {

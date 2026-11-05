@@ -89,29 +89,29 @@ a user replied in a thread. Agent replies and status changes are not new. Withou
 baseline: it lists the feedback and counts everything in that listing as seen, then lists once more, which returns at
 once anything sent after the first listing; anything that lands later is new too, even if it arrives before the wait
 is listening for events. Once the second listing has finished, every outcome (and a failure) carries a cursor that
-resumes from the baseline. If the second listing itself fails (the daemon stopped between the two), the failure has no
-cursor: once `iterbar dev` runs again, call `list_feedback` without filters, which shows every item, and continue with
-its cursor.
+resumes from the baseline. If the timeout or a failure (the daemon stopped between the two) ends the wait before the
+second listing has finished, nothing was handed to you and there is no cursor: call `list_feedback` without filters
+(once `iterbar dev` runs again, after a failure), which shows every item, and continue with its cursor.
 
 A cursor relies only on the order in which the daemon commits feedback, never on how long a write or a listing takes:
 an item that takes long to save is still returned once it is saved. Every cursor a tool returns is accepted by the next
 call, however much feedback arrived: after a large burst, the tool lists a few more times to keep the cursor small
-(whatever those listings find is returned too).
+(whatever those listings find is returned too). When a wait's timeout cuts those extra listings short, it returns what
+it found with a cursor that may hand some of it over again, never one that skips anything; skip an event you have
+already handled.
 
-The wait ends at its timeout however much else changes meanwhile; a daemon request still running then is cut short,
-and the returned cursor still covers whatever it would have found. A `timeoutSeconds` of 0 checks once and returns
-(within about a second). The one exception is the second baseline listing of a wait without a cursor: it always
-finishes (or fails with `daemon_unavailable` after the daemon's 30-second request limit), so that the baseline it
-acknowledged is never left without a cursor. Likewise, the extra listings that keep a cursor small run only when the
-wait is about to return new events, and they finish even after the timeout.
+The wait ends at its timeout however much else changes meanwhile: every daemon request it makes, including both
+baseline listings and the extra listings after a burst, is cut short at the timeout, and the returned cursor still
+covers whatever a cut-short listing would have found. A `timeoutSeconds` of 0 checks once and returns (within about a
+second).
 
 Result: `{ outcome, items, events, cursor }`:
 
 - `outcome`: `feedback` or `timeout`;
 - `items`: the items with something new, oldest first (empty on timeout);
 - `events`: `[{ feedbackId, kind: "created" | "user_reply", at, replyId? }]`;
-- `cursor`: pass it to the next wait. It is missing only when a wait without a cursor timed out before its first
-  listing finished, so nothing was counted as seen. Then call `list_feedback` without filters, which shows every
+- `cursor`: pass it to the next wait. It is missing only when a wait without a cursor timed out before its baseline
+  listings finished, so nothing was handed to you. Then call `list_feedback` without filters, which shows every
   item, including anything sent meanwhile, and continue with its cursor.
 
 A client that sends a progress token receives a progress notification every 15 seconds while the wait lasts,

@@ -314,24 +314,21 @@ describe("waitForFeedback without a cursor", { timeout: 10_000 }, () => {
     expect(await drain(client, decodeCursor(cursor as string))).toEqual(["feedback:feedback-b"]);
   });
 
-  it("lets its second baseline listing finish past the deadline, so the baseline it acknowledged stays resumable", async () => {
+  it("cuts its second baseline listing short at the deadline and returns no cursor, having handed nothing over", async () => {
     let listings = 0;
-    let b = false;
     const client = fakeClient(async (_query, signal) => {
       listings += 1;
-      // The second listing outlasts the deadline (a wait of 0 gives its requests a second); feedback-b commits meanwhile.
+      // The second listing stalls far past the deadline (a wait of 0 gives its requests a second); feedback-b commits.
       if (listings === 2) {
-        b = true;
-        await Promise.race([pause(MIN_WAIT_REQUEST_MS + 200), hang(signal)]);
-        return [a];
+        await Promise.race([pause(4_000), hang(signal)]);
+        return [a, feedbackItem("feedback-b", base + 10)];
       }
-      return [a, ...(b ? [feedbackItem("feedback-b", base + 10)] : [])];
+      return [a];
     }, async (signal) => hang(signal));
-    const first = await wait(client, { timeoutMs: 0 });
-    expect(first.outcome).toBe("timeout");
-    expect(first.cursor).toBeDefined();
-    const later = fakeClient(async (query, signal) => client.listFeedback(query, signal));
-    expect(await drain(later, first.cursor)).toEqual(["feedback:feedback-b"]);
+    const started = Date.now();
+    const result = await wait(client, { timeoutMs: 0 });
+    expect(Date.now() - started).toBeLessThan(MIN_WAIT_REQUEST_MS + 500);
+    expect([listings, result]).toEqual([2, { outcome: "timeout", items: [], events: [], cursor: undefined }]);
   });
 
   it("returns no cursor when the deadline cuts its first listing short, so nothing is acknowledged", async () => {
@@ -397,6 +394,46 @@ describe("waitForFeedback after a burst", { timeout: 30_000 }, () => {
     items = [answered(count + 1)];
     const resumed = await wait(client, { cursor, timeoutMs: 1000 });
     expect(resumed.events.map((event) => event.key)).toEqual([`reply:reply-${String(count).padStart(5, "0")}`]);
+  });
+
+  /** A store holding the burst whose listings after the first (the compaction) stall until `answering` is set. */
+  function stalling(answering: { now: boolean }) {
+    let listings = 0;
+    return fakeClient(async (_query, signal) => {
+      if (++listings === 1 || answering.now) return [answered(count)];
+      await Promise.race([pause(4_000), hang(signal)]);
+      return [answered(count)];
+    });
+  }
+
+  it("stops compacting at its deadline, returns the burst with a cursor that decodes, and skips nothing", async () => {
+    const answering = { now: false };
+    const client = stalling(answering);
+    const start = cursorAfter([a], [a]);
+    const started = Date.now();
+    const burst = await wait(client, { cursor: start, timeoutMs: 300 });
+    expect(Date.now() - started).toBeLessThan(MIN_WAIT_REQUEST_MS + 500);
+    expect(burst.outcome).toBe("feedback");
+    const delivered = new Set(burst.events.map((event) => event.key));
+    expect(delivered.size).toBe(count);
+    // The cursor may hand some of the burst over again but holds no more than it can issue.
+    let cursor = decodeCursor(encodeCursor(burst.cursor!));
+    answering.now = true;
+    let quiet = false;
+    for (let turn = 0; turn < 3 && !quiet; turn += 1) {
+      const next = await wait(client, { cursor, timeoutMs: 0 });
+      next.events.forEach((event) => expect(delivered.has(event.key)).toBe(true));
+      cursor = decodeCursor(encodeCursor(next.cursor!));
+      quiet = next.outcome === "timeout";
+    }
+    expect(quiet).toBe(true);
+  });
+
+  it("is cancelled, not timed out, when its call is cancelled while it compacts", async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(new Error("cancelled")), 100);
+    const failure = await failed(wait(stalling({ now: false }), { cursor: cursorAfter([a], [a]), timeoutMs: 5_000, signal: controller.signal }));
+    expect([failure.code, failure.message]).toEqual(["internal", "The wait was cancelled"]);
   });
 
   it("acknowledges none of a burst when the daemon fails while it compacts the cursor", async () => {

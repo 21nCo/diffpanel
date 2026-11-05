@@ -77,6 +77,7 @@ const cursorInput = z.string().max(1_000_000).optional();
 
 const feedbackId = idSchema.describe("The feedback item's id, as returned by list_feedback or wait_for_feedback.");
 
+/** Registers the six Iterbar tools on `context.server`; each one is a client of the project's daemon. */
 export function registerTools(context: ToolContext): void {
   const { server, client } = context;
 
@@ -87,9 +88,10 @@ export function registerTools(context: ToolContext): void {
       "with its thread of replies, status and attachment references. Filters are optional. Also returns a cursor for " +
       "wait_for_feedback. Pass your latest cursor in: without filters, the result says what is new since that cursor " +
       "and the cursor moves past it; with filters, your cursor comes back unchanged, so nothing the filters hid is " +
-      "skipped. Without a cursor, the returned one counts everything sent so far as seen.",
+      "skipped, but the items it shows come back too: take work only from an unfiltered listing (or a wait) and use " +
+      "filters to look things up. Without a cursor, the returned one counts everything sent so far as seen.",
     inputSchema: {
-      status: feedbackStatusSchema.optional().describe("Only items with this status, e.g. \"open\" for unhandled feedback."),
+      status: feedbackStatusSchema.optional().describe("Only items with this status (a lookup; it leaves your cursor unchanged)."),
       kind: feedbackKindSchema.optional().describe("\"comment\" or \"choose_variant\"."),
       since: timestampSchema.optional().describe("Only items updated at or after this ISO 8601 timestamp."),
       cursor: cursorInput.describe("Your latest cursor from list_feedback or wait_for_feedback."),
@@ -196,7 +198,8 @@ export function registerTools(context: ToolContext): void {
     description:
       "Block until a user sends new feedback or replies in a thread, or until the timeout passes. Returns the items with " +
       "something new, what is new in each, and a cursor. Pass the cursor from the previous list_feedback or " +
-      "wait_for_feedback call so nothing in between is missed; without one, only what arrives after the call counts. " +
+      "wait_for_feedback call so nothing in between is missed, and continue with the cursor it returns; without one, " +
+      "only what arrives after the call counts. " +
       "Your own replies and status changes never end the wait.",
     inputSchema: {
       cursor: cursorInput.describe("The cursor from the previous list_feedback or wait_for_feedback result."),
@@ -232,7 +235,7 @@ export function registerTools(context: ToolContext): void {
       outcome: result.outcome,
       items: result.items,
       events: describeEvents(result.events),
-      // Missing only when a wait without a cursor timed out before its first listing: nothing was acknowledged.
+      // Missing only when a wait without a cursor timed out before its baseline listings: nothing was handed over.
       ...(result.cursor ? { cursor: encodeCursor(result.cursor) } : {}),
     });
   }));

@@ -20,7 +20,8 @@ mkdir -p "$HOME/.claude/skills"
 ln -s "$PWD/products/iterbar/skills/iterbar" "$HOME/.claude/skills/iterbar"
 ```
 
-For Cursor (which also loads skills from the two directories above):
+For Cursor (which also loads skills from `~/.claude/skills` and the default `~/.codex/skills`, not a custom
+`CODEX_HOME`):
 
 ```bash
 mkdir -p "$HOME/.cursor/skills"
