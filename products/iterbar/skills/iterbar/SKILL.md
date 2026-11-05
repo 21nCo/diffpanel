@@ -55,12 +55,15 @@ switches between them in place, and the `iterbar` URL parameter (`?iterbar=prici
 Work in a loop, one feedback item at a time, oldest first:
 
 1. At the start of a session, before you have a cursor, call `list_feedback` without filters and keep its `cursor`.
-   A listing without a cursor counts everything sent before it as seen, so at the start of a session read every item
-   that is not resolved with `get_feedback`, done ones included: handle `open` and `working` items (an earlier session
-   left those unfinished), and answer any user reply that no later agent reply answers, judged by what the replies
-   say, not by who wrote last. A user may have replied after an earlier session read the thread and before it
-   replied; that reply comes before the agent's, yet nobody has answered it. A thread whose user replies are all
-   answered needs nothing.
+   A listing without a cursor counts everything sent before it as seen, so at the start of a session check every item
+   it returns, whatever its status, resolved and done ones included, using the replies each item carries: handle
+   `open` and `working` items (an earlier session left those unfinished), and answer any user reply that no later
+   agent reply answers, judged by what the replies say, not by who wrote last. A user may have replied after an
+   earlier session read the thread and before it replied; that reply comes before the agent's, yet nobody has
+   answered it. A user can also reply on a thread after it was resolved, and the reply leaves its status unchanged.
+   Such a reply on a resolved or done thread reopens it: `set_status` `working` and handle it like new feedback. A
+   thread whose user replies are all answered needs nothing. For that check, call `get_feedback` only when you need an
+   item's detail, with `includeAttachments: false` unless you need its screenshot or evidence.
    To pick up what arrived while you worked, call `list_feedback` again without filters and with your latest
    `cursor`: its `events` say what arrived since that cursor (`created` items and `user_reply` answers), and the
    cursor it returns moves past them. Never take work from a filtered listing: it hands your cursor back unchanged,

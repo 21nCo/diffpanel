@@ -87,19 +87,22 @@ export const HANDLED_EVENT_RULE =
   "even when your own reply now comes after it.";
 
 /**
- * What still needs the agent when a session starts or ends. A listing without a cursor counts everything as seen, and
- * who wrote a thread's last reply does not show whether an earlier user reply was read: a user can reply between the
- * agent's get_feedback and its reply, and the session can end before a cursor call returns that reply. So a session
- * starts by reading every unresolved thread, re-reads a thread right before finishing it, and makes one more unfiltered
- * cursor call before it stops. Shared by the server instructions and tool descriptions.
+ * What still needs the agent when a session starts or ends. A listing without a cursor counts everything as seen, a
+ * user reply leaves a thread's status as it was, and who wrote a thread's last reply does not show whether an earlier
+ * user reply was read: a user can reply on a resolved thread, or between the agent's get_feedback and its reply, and
+ * the session can end before a cursor call returns that reply. So a session starts by checking the replies of every
+ * listed item, whatever its status, re-reads a thread right before finishing it, and makes one more unfiltered cursor
+ * call before it stops. Shared by the server instructions and tool descriptions.
  */
 export const SESSION_RULE =
-  "A listing without a cursor counts everything sent before it as seen, so at the start of a session read every item " +
-  "that is not resolved with get_feedback, done ones included: handle open and working items, and answer any user " +
-  "reply that no later agent reply answers, judged by what the replies say, not by who wrote last. Right before you " +
-  "reply and set a thread done or needs-info, read it again with get_feedback so your reply covers every user reply " +
-  "in it. Before you stop, call list_feedback without filters and with your latest cursor once more, and handle what " +
-  "it returns.";
+  "A listing without a cursor counts everything sent before it as seen, so at the start of a session check every " +
+  "item it returns, whatever its status, resolved and done ones included, using the replies each item carries: " +
+  "handle open and working items, and answer any user reply that no later agent reply answers, judged by what the " +
+  "replies say, not by who wrote last. Such a reply on a resolved or done thread reopens it: set_status working and " +
+  "handle it like new feedback. For that check, call get_feedback only when you need an item's detail, with " +
+  "includeAttachments: false unless you need its screenshot or evidence. Right before you reply and set a thread " +
+  "done or needs-info, read it again with get_feedback so your reply covers every user reply in it. Before you stop, " +
+  "call list_feedback without filters and with your latest cursor once more, and handle what it returns.";
 
 const cursorInput = z.string().max(1_000_000).optional();
 

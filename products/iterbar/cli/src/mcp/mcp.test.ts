@@ -90,6 +90,13 @@ async function userReply(daemon: RunningDaemon, feedbackId: string, text: string
   return JSON.parse(response.text) as Feedback;
 }
 
+/** The user replies on `items`, whatever their status; in these tests no agent reply answers one, so each needs the agent. */
+function userReplies(items: readonly Feedback[]): { feedbackId: string; replyId: string }[] {
+  return items.flatMap((item) => item.replies
+    .filter((reply) => reply.author.kind === "user")
+    .map((reply) => ({ feedbackId: item.id, replyId: reply.id })));
+}
+
 interface WaitOutput {
   outcome: "feedback" | "timeout";
   items: Feedback[];
@@ -471,20 +478,61 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     expect(deliveryContractProblems(second.client.getInstructions() ?? "")).toEqual([]);
     const started = await ok<{ items: Feedback[]; cursor: string; events?: unknown }>(second.client, "list_feedback");
     expect(started.events).toBeUndefined();
-    // The session rule reads every item that is not resolved, done ones included, and looks at their user replies.
-    const unresolved = started.items.filter((item) => item.status !== "resolved");
-    const toAnswer: { feedbackId: string; replyId: string }[] = [];
-    for (const item of unresolved) {
-      const { feedback } = await ok<{ feedback: Feedback }>(second.client, "get_feedback", { feedbackId: item.id, includeAttachments: false });
-      expect(feedback.status).toBe("done");
-      for (const reply of feedback.replies) {
-        if (reply.author.kind === "user") toAnswer.push({ feedbackId: feedback.id, replyId: reply.id });
-      }
-    }
+    // The session rule checks the replies of every listed item, whatever its status (both are done here).
+    expect(started.items.map((item) => item.status)).toEqual(["done", "done"]);
     // The follow-up is in front of the agent; the handled thread has no user reply, so nothing there is acted on again.
-    expect(toAnswer).toEqual([{ feedbackId: followedUp.id, replyId: followUpId }]);
+    expect(userReplies(started.items)).toEqual([{ feedbackId: followedUp.id, replyId: followUpId }]);
     const quiet = await ok<WaitOutput>(second.client, "wait_for_feedback", { cursor: started.cursor, timeoutSeconds: 1 });
     expect(quiet).toMatchObject({ outcome: "timeout", events: [] });
+  });
+
+  it("finds a user reply sent on a resolved thread between sessions, and reopens that thread only", async () => {
+    const daemon = await start();
+    const resolved = await sendFeedback(daemon);
+    const finished = await sendFeedback(daemon, chooseVariantDraft, false);
+
+    // Session 1 resolves one thread and finishes the other, then stops after its final unfiltered cursor call.
+    const first = await connect();
+    const session = await ok<{ items: Feedback[]; cursor: string }>(first.client, "list_feedback");
+    for (const item of [resolved, finished]) {
+      await ok(first.client, "get_feedback", { feedbackId: item.id, includeAttachments: false });
+      await ok(first.client, "set_status", { feedbackId: item.id, status: "working" });
+      await ok(first.client, "get_feedback", { feedbackId: item.id, includeAttachments: false });
+      await ok(first.client, "reply", { feedbackId: item.id, text: "Made the button larger." });
+    }
+    await ok(first.client, "set_status", { feedbackId: resolved.id, status: "resolved" });
+    await ok(first.client, "set_status", { feedbackId: finished.id, status: "done" });
+    const final = await ok<{ events: WaitOutput["events"] }>(first.client, "list_feedback", { cursor: session.cursor });
+    expect(final.events).toEqual([]);
+    await first.client.close();
+
+    // Between sessions the user answers on the resolved thread; a user reply leaves the status as it was.
+    const reopened = await userReply(daemon, resolved.id, "Actually, make it smaller again.");
+    expect(reopened.status).toBe("resolved");
+    const replyId = reopened.replies.at(-1)?.id;
+
+    // Session 2 starts without a cursor, so the listing counts that reply as seen and returns no events.
+    const second = await connect();
+    const instructions = (second.client.getInstructions() ?? "").replace(/\s+/g, " ");
+    expect(deliveryContractProblems(instructions)).toEqual([]);
+    expect(instructions).toContain("check every item it returns, whatever its status, resolved and done ones included");
+    const started = await ok<{ items: Feedback[]; cursor: string; events?: unknown }>(second.client, "list_feedback");
+    expect(started.events).toBeUndefined();
+    // A startup rule bounded by status would never see the reply; the shipped rule checks every listed item.
+    expect(userReplies(started.items.filter((item) => item.status !== "resolved"))).toEqual([]);
+    expect(userReplies(started.items)).toEqual([{ feedbackId: resolved.id, replyId }]);
+
+    // Acting on it reopens the thread; the detail read needs no attachments, so none is inlined.
+    await ok(second.client, "set_status", { feedbackId: resolved.id, status: "working" });
+    const detail = await call(second.client, "get_feedback", { feedbackId: resolved.id, includeAttachments: false });
+    expect(detail.isError).toBeFalsy();
+    expect(detail.content.some((block) => block.type === "image" || block.type === "resource")).toBe(false);
+    expect((detail.structuredContent as { attachments: { inlined: boolean }[] }).attachments.map((ref) => ref.inlined)).toEqual([false, false]);
+    await ok(second.client, "reply", { feedbackId: resolved.id, text: "Made it smaller again." });
+    await ok(second.client, "set_status", { feedbackId: resolved.id, status: "done" });
+    // Nothing on the finished thread is acted on again, and nothing new is waiting.
+    const quiet = await ok<WaitOutput>(second.client, "wait_for_feedback", { cursor: started.cursor, timeoutSeconds: 1 });
+    expect(quiet).toMatchObject({ outcome: "timeout", items: [], events: [] });
   });
 
   it("accepts a cursor at the latest time the daemon's since filter takes, and refuses a later one", async () => {
