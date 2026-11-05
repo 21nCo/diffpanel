@@ -59,9 +59,9 @@ Work in a loop, one feedback item at a time, oldest first:
    session left unfinished (handle them like open ones), and any other unresolved thread whose last reply is from the
    user (an answer to a `needs-info` question or a follow-up; continue the thread).
    To pick up what arrived while you worked, call `list_feedback` again without filters and with your latest
-   `cursor`: its `events` are exactly what is new (`created` items and `user_reply` answers), and the cursor it
-   returns moves past them. Never take work from a filtered listing: it hands your cursor back unchanged, so the next
-   wait returns its items again even after you have handled them.
+   `cursor`: its `events` say what arrived since that cursor (`created` items and `user_reply` answers), and the
+   cursor it returns moves past them. Never take work from a filtered listing: it hands your cursor back unchanged,
+   so the next wait returns its items again even after you have handled them.
 2. For each item, `get_feedback`. Use `target.sourceLocation` (project-relative `path:line:column`), the selector,
    the text excerpt, the screenshot and `activeVariants` to find exactly what the user meant. A comment applies to
    the version that was active when it was sent (`activeVariants`); change that version, not the others, unless the
@@ -83,11 +83,18 @@ or the previous wait). It returns when a user sends new feedback or replies in a
 - `outcome: "timeout"`: nothing arrived. Wait again with the returned `cursor`, or tell the user you are stopping.
 
 Always pass the most recent cursor, to `list_feedback` as well as to `wait_for_feedback`, so nothing sent while you
-were working is missed or handed to you twice. Never start over without one once you have it. A filtered
-`list_feedback` is only for looking something up; if you did act on an item it showed, skip that event when a later
-call hands it to you again. Your own replies and status changes never end a wait. The default timeout is 300
-seconds and the maximum 1,800; if your client gives up on long tool calls, use a shorter `timeoutSeconds` and wait
-again.
+were working is missed. Never start over without one once you have it. A filtered `list_feedback` is only for
+looking something up. Your own replies and status changes never end a wait. The default timeout is 300 seconds and
+the maximum 1,800; if your client gives up on long tool calls, use a shorter `timeoutSeconds` and wait again.
+
+Events are delivered at least once: after a very large burst, or when a wait's timeout cuts its cursor upkeep short,
+an event you already got can come back, from either tool. Before acting on an event, read the item's `replies`:
+
+- skip a `created` event when the thread already has an agent reply;
+- skip a `user_reply` event when an agent reply comes after the reply with that `replyId`.
+
+A user reply that comes after your last reply is always new; handle it. The same check covers an item you acted on
+after a filtered lookup showed it.
 
 If any tool fails with `daemon_unavailable` during the loop, the user stopped the dev server or daemon. Tell them to
 run `iterbar dev` again; keep your cursor, and continue with it once it is back. A failed wait may carry a newer

@@ -41,8 +41,9 @@ export interface WaitResult {
   readonly items: readonly Feedback[];
   readonly events: readonly FeedbackEvent[];
   /**
-   * Pass this to the next wait so that nothing in between is missed or returned twice. Missing only when a wait without
-   * a cursor timed out before its baseline listings completed, so that nothing was handed over.
+   * Pass this to the next wait so that nothing in between is missed; an event may come back again (delivery is at
+   * least once, see `observe`). Missing only when a wait without a cursor timed out before its baseline listings
+   * completed, so that nothing was handed over.
    */
   readonly cursor: FeedbackCursor | undefined;
 }

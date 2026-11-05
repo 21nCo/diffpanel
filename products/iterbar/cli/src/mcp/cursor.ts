@@ -196,7 +196,11 @@ export function encodeCursor(cursor: FeedbackCursor): string {
   return Buffer.from(JSON.stringify({ v: 1, w: cursor.watermark, c: cursor.committed, s: [...cursor.seen].sort(compareText) })).toString("base64url");
 }
 
-/** The cursor an agent passed back; anything no tool issued is refused as `invalid_request`. */
+/**
+ * The cursor an agent passed back. Validation is structural: anything that is not a well-formed cursor within the
+ * issued size limits is refused as `invalid_request`. It does not prove that a tool issued the value; a hand-made
+ * cursor only changes what that agent's own calls report as new.
+ */
 export function decodeCursor(value: string): FeedbackCursor {
   let json: unknown;
   try {

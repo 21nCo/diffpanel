@@ -96,23 +96,28 @@ second listing has finished, nothing was handed to you and there is no cursor: c
 A cursor relies only on the order in which the daemon commits feedback, never on how long a write or a listing takes:
 an item that takes long to save is still returned once it is saved. Every cursor a tool returns is accepted by the next
 call, however much feedback arrived: after a large burst, the tool lists a few more times to keep the cursor small
-(whatever those listings find is returned too). When a wait's timeout cuts those extra listings short, it returns what
-it found with a cursor that may hand some of it over again, never one that skips anything; skip an event you have
-already handled.
+(whatever those listings find is returned too).
+
+Events are delivered at least once, by `list_feedback` and `wait_for_feedback` alike. When those extra listings still
+leave too much (feedback committed faster than the daemon lists it), or a wait's timeout cuts them short, the cursor
+keeps its position but forgets which recent events it returned, so some of them can be handed over again; none is
+skipped. Before acting on an event, read the item's `replies`: skip a `created` event when the thread already has an
+agent reply, and a `user_reply` event when an agent reply comes after the reply with that `replyId`. A user reply that
+comes after your last reply is always new.
 
 The wait ends at its timeout however much else changes meanwhile: every daemon request it makes, including both
-baseline listings and the extra listings after a burst, is cut short at the timeout, and the returned cursor still
-covers whatever a cut-short listing would have found. A `timeoutSeconds` of 0 checks once and returns (within about a
-second).
+baseline listings and the extra listings after a burst, is cut short at the timeout. The returned cursor stays at the
+last listing that finished, so nothing a cut-short listing would have found counts as seen: a later call returns it.
+A `timeoutSeconds` of 0 checks once and returns (within about a second).
 
 Result: `{ outcome, items, events, cursor }`:
 
 - `outcome`: `feedback` or `timeout`;
 - `items`: the items with something new, oldest first (empty on timeout);
 - `events`: `[{ feedbackId, kind: "created" | "user_reply", at, replyId? }]`;
-- `cursor`: pass it to the next wait. It is missing only when a wait without a cursor timed out before its baseline
-  listings finished, so nothing was handed to you. Then call `list_feedback` without filters, which shows every
-  item, including anything sent meanwhile, and continue with its cursor.
+- `cursor`: pass it to the next wait. It is missing only when a wait without a cursor timed out or failed before its
+  baseline listings finished, so nothing was handed to you. Then call `list_feedback` without filters, which shows
+  every item, including anything sent meanwhile, and continue with its cursor.
 
 A client that sends a progress token receives a progress notification every 15 seconds while the wait lasts,
 so clients that reset their request timeout on progress keep waiting. If the daemon stops during the wait, the call

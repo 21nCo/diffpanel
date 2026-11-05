@@ -5,8 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { baselineCursor, cursorAfter, decodeCursor, encodeCursor, MAX_CURSOR_SEEN, type FeedbackCursor } from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { daemonUnavailable, IterbarToolError } from "./errors.js";
-import { feedbackItem } from "./test-support/feedback.js";
-import { MIN_WAIT_REQUEST_MS, waitForFeedback, type WaitOptions } from "./wait.js";
+import { alreadyHandled } from "./test-support/delivery.js";
+import { feedbackItem, type ReplySpec } from "./test-support/feedback.js";
+import { MIN_WAIT_REQUEST_MS, waitForFeedback, type WaitOptions, type WaitResult } from "./wait.js";
 
 /** An `/events` socket the test drives: `push` sends a daemon event, `emit("close")` ends the stream. */
 class FakeSocket extends EventEmitter {
@@ -396,7 +397,10 @@ describe("waitForFeedback after a burst", { timeout: 30_000 }, () => {
     expect(resumed.events.map((event) => event.key)).toEqual([`reply:reply-${String(count).padStart(5, "0")}`]);
   });
 
-  /** A store holding the burst whose listings after the first (the compaction) stall until `answering` is set. */
+  /**
+   * A store holding the burst. Its first listing answers at once; a later one (the compaction) answers at once if
+   * `answering.now` is set when it starts, and otherwise stalls for 4 seconds or until its signal aborts.
+   */
   function stalling(answering: { now: boolean }) {
     let listings = 0;
     return fakeClient(async (_query, signal) => {
@@ -427,6 +431,46 @@ describe("waitForFeedback after a burst", { timeout: 30_000 }, () => {
       quiet = next.outcome === "timeout";
     }
     expect(quiet).toBe(true);
+  });
+
+  it("hands over a deadline-cut burst again, and the documented rule acts on none of it but on a newer user reply", async () => {
+    const replies = (extra: ReplySpec[]) => feedbackItem("feedback-a", base, [
+      ...Array.from({ length: count }, (_, index) => [`reply-${String(index).padStart(5, "0")}`, "user", base + 1_000 + index] as const),
+      ...extra,
+    ]);
+    let items = [replies([])];
+    let listings = 0;
+    const answering = { now: false };
+    // The first listing answers at once; the compaction listings stall past the deadline until `answering` is set.
+    const client = fakeClient(async (_query, signal) => {
+      if (++listings > 1 && !answering.now) await Promise.race([pause(4_000), hang(signal)]);
+      return items;
+    });
+    /** The events of a result an agent following the documented rule acts on. */
+    const actOn = (result: WaitResult) => result.events.filter((event) =>
+      !alreadyHandled(result.items.find((item) => item.id === event.feedbackId)!, event));
+
+    const burst = await wait(client, { cursor: cursorAfter([a], [a]), timeoutMs: 300 });
+    const delivered = new Set(burst.events.map((event) => event.key));
+    expect([delivered.size, actOn(burst).length]).toEqual([count, count]);
+    // The agent answers the burst, then follows the documented loop with the cursors the waits return.
+    items = [replies([["reply-agent", "agent", base + 1_000 + count]])];
+    answering.now = true;
+    let cursor = decodeCursor(encodeCursor(burst.cursor!));
+    let replayed = 0;
+    for (let turn = 0; turn < 3; turn += 1) {
+      const next = await wait(client, { cursor, timeoutMs: 0 });
+      next.events.forEach((event) => expect(delivered.has(event.key)).toBe(true));
+      replayed += next.events.length;
+      expect(actOn(next)).toEqual([]);
+      cursor = decodeCursor(encodeCursor(next.cursor!));
+      if (next.outcome === "timeout") break;
+    }
+    expect(replayed).toBeGreaterThan(0);
+    // A user reply after the agent's is new on the same thread, and the rule acts on it.
+    items = [replies([["reply-agent", "agent", base + 1_000 + count], ["reply-later", "user", base + 2_000 + count]])];
+    const later = await wait(client, { cursor, timeoutMs: 1_000 });
+    expect(actOn(later).map((event) => event.key)).toEqual(["reply:reply-later"]);
   });
 
   it("is cancelled, not timed out, when its call is cancelled while it compacts", async () => {

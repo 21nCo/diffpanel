@@ -13,6 +13,7 @@ import { startDaemon, type RunningDaemon } from "../daemon/index.js";
 import { bearer, json, multipart, send } from "../daemon/test-support/client.js";
 import { chooseVariantDraft, commentDraft, deadPid, EVIDENCE, PNG, temporaryProject } from "../store/test-support/helpers.js";
 import { createIterbarMcpServer } from "./server.js";
+import { deliveryContractProblems } from "./test-support/delivery.js";
 
 /** The built command line; the package's test script builds it first. */
 const cli = fileURLToPath(new URL("../../dist/cli.js", import.meta.url));
@@ -400,6 +401,7 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     expect(instructions).toContain("take new work only from list_feedback without filters and with your latest cursor");
     expect(instructions).toContain("use it only to look things up, never to pick up work");
     expect(instructions).not.toMatch(/list_feedback \(status "open"\)/);
+    expect(instructions).toContain("including one that a failed wait_for_feedback returns next to its error");
 
     const handled = await sendFeedback(daemon);
     const asked = await sendFeedback(daemon, chooseVariantDraft, false);
@@ -423,6 +425,17 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     expect(pickup.events).toEqual([]);
     const after = await ok<WaitOutput>(client, "wait_for_feedback", { cursor: pickup.cursor, timeoutSeconds: 1 });
     expect(after).toMatchObject({ outcome: "timeout", events: [] });
+  });
+
+  it("tells every client, in its instructions and both pickup tools, that events can repeat and how to skip them", async () => {
+    await start();
+    const { client } = await connect();
+    expect(deliveryContractProblems(client.getInstructions() ?? "")).toEqual([]);
+    const { tools } = await client.listTools();
+    for (const name of ["list_feedback", "wait_for_feedback"]) {
+      const description = tools.find((tool) => tool.name === name)?.description ?? "";
+      expect([name, deliveryContractProblems(description)]).toEqual([name, []]);
+    }
   });
 
   it("fails with daemon_unavailable when the daemon stops during the wait", async () => {
