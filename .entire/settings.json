@@ -9,7 +9,7 @@
   "strategy_options": {
     "checkpoint_remote": {
       "provider": "github",
-      "repo": "21nCo/diffpanel.private"
+      "repo": "21nCo/devroll.private"
     }
   }
 }
