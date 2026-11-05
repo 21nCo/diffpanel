@@ -532,4 +532,35 @@ describe("slot ranges", () => {
     host.remove();
     other.remove();
   });
+
+  it("keeps following a range that is detached, observed while detached, and inserted elsewhere", async () => {
+    const [start, end, innerStart, innerEnd] = [boundary("start"), boundary("end"), boundary("start"), boundary("end")];
+    const first = document.createElement("div");
+    const second = document.createElement("section");
+    document.body.append(first, second);
+    first.append(start, paragraph("One"), innerStart, paragraph("Inner"), innerEnd, end);
+    const stopInner = markSlotRange(innerStart, innerEnd, "inner");
+    const stop = markSlotRange(start, end, "outer");
+    const marks = () => ({ inner: roots(document.body, "inner"), outer: roots(document.body, "outer") });
+    expect(marks()).toEqual({ inner: ["Inner"], outer: ["One"] });
+
+    const nodes = [...first.childNodes];
+    for (const node of nodes) node.remove();
+    await settle();
+    second.append(...nodes);
+    await settle();
+    expect(marks()).toEqual({ inner: ["Inner"], outer: ["One"] });
+
+    start.nextElementSibling?.replaceWith(paragraph("Two"));
+    await settle();
+    expect(marks()).toEqual({ inner: ["Inner"], outer: ["Two"] });
+
+    stop();
+    stopInner();
+    second.insertBefore(paragraph("Three"), end);
+    await settle();
+    expect(marks()).toEqual({ inner: [], outer: [] });
+    first.remove();
+    second.remove();
+  });
 });

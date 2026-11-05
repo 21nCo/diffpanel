@@ -82,14 +82,14 @@ function renderVersion(versions: Readonly<Record<string, VersionContent>>, versi
  *
  * Development means `process.env.NODE_ENV === "development"`; any other value, or none, renders `default`
  * only, with no markers and no registry. The condition is written inline, as React writes its own, so a
- * bundler that replaces `process.env.NODE_ENV` drops the development code from other builds.
+ * bundler that replaces `process.env.NODE_ENV` needs no `process` global and drops the development code
+ * from other builds.
  */
 export function Variants<Versions extends Readonly<Record<string, VersionContent>>>(
   props: VariantsProps<Versions>,
 ): JSX.Element {
-  if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
-    return <DevelopmentVariants {...props} />;
-  }
+  // Bare, as React's own entry reads it: a bundler's replacement leaves no `process` reference behind.
+  if (process.env.NODE_ENV === "development") return <DevelopmentVariants {...props} />;
   return <>{renderVersion(props.versions, props.default)}</>;
 }
 

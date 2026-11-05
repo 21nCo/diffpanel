@@ -214,20 +214,19 @@ export class VariantsRegistry {
   }
 
   /**
-   * After the defining instance unregisters, keeps the active version valid for the new definition. A slot
-   * that shows its default because the URL or storage named an unknown version chooses again, so a version
-   * added by a hot update is honoured.
+   * After the defining instance unregisters, chooses the slot's version again for the next definition as a
+   * first registration would: the URL, then storage (an unknown version there shows the default and is
+   * reported), then the default. With neither naming the slot, a version selected in the page that the new
+   * definition still has stays active.
    */
   #refreshDefinition(record: SlotRecord, previous: SlotDefinition): void {
     const definition = definitionOf(record);
     if (sameDefinition(definition, previous)) return;
-    if (record.warnings.length > 0) {
-      const resolved = this.#resolve(definition);
-      record.activeVersion = resolved.version;
-      record.warnings = resolved.warnings;
-    } else if (!definition.versions.includes(record.activeVersion)) {
-      record.activeVersion = definition.defaultVersion;
-    }
+    const resolved = this.#resolve(definition);
+    const keep = !resolved.selected && record.activeVersion !== previous.defaultVersion
+      && definition.versions.includes(record.activeVersion);
+    if (!keep) record.activeVersion = resolved.version;
+    record.warnings = resolved.warnings;
   }
 
   /**
@@ -308,12 +307,16 @@ export class VariantsRegistry {
     };
   }
 
-  #resolve(definition: SlotDefinition): { version: string; warnings: RegistryWarning[] } {
+  /** The version the URL, storage or default selects for `definition`; `selected` when the URL or storage names the slot. */
+  #resolve(definition: SlotDefinition): { version: string; warnings: RegistryWarning[]; selected: boolean } {
     for (const source of ["url", "storage"] as const) {
       const selection = this.#read(source).selections.find((entry) => entry.slot === definition.slot);
       if (!selection) continue;
-      if (definition.versions.includes(selection.version)) return { version: selection.version, warnings: [] };
+      if (definition.versions.includes(selection.version)) {
+        return { version: selection.version, warnings: [], selected: true };
+      }
       return {
+        selected: true,
         version: definition.defaultVersion,
         warnings: [warning(
           "unknown_version", source, `${selection.slot}:${selection.version}`,
@@ -322,7 +325,7 @@ export class VariantsRegistry {
         )],
       };
     }
-    return { version: definition.defaultVersion, warnings: [] };
+    return { version: definition.defaultVersion, warnings: [], selected: false };
   }
 
   #read(source: SelectionSource): ParsedVariantParam {

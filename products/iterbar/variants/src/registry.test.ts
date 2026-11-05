@@ -266,6 +266,44 @@ describe("repeated slots and unregistering", () => {
     expect(registry.getSnapshot().warnings).toEqual([]);
   });
 
+  it.each(["url", "storage"] as const)(
+    "reports a %s version the next definition lacks and honours it again when a later one has it",
+    (source) => {
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const { registry } = source === "url" ? page("?iterbar=pricing:v2") : page("", "pricing:v2");
+      const withV2: SlotDefinition = { slot: "pricing", versions: ["v1", "v2"], defaultVersion: "v1" };
+      const withoutV2: SlotDefinition = { slot: "pricing", versions: ["v1", "v3"], defaultVersion: "v1" };
+      const first = registry.register(withV2);
+      const second = registry.register(withoutV2);
+      expect(slotOf(registry.getSnapshot(), "pricing")?.activeVersion).toBe("v2");
+
+      first();
+      expect(slotOf(registry.getSnapshot(), "pricing")?.activeVersion).toBe("v1");
+      expect(registry.getSnapshot().warnings).toMatchObject([{ code: "unknown_version", source, value: "pricing:v2" }]);
+
+      registry.register(withV2);
+      second();
+      expect(slotOf(registry.getSnapshot(), "pricing")?.activeVersion).toBe("v2");
+      expect(registry.getSnapshot().warnings).toEqual([]);
+    },
+  );
+
+  it("follows a changed default unless a version was selected in the page", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { registry } = page();
+    const first = registry.register({ slot: "pricing", versions: ["v1", "v2", "v3"], defaultVersion: "v1" });
+    registry.register({ slot: "pricing", versions: ["v1", "v2", "v3"], defaultVersion: "v2" });
+    first();
+    expect(slotOf(registry.getSnapshot(), "pricing")?.activeVersion).toBe("v2");
+
+    const memory = createVariantsRegistry({ environment: { readSearch: () => "", storage: () => null } });
+    const kept = memory.register(pricing);
+    memory.register({ slot: "pricing", versions: ["v3", "v1"], defaultVersion: "v1" });
+    select(memory, "pricing", "v3");
+    kept();
+    expect(slotOf(memory.getSnapshot(), "pricing")?.activeVersion).toBe("v3");
+  });
+
   it("notifies subscribers on register, select and unregister", () => {
     const { registry } = page();
     const listener = vi.fn();

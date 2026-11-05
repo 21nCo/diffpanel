@@ -40,9 +40,10 @@ With any other `NODE_ENV`, or none, `Variants` renders the `default` version
 only: no templates, no marks, no registry and no `window.__ITERBAR__`. Server
 and client must agree on development, or hydration reports a mismatch. Your
 bundler must replace `process.env.NODE_ENV`, as it already must for React;
-then a production bundle contains none of the development code (the
-registry, its validation and the DOM observers). Without that replacement and
-without a `process` global, `Variants` behaves as in production.
+then a development bundle needs no `process` global in the browser, and a
+production bundle contains none of the development code (the registry, its
+validation and the DOM observers). Without that replacement, `Variants`
+reads the `process` global, as React does.
 
 The entry starts with `"use client"`, so React Server Components (for
 example the Next.js App Router) can import `Variants` and `VariantsProvider`

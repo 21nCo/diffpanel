@@ -67,12 +67,14 @@ export function markSlotRange(start: Node, end: Node, slot: string): () => void 
   const observer = typeof Observer === "function" ? new Observer(() => update()) : null;
   let observed: Node | null = null;
   const update = () => {
-    // Follow the range when it moves to another parent, such as when its DocumentFragment is inserted.
+    // Follow the range to each parent it moves to, such as when its DocumentFragment is inserted. While it
+    // is detached, watch its document so that inserting it again anywhere there is noticed.
     const parent = start.parentNode;
-    if (observer && parent && parent !== observed) {
+    const target = parent ?? start.ownerDocument;
+    if (observer && target && target !== observed) {
       observer.disconnect();
-      observer.observe(parent, { childList: true });
-      observed = parent;
+      observer.observe(target, { childList: true, subtree: !parent });
+      observed = target;
     }
     const current = rangeElements(start, end);
     for (const element of marked) if (!current.has(element)) unmark(element);
