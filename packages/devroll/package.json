@@ -1,6 +1,6 @@
 {
   "name": "devroll",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Catalog of the Devroll developer tools from 21n, such as Diffpanel and Iterbar.",
   "type": "module",
   "license": "MIT",
