@@ -42,8 +42,8 @@ and client must agree on development, or hydration reports a mismatch. Your
 bundler must replace `process.env.NODE_ENV`, as it already must for React;
 then a development bundle needs no `process` global in the browser, and a
 production bundle contains none of the development code (the registry, its
-validation and the DOM observers). Without that replacement, `Variants`
-reads the `process` global, as React does.
+validation and the DOM observers). Without that replacement, `Variants` reads
+the `process` global; when there is none, it behaves as in production.
 
 The entry starts with `"use client"`, so React Server Components (for
 example the Next.js App Router) can import `Variants` and `VariantsProvider`

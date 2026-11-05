@@ -21,13 +21,15 @@ const BUNDLE_SCRIPT = `
 import { build } from "esbuild";
 const [entry, nodeEnv] = process.argv.slice(1);
 const result = await build({
-  entryPoints: [entry], bundle: true, write: false, format: "cjs", platform: "browser", minify: true,
-  define: { "process.env.NODE_ENV": JSON.stringify(nodeEnv) }, external: ["react", "react/*"], logLevel: "silent",
+  // For the browser platform esbuild replaces NODE_ENV itself when minifying; "neutral" leaves it unreplaced.
+  entryPoints: [entry], bundle: true, write: false, format: "cjs", platform: nodeEnv ? "browser" : "neutral", minify: true,
+  define: nodeEnv ? { "process.env.NODE_ENV": JSON.stringify(nodeEnv) } : {}, external: ["react", "react/*"],
+  logLevel: "silent",
 });
 process.stdout.write(result.outputFiles[0].text);
 `;
 
-/** Bundles the built package as a consumer's bundler does, with `process.env.NODE_ENV` replaced. */
+/** Bundles the built package as a consumer's bundler does, with `process.env.NODE_ENV` replaced unless empty. */
 function bundle(nodeEnv: string): string {
   return execFileSync(process.execPath, ["--input-type=module", "--eval", BUNDLE_SCRIPT, dist, nodeEnv], {
     cwd: packageDirectory,
@@ -35,14 +37,14 @@ function bundle(nodeEnv: string): string {
   });
 }
 
-/** Runs a bundle the way a browser does: no `process` global, React from the page. */
-function load(code: string): typeof Variants {
+/** Runs a bundle the way a browser does: no `process` global (or the given one), React from the page. */
+function load(code: string, process?: object): typeof Variants {
   const module = { exports: {} as { Variants: typeof Variants } };
   const modules: Record<string, unknown> = { react: React, "react/jsx-runtime": JsxRuntime };
   const evaluate = runInThisContext(`(function (require, module, exports, process) {${code}\n})`) as (
-    require: (id: string) => unknown, target: typeof module, exports: object, process: undefined,
+    require: (id: string) => unknown, target: typeof module, exports: object, process: object | undefined,
   ) => void;
-  evaluate((id) => modules[id], module, module.exports, undefined);
+  evaluate((id) => modules[id], module, module.exports, process);
   return module.exports.Variants;
 }
 
@@ -62,6 +64,11 @@ afterEach(() => {
 describe("built package", () => {
   const development = bundle("development");
   const production = bundle("production");
+  const unreplaced = bundle("");
+
+  it("leaves NODE_ENV unreplaced when asked to", () => {
+    expect(unreplaced).toContain("process.env.NODE_ENV");
+  });
   const devOnly = ["MutationObserver", PAGE_API_GLOBAL, "data-iterbar-slot", VARIANT_STORAGE_KEY];
 
   it("keeps the \"use client\" directive", () => {
@@ -80,6 +87,17 @@ describe("built package", () => {
     expect(container.innerHTML).toBe("<p>Plan one</p>");
     expect(readPageApi(window)).toBeNull();
   });
+
+  it.each([["no process global", undefined], ["a process without env", {}]])(
+    "renders only the default from an unreplaced bundle in a browser with %s",
+    (_name, process) => {
+      window.history.replaceState(null, "", "/plans?iterbar=pricing:v2");
+      const BuiltVariants = load(unreplaced, process);
+      const { container } = render(<BuiltVariants slot="pricing" versions={versions} default="v1" />);
+      expect(container.innerHTML).toBe("<p>Plan one</p>");
+      expect(readPageApi(window)).toBeNull();
+    },
+  );
 
   it("registers and switches a development bundle in a browser without a process global", () => {
     for (const marker of devOnly) expect(development).toContain(marker);
