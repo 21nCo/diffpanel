@@ -12,15 +12,7 @@ import {
 } from "iterbar";
 import { attachmentPath } from "iterbar/node";
 import { z } from "zod";
-import {
-  cursorAfter,
-  decodeCursor,
-  encodeCursor,
-  observeListing,
-  unseenEvents,
-  type FeedbackCursor,
-  type FeedbackEvent,
-} from "./cursor.js";
+import { cursorProvenBy, decodeCursor, encodeCursor, observe, type FeedbackEvent } from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { IterbarToolError } from "./errors.js";
 import { DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS, waitForFeedback } from "./wait.js";
@@ -106,21 +98,23 @@ export function registerTools(context: ToolContext): void {
   }, (input) => run(context, async () => {
     const cursor = input.cursor === undefined ? undefined : decodeCursor(input.cursor);
     const filtered = input.status !== undefined || input.kind !== undefined || input.since !== undefined;
+    // Lists every item updated at or after `since`; observe() uses it to keep a cursor small enough to issue.
+    const relist = (since: string | undefined) => client.listFeedback(since === undefined ? {} : { since });
     if (!filtered) {
       const items = await client.listFeedback();
       if (cursor) {
         // Every listed event is shown to the agent, so the cursor may move past all of them.
-        const events = unseenEvents(cursor, items);
-        return success({ items, events: describeEvents(events), cursor: encodeCursor(observeListing(cursor, items)) });
+        const observed = await observe(cursor, items, relist);
+        return success({ items: observed.items, events: describeEvents(observed.events), cursor: encodeCursor(observed.cursor) });
       }
       // A second listing proves when the first was committed, so the cursor keeps only the newest events by key.
-      const shown = await client.listFeedback();
-      return success({ items: shown, cursor: encodeCursor(cursorAfter(items, shown)) });
+      const observed = await observe(cursorProvenBy(items), await client.listFeedback(), relist);
+      return success({ items: observed.items, cursor: encodeCursor(observed.cursor) });
     }
     // The agent sees only the filtered items, so the cursor must not count anything else as seen: an agent's cursor
     // comes back unchanged. Without one, the cursor starts now; it is taken before the filtered listing, so an item
     // that arrives in between is handed over again by the next wait, never skipped.
-    const next: FeedbackCursor = cursor ?? cursorAfter(await client.listFeedback(), await client.listFeedback());
+    const next = cursor ?? (await observe(cursorProvenBy(await client.listFeedback()), await client.listFeedback(), relist)).cursor;
     const items = await client.listFeedback({
       ...(input.status ? { status: input.status } : {}),
       ...(input.kind ? { kind: input.kind } : {}),

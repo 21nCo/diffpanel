@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Feedback, FeedbackListQuery } from "iterbar";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import { baselineCursor, decodeCursor, encodeCursor, type FeedbackCursor } from "./cursor.js";
+import { baselineCursor, cursorAfter, decodeCursor, encodeCursor, MAX_CURSOR_SEEN, type FeedbackCursor } from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { daemonUnavailable, IterbarToolError } from "./errors.js";
 import { feedbackItem } from "./test-support/feedback.js";
@@ -338,5 +338,80 @@ describe("waitForFeedback without a cursor", { timeout: 10_000 }, () => {
     const client = fakeClient(async (_query, signal) => hang(signal));
     const result = await wait(client, { timeoutMs: 0 });
     expect(result).toEqual({ outcome: "timeout", items: [], events: [], cursor: undefined });
+  });
+});
+
+describe("waitForFeedback after a burst", { timeout: 30_000 }, () => {
+  /** The failure of a wait that must fail. */
+  const failed = (pending: Promise<unknown>) => pending.then(
+    () => expect.unreachable("the wait succeeded"),
+    (error: unknown) => {
+      expect(error).toBeInstanceOf(IterbarToolError);
+      return error as IterbarToolError;
+    },
+  );
+  const base = Date.now() - 600_000;
+  const a = feedbackItem("feedback-a", base);
+  /** feedback-a with `count` user replies committed one millisecond apart after the cursor was issued. */
+  const answered = (count: number) => feedbackItem("feedback-a", base, Array.from({ length: count }, (_, index) =>
+    [`reply-${String(index).padStart(5, "0")}`, "user", base + 1_000 + index] as const));
+  const count = 2 * MAX_CURSOR_SEEN + 1;
+
+  it("returns more events than a cursor holds and issues a cursor that resumes without duplicates", async () => {
+    let items: Feedback[] = [a];
+    const client = fakeClient(async () => items);
+    const start = cursorAfter([a], [a]);
+    items = [answered(count)];
+    const burst = await wait(client, { cursor: decodeCursor(encodeCursor(start)), timeoutMs: 1000 });
+    expect(burst.outcome).toBe("feedback");
+    expect(new Set(burst.events.map((event) => event.key)).size).toBe(count);
+    const resumed = decodeCursor(encodeCursor(burst.cursor!));
+    const next = await wait(client, { cursor: resumed, timeoutMs: 0 });
+    expect(next).toMatchObject({ outcome: "timeout", events: [] });
+    items = [answered(count + 1)];
+    const last = await wait(client, { cursor: decodeCursor(encodeCursor(next.cursor!)), timeoutMs: 1000 });
+    expect(last.events.map((event) => event.key)).toEqual([`reply:reply-${String(count).padStart(5, "0")}`]);
+  });
+
+  it("carries a cursor that decodes in a failure after such a wait", async () => {
+    let items: Feedback[] = [answered(count)];
+    let opened = 0;
+    let listings = 0;
+    const client = fakeClient(async () => {
+      listings += 1;
+      return items;
+    }, async () => {
+      opened += 1;
+      if (opened === 3) throw daemonUnavailable("The daemon is gone.");
+      const socket = new FakeSocket();
+      // In the second wait, the daemon stops after that wait listed: the stream closes and cannot be reopened.
+      if (opened === 2) setTimeout(() => socket.emit("close"), 50);
+      return socket;
+    });
+    const burst = await wait(client, { cursor: cursorAfter([a], [a]), timeoutMs: 1000 });
+    expect(burst.events).toHaveLength(count);
+    const before = listings;
+    const failure = await failed(wait(client, { cursor: decodeCursor(encodeCursor(burst.cursor!)), timeoutMs: 1000 }));
+    expect([failure.code, opened, listings - before]).toEqual(["daemon_unavailable", 3, 1]);
+    const cursor = decodeCursor(failure.details.cursor as string);
+    items = [answered(count + 1)];
+    const resumed = await wait(client, { cursor, timeoutMs: 1000 });
+    expect(resumed.events.map((event) => event.key)).toEqual([`reply:reply-${String(count).padStart(5, "0")}`]);
+  });
+
+  it("acknowledges none of a burst when the daemon fails while it compacts the cursor", async () => {
+    let listings = 0;
+    const client = fakeClient(async () => {
+      listings += 1;
+      if (listings === 2) throw daemonUnavailable("The daemon is gone.");
+      return [answered(count)];
+    });
+    const start = cursorAfter([a], [a]);
+    const failure = await failed(wait(client, { cursor: start, timeoutMs: 1000 }));
+    expect(failure.code).toBe("daemon_unavailable");
+    const cursor = decodeCursor(failure.details.cursor as string);
+    expect(cursor).toEqual(start);
+    const resumed = await wait(client, { cursor, timeoutMs: 1000 });
+    expect(resumed.events).toHaveLength(count);
   });
 });

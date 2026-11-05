@@ -86,16 +86,22 @@ Blocks until something new arrives after the cursor, or the timeout passes. New 
 a user replied in a thread. Agent replies and status changes are not new. Without a cursor, the wait first takes a
 baseline: it lists the feedback and counts everything in that listing as seen, then lists once more, which returns at
 once anything sent after the first listing; anything that lands later is new too, even if it arrives before the wait
-is listening for events. From then on, every outcome (and a failure) carries a cursor that resumes from the baseline.
+is listening for events. Once the second listing has finished, every outcome (and a failure) carries a cursor that
+resumes from the baseline. If the second listing itself fails (the daemon stopped between the two), the failure has no
+cursor: once `iterbar dev` runs again, call `list_feedback` without filters, which shows every item, and continue with
+its cursor.
 
 A cursor relies only on the order in which the daemon commits feedback, never on how long a write or a listing takes:
-an item that takes long to save is still returned once it is saved.
+an item that takes long to save is still returned once it is saved. Every cursor a tool returns is accepted by the next
+call, however much feedback arrived: after a large burst, the tool lists a few more times to keep the cursor small
+(whatever those listings find is returned too).
 
 The wait ends at its timeout however much else changes meanwhile; a daemon request still running then is cut short,
 and the returned cursor still covers whatever it would have found. A `timeoutSeconds` of 0 checks once and returns
 (within about a second). The one exception is the second baseline listing of a wait without a cursor: it always
 finishes (or fails with `daemon_unavailable` after the daemon's 30-second request limit), so that the baseline it
-acknowledged is never left without a cursor.
+acknowledged is never left without a cursor. Likewise, the extra listings that keep a cursor small run only when the
+wait is about to return new events, and they finish even after the timeout.
 
 Result: `{ outcome, items, events, cursor }`:
 

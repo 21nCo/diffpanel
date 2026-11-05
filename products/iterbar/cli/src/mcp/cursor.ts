@@ -36,11 +36,20 @@ export interface FeedbackCursor {
   readonly committed: number;
 }
 
+/**
+ * The most event keys an issued cursor holds. A key is at most 137 characters (`feedback:` and a 128-character id), so
+ * an encoded cursor stays under 950,000 characters, inside the tools' 1,000,000-character cursor input.
+ */
+export const MAX_CURSOR_SEEN = 5_000;
+
+/** Extra listings {@link observe} makes to compact a cursor before it falls back to forgetting keys. */
+export const MAX_COMPACTIONS = 3;
+
 const encodedCursorSchema = z.object({
   v: z.literal(1),
   w: z.number().int().nonnegative(),
   c: z.number().int().nonnegative(),
-  s: z.array(z.string().min(1).max(256)).max(10_000),
+  s: z.array(z.string().min(1).max(256)).max(MAX_CURSOR_SEEN),
 });
 
 export function feedbackEvents(feedback: Feedback): FeedbackEvent[] {
@@ -107,11 +116,64 @@ export function baselineCursor(items: readonly Feedback[]): FeedbackCursor {
 }
 
 /**
+ * A cursor that has seen nothing yet but holds `earlier`'s newest commit as its proof: observing a later complete
+ * listing with it keeps by key only the events at or after that commit.
+ */
+export function cursorProvenBy(earlier: readonly Feedback[]): FeedbackCursor {
+  return { ...ORIGIN_CURSOR, committed: newestCommit(earlier, 0) };
+}
+
+/**
  * A cursor that has seen `items`, a complete listing sent after `earlier` (another complete listing) returned. Only
  * the newest events are kept by key: everything before `earlier`'s newest write is covered by the watermark.
  */
 export function cursorAfter(earlier: readonly Feedback[], items: readonly Feedback[]): FeedbackCursor {
-  return observeListing({ ...ORIGIN_CURSOR, committed: newestCommit(earlier, 0) }, items);
+  return observeListing(cursorProvenBy(earlier), items);
+}
+
+/** What {@link observe} found. */
+export interface Observation {
+  /** Every listed item, each in its newest listed version, in the daemon's order (oldest first). */
+  readonly items: Feedback[];
+  /** The events `from` had not seen, each once. */
+  readonly events: FeedbackEvent[];
+  /** A cursor that has seen all of them and that {@link encodeCursor} can always issue. */
+  readonly cursor: FeedbackCursor;
+}
+
+/**
+ * Observes `items`, a listing sent after `from` was made (as for {@link observeListing}), and makes the resulting
+ * cursor small enough to issue.
+ *
+ * A cursor keeps by key every event at or after its previous listing's newest commit, so a burst of more than
+ * {@link MAX_CURSOR_SEEN} events between two listings would make it too large. Each extra listing, from `relist`
+ * (which must list every item updated at or after the `since` it is given), raises the watermark to the previous
+ * listing's newest commit and leaves by key only what was committed after that; whatever new events it finds are
+ * returned too. After {@link MAX_COMPACTIONS} listings that still leave too many keys (events committed faster than
+ * the daemon lists them), the cursor forgets the keys it cannot hold, so those events may be handed over again but are
+ * never skipped.
+ */
+export async function observe(
+  from: FeedbackCursor,
+  items: readonly Feedback[],
+  relist: (since: string | undefined) => Promise<Feedback[]>,
+): Promise<Observation> {
+  const events = unseenEvents(from, items);
+  const latest = new Map(items.map((item) => [item.id, item]));
+  let cursor = observeListing(from, items);
+  for (let round = 0; cursor.seen.size > MAX_CURSOR_SEEN && round < MAX_COMPACTIONS; round += 1) {
+    const more = await relist(cursorSince(cursor));
+    events.push(...unseenEvents(cursor, more));
+    for (const item of more) latest.set(item.id, item);
+    cursor = observeListing(cursor, more);
+  }
+  if (cursor.seen.size > MAX_CURSOR_SEEN) {
+    // Forgetting a key keeps the watermark, so the event comes back as new: a duplicate, never a loss.
+    cursor = { ...cursor, seen: new Set([...cursor.seen].sort().slice(0, MAX_CURSOR_SEEN)) };
+  }
+  const ordered = [...latest.values()].sort((left, right) =>
+    Date.parse(left.createdAt) - Date.parse(right.createdAt) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+  return { items: ordered, events, cursor };
 }
 
 /** The `since` filter that lists every item that can have an event the cursor has not seen. */
@@ -121,6 +183,8 @@ export function cursorSince(cursor: FeedbackCursor): string | undefined {
 
 /** An opaque string the agent passes back; base64url JSON so that it survives any tool-call transport. */
 export function encodeCursor(cursor: FeedbackCursor): string {
+  // An issued cursor must decode on the next call; observe() keeps every cursor the tools issue within the limit.
+  if (cursor.seen.size > MAX_CURSOR_SEEN) throw new Error(`A cursor holds ${cursor.seen.size} event keys`);
   return Buffer.from(JSON.stringify({ v: 1, w: cursor.watermark, c: cursor.committed, s: [...cursor.seen].sort() })).toString("base64url");
 }
 

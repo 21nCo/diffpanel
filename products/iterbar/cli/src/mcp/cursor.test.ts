@@ -5,6 +5,8 @@ import {
   cursorSince,
   decodeCursor,
   encodeCursor,
+  MAX_CURSOR_SEEN,
+  observe,
   observeListing,
   ORIGIN_CURSOR,
   unseenEvents,
@@ -97,5 +99,64 @@ describe("feedback cursor", () => {
     ]) {
       expect(() => decodeCursor(value)).toThrow(expect.objectContaining({ code: "invalid_request" }));
     }
+  });
+
+  it("issues a cursor that fits the decode limit and the tools' 1,000,000-character input with the longest keys", () => {
+    const id = (index: number) => `f${String(index).padStart(127, "0")}`;
+    const cursor: FeedbackCursor = {
+      watermark: T0, committed: T0, seen: new Set(Array.from({ length: MAX_CURSOR_SEEN }, (_, index) => `feedback:${id(index)}`)),
+    };
+    const encoded = encodeCursor(cursor);
+    expect(encoded.length).toBeLessThan(1_000_000);
+    expect(decodeCursor(encoded)).toEqual(cursor);
+    expect(() => encodeCursor({ ...cursor, seen: new Set([...cursor.seen, "feedback:one-more"]) })).toThrow();
+  });
+});
+
+describe("observe", () => {
+  const burst = (count: number, from: number) => Array.from({ length: count }, (_, index) => item(`feedback-${from + index}`, from + index));
+
+  it("compacts a cursor after a burst of more events than it can hold, with one more listing", () => {
+    const start = cursorAfter([item("feedback-a", 0)], [item("feedback-a", 0)]);
+    const listing = [item("feedback-a", 0), ...burst(MAX_CURSOR_SEEN * 2 + 1, 10)];
+    const sinces: (string | undefined)[] = [];
+    return observe(start, listing, async (since) => {
+      sinces.push(since);
+      return listing;
+    }).then((observed) => {
+      expect(sinces).toEqual([cursorSince(observeListing(start, listing))]);
+      expect(observed.events).toHaveLength(MAX_CURSOR_SEEN * 2 + 1);
+      expect(observed.items).toEqual(listing);
+      expect(observed.cursor.seen.size).toBeLessThanOrEqual(1);
+      expect(keys(decodeCursor(encodeCursor(observed.cursor)), listing)).toEqual([]);
+    });
+  });
+
+  it("returns what the compacting listings find, each event once", async () => {
+    const first = burst(MAX_CURSOR_SEEN + 1, 10);
+    const late = item("feedback-late", 20 * MINUTE, [["reply-late", "user", 20 * MINUTE + 1]]);
+    const observed = await observe(ORIGIN_CURSOR, first, async () => [...first, late]);
+    expect(observed.events.map((event) => event.key).slice(-2)).toEqual(["feedback:feedback-late", "reply:reply-late"]);
+    expect(new Set(observed.events.map((event) => event.key)).size).toBe(MAX_CURSOR_SEEN + 3);
+    expect(observed.items.at(-1)).toEqual(late);
+    expect(keys(observed.cursor, [...first, late])).toEqual([]);
+  });
+
+  it("forgets keys rather than skip events when bursts outpace every compacting listing", async () => {
+    let next = 10;
+    const all: ReturnType<typeof item>[] = [];
+    const grow = () => {
+      all.push(...burst(MAX_CURSOR_SEEN + 1, next));
+      next += MAX_CURSOR_SEEN + 1;
+      return [...all];
+    };
+    const observed = await observe(ORIGIN_CURSOR, grow(), async () => grow());
+    expect(observed.cursor.seen.size).toBe(MAX_CURSOR_SEEN);
+    const cursor = decodeCursor(encodeCursor(observed.cursor));
+    // Nothing is skipped: every event was handed over now, and whatever the cursor does not cover comes back as new.
+    expect(new Set(observed.events.map((event) => event.key)).size).toBe(all.length);
+    const again = keys(cursor, all);
+    expect(again.length).toBeGreaterThan(0);
+    expect(again.length).toBeLessThan(all.length);
   });
 });

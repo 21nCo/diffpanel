@@ -4,8 +4,7 @@ import {
   baselineCursor,
   cursorSince,
   encodeCursor,
-  observeListing,
-  unseenEvents,
+  observe,
   type FeedbackCursor,
   type FeedbackEvent,
 } from "./cursor.js";
@@ -128,10 +127,11 @@ function delay(ms: number, signal: AbortSignal, register?: (wake: () => void) =>
  *
  * Without a cursor, the wait first takes a baseline: one listing whose events count as seen, then a second complete
  * listing that returns whatever was committed after the first and makes the cursor compact (an earlier observed commit
- * covers everything before it). Once that baseline exists, every exit hands back a cursor that resumes from it: the
- * deadline, an event stream that cannot be reopened, and a failure, which carries it in its details. Only the first
+ * covers everything before it). Once the second listing completes, every exit hands back a cursor that resumes from it:
+ * the deadline, an event stream that cannot be reopened, and a failure, which carries it in its details. Only the first
  * listing obeys the deadline; the second is bounded by the daemon request timeout so that the deadline can never leave
- * an acknowledged baseline without a cursor.
+ * an acknowledged baseline without a cursor. A failure of the second listing itself (the daemon went away between the
+ * two) has no cursor to carry: the agent recovers with an unfiltered `list_feedback`, which shows everything.
  *
  * A stream that closes is reopened when the daemon is still there (or was restarted); when it is gone, the wait fails
  * with `daemon_unavailable`. The deadline holds whatever happens after the baseline: it is checked on every turn of the
@@ -153,16 +153,20 @@ export async function waitForFeedback(client: DaemonClient, options: WaitOptions
     ? setInterval(() => onHeartbeat(Date.now() - started), heartbeatMs)
     : undefined;
 
-  /** Lists what can be new after `from`; `cursor` then covers this listing too. */
+  const list = (since: string | undefined, bound: AbortSignal) => client.listFeedback(since === undefined ? {} : { since }, bound);
+  /**
+   * Lists what can be new after `from`; `cursor` then covers this listing too. A listing that needs compacting found
+   * new events (an issued cursor is small, and only new events grow it), so the wait is about to return them: those
+   * extra listings are bounded by cancellation and the daemon request timeout, not the deadline, and a failure among
+   * them leaves `cursor` at `from`, which acknowledges none of them.
+   */
   const check = async (from: FeedbackCursor, bound: AbortSignal = requests): Promise<WaitResult | null> => {
-    const since = cursorSince(from);
-    const items = await client.listFeedback(since === undefined ? {} : { since }, bound);
-    const events = unseenEvents(from, items);
-    const next = observeListing(from, items);
-    cursor = next;
+    const observed = await observe(from, await list(cursorSince(from), bound), (since) => list(since, signal));
+    const { events } = observed;
+    cursor = observed.cursor;
     if (!events.length) return null;
     const ids = new Set(events.map((event) => event.feedbackId));
-    return { outcome: "feedback", items: items.filter((item) => ids.has(item.id)), events, cursor: next };
+    return { outcome: "feedback", items: observed.items.filter((item) => ids.has(item.id)), events, cursor: observed.cursor };
   };
   /** Lists again from wherever the wait has got to; a cursor always exists once the baseline is taken. */
   const recheck = () => {
