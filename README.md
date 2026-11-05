@@ -37,11 +37,11 @@ pnpm validate
 
 ## Publishing packages
 
-Public packages are released by pushing a package-specific version tag in the form `<slug>-v<version>`. The **Publish tagged package** workflow resolves the slug through `release-packages.json`, checks that the tag matches the package's exact `package.json` version, builds and tests that package, verifies its tarball in a clean consumer and publishes it with the `NPM_TOKEN` secret. Prerelease versions (for example `0.1.0-beta.1`) publish under the `next` dist-tag.
+Public packages are released by pushing a package-specific version tag in the form `<slug>-v<version>`. The **Publish tagged package** workflow resolves the slug through `release-packages.json`, checks that the tag matches the package's exact `package.json` version, builds and tests that package, verifies its tarball in a clean consumer, then hands that tarball to a separate publish job that publishes it through npm trusted publishing (OIDC). Each package's trusted publisher on npm points at `21nCo/devroll` and `publish-tag.yml`. The `NPM_TOKEN` secret remains only as a fallback for a package's first release, before its trusted publisher can be added. After that release, add the trusted publisher with **Allow npm publish** enabled and publish again within 2 days, because npm expires a trusted publisher configuration that has not completed a successful publish within 2 days of creation. Prerelease versions (for example `0.1.0-beta.1`) publish under the `next` dist-tag.
 
 ```bash
 git tag devroll-v0.0.1
 git push origin devroll-v0.0.1
 ```
 
-To add a package to the release flow, add it to `release-packages.json` and add its `<slug>-v*.*.*` trigger to `.github/workflows/publish-tag.yml`; `scripts/release-targets.test.mjs` fails when the two drift apart. A failed run can be retried from the workflow's manual dispatch with the existing tag.
+To add a package to the release flow, add it to `release-packages.json` and add its `<slug>-v*.*.*` trigger to `.github/workflows/publish-tag.yml`; `scripts/release-targets.test.mjs` fails when the two drift apart. A failed run can be retried from the workflow's manual dispatch with the existing tag, run on that tag (`gh workflow run publish-tag.yml --ref <tag> -f release_tag=<tag>`) so npm provenance records the published commit.
