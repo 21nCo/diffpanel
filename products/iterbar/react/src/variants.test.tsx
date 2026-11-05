@@ -1,10 +1,19 @@
 import { createVariantsRegistry, type VariantsRegistry } from "@iterbar/variants";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { PAGE_API_GLOBAL, readPageApi, registrySnapshotSchema, VARIANT_STORAGE_KEY } from "iterbar";
-import { Component, StrictMode, useState, version as reactVersion, type ReactNode } from "react";
+import {
+  Component,
+  forwardRef,
+  memo,
+  StrictMode,
+  useState,
+  version as reactVersion,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { version as reactDomVersion } from "react-dom";
 import { renderToString } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Variants, VariantsProvider } from "./index.js";
 
 const SHARED_REGISTRY = Symbol.for("iterbar.variants.registry.v1");
@@ -13,9 +22,46 @@ function Pricing() {
   return <Variants slot="pricing" versions={{ v1: <p>Plan one</p>, v2: <p>Plan two</p> }} default="v1" />;
 }
 
+function PlanOne() {
+  return <p>Plan one</p>;
+}
+
+const PlanTwo = memo(function PlanTwo() {
+  return <p>Plan two</p>;
+});
+
+const PlanThree = forwardRef<HTMLParagraphElement>(function PlanThree(_props, ref) {
+  return <p ref={ref}>Plan three</p>;
+});
+
+class PlanFour extends Component {
+  render() {
+    return <p>Plan four</p>;
+  }
+}
+
+/** Records console errors and warnings and uncaught window errors, such as React's nesting and hydration reports. */
+function collectErrors() {
+  const errors: string[] = [];
+  const record = (...args: unknown[]) => {
+    errors.push(args.map(String).join(" "));
+  };
+  vi.spyOn(console, "error").mockImplementation(record);
+  vi.spyOn(console, "warn").mockImplementation(record);
+  const onError = (event: ErrorEvent) => record(event.error ?? event.message);
+  window.addEventListener("error", onError);
+  onTestFinished(() => window.removeEventListener("error", onError));
+  return errors;
+}
+
 function Counter() {
   const [count, setCount] = useState(0);
   return <button type="button" onClick={() => setCount(count + 1)}>clicked {count}</button>;
+}
+
+/** Text of each element marked as a root of `slot`. */
+function roots(container: ParentNode, slot: string) {
+  return [...container.querySelectorAll(`[data-iterbar-slot="${slot}"]`)].map((element) => element.textContent);
 }
 
 function visit(path: string) {
@@ -78,14 +124,15 @@ describe("in development", () => {
     visit("/plans?iterbar=pricing:v1#faq");
     const { container } = render(<><Counter /><Pricing /></>);
     act(() => screen.getByRole("button").click());
-    const slotRoot = container.querySelector('[data-iterbar-slot="pricing"]');
-    expect(slotRoot?.textContent).toBe("Plan one");
+    const button = screen.getByRole("button");
+    expect(roots(container, "pricing")).toEqual(["Plan one"]);
 
     select("pricing", "v2");
 
-    expect(container.querySelector('[data-iterbar-slot="pricing"]')).toBe(slotRoot);
-    expect(slotRoot?.textContent).toBe("Plan two");
-    expect(screen.getByRole("button").textContent).toBe("clicked 1");
+    expect(roots(container, "pricing")).toEqual(["Plan two"]);
+    expect(screen.queryByText("Plan one")).toBeNull();
+    expect(screen.getByRole("button")).toBe(button);
+    expect(button.textContent).toBe("clicked 1");
     expect(window.location.pathname + window.location.search + window.location.hash)
       .toBe("/plans?iterbar=pricing:v2#faq");
     expect(window.localStorage.getItem(VARIANT_STORAGE_KEY)).toBe("pricing:v2");
@@ -186,6 +233,101 @@ describe("in development", () => {
   });
 });
 
+describe("version content", () => {
+  it("renders and switches between component types and elements", () => {
+    const { container } = render(
+      <Variants
+        slot="pricing"
+        versions={{ v1: PlanOne, v2: PlanTwo, v3: PlanThree, v4: PlanFour, v5: <p>Plan five</p> }}
+        default="v1"
+      />,
+    );
+    expect(roots(container, "pricing")).toEqual(["Plan one"]);
+    for (const [version, text] of [["v2", "Plan two"], ["v3", "Plan three"], ["v4", "Plan four"], ["v5", "Plan five"]]) {
+      select("pricing", version!);
+      expect(roots(container, "pricing")).toEqual([text]);
+    }
+  });
+
+  it("keeps marking a version that replaces its own root element", async () => {
+    function Disclosure() {
+      const [open, setOpen] = useState(false);
+      return open ? <section>Details</section> : <button type="button" onClick={() => setOpen(true)}>More</button>;
+    }
+    const { container } = render(<Variants slot="faq" versions={{ closed: Disclosure }} default="closed" />);
+    expect(roots(container, "faq")).toEqual(["More"]);
+    act(() => screen.getByRole("button").click());
+    await waitFor(() => expect(roots(container, "faq")).toEqual(["Details"]));
+  });
+});
+
+describe("markup in development", () => {
+  const contexts: {
+    name: string;
+    page: (slot: ReactElement) => ReactElement;
+    versions: Record<string, ReactNode>;
+    text: { a: string; b: string };
+  }[] = [
+    {
+      name: "inline text in a <p>",
+      page: (slot) => <p>Price: {slot} per month</p>,
+      versions: { a: <strong>ten</strong>, b: <em>twelve</em> },
+      text: { a: "ten", b: "twelve" },
+    },
+    {
+      name: "<tr> versions in a <tbody>",
+      page: (slot) => <table><tbody>{slot}</tbody></table>,
+      versions: { a: <tr><td>Row A</td></tr>, b: <tr><td>Row B</td></tr> },
+      text: { a: "Row A", b: "Row B" },
+    },
+    {
+      name: "<li> versions in a <ul>",
+      page: (slot) => <ul>{slot}</ul>,
+      versions: { a: <li>Item A</li>, b: <li>Item B</li> },
+      text: { a: "Item A", b: "Item B" },
+    },
+  ];
+
+  // Runs before the hydration cases: React reports each invalid nesting only once per page.
+  it.each(contexts)("renders $name on the client without nesting errors", ({ page, versions, text }) => {
+    const errors = collectErrors();
+    const { container } = render(page(<Variants slot="demo" versions={versions} default="a" />));
+    expect(roots(container, "demo")).toEqual([text.a]);
+    select("demo", "b");
+    expect(roots(container, "demo")).toEqual([text.b]);
+    expect(errors).toEqual([]);
+  });
+
+  it.each(contexts)("hydrates $name without nesting or hydration errors and marks the version", ({ page, versions, text }) => {
+    const errors = collectErrors();
+    visit("/plans?iterbar=demo:b");
+    const tree = () => page(<Variants slot="demo" versions={versions} default="a" />);
+    const container = document.createElement("div");
+    container.innerHTML = renderToString(tree());
+    const serverMarkup = container.innerHTML;
+    document.body.append(container);
+
+    render(tree(), { container, hydrate: true });
+    expect(roots(container, "demo")).toEqual([text.b]);
+    select("demo", "a");
+    expect(roots(container, "demo")).toEqual([text.a]);
+
+    expect(errors).toEqual([]);
+    // The HTML parser kept the server markup as rendered: nothing was hoisted out of its parent.
+    expect(serverMarkup).toBe(renderToString(tree()));
+  });
+
+  it("adds no wrapper element and removes the marks it set on unmount", () => {
+    const { container, unmount } = render(<ul><Variants slot="list" versions={{ a: <li>One</li> }} default="a" /></ul>);
+    const list = container.querySelector("ul");
+    expect([...(list?.children ?? [])].map((element) => element.localName)).toEqual(["template", "li", "template"]);
+    const item = list?.querySelector("li");
+    expect(item?.getAttribute("data-iterbar-slot")).toBe("list");
+    unmount();
+    expect(item?.hasAttribute("data-iterbar-slot")).toBe(false);
+  });
+});
+
 describe("in production", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "production");
@@ -198,6 +340,11 @@ describe("in production", () => {
     expect(container.innerHTML).toBe("<p>Plan one</p>");
     expect(readPageApi(window)).toBeNull();
     expect((globalThis as Record<PropertyKey, unknown>)[SHARED_REGISTRY]).toBeUndefined();
+  });
+
+  it("renders a component-type default without markers", () => {
+    const { container } = render(<Variants slot="pricing" versions={{ v1: PlanTwo, v2: PlanOne }} default="v1" />);
+    expect(container.innerHTML).toBe("<p>Plan two</p>");
   });
 
   it("leaves a provided registry empty", () => {

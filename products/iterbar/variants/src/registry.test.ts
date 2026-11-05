@@ -232,6 +232,44 @@ describe("repeated slots and unregistering", () => {
   });
 });
 
+describe("change notifications", () => {
+  it("notifies when select() rewrites a URL with a malformed entry, even though the version is unchanged", () => {
+    const { registry, state } = page("?iterbar=pricing:v2,oops");
+    registry.register(pricing);
+    const listener = vi.fn();
+    registry.subscribe(listener);
+    expect(registry.getSnapshot().warnings).toEqual([
+      expect.objectContaining({ code: "invalid_selection", source: "url", value: "oops" }),
+    ]);
+
+    select(registry, "pricing", "v2");
+
+    expect(state.search).toBe("?iterbar=pricing:v2");
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(registry.getSnapshot().warnings).toEqual([]);
+    select(registry, "pricing", "v2");
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("notifies when select() rewrites storage with a malformed entry, even though the version is unchanged", () => {
+    const { registry, storage } = page("", "oops,hero:b");
+    registry.register(pricing);
+    const listener = vi.fn();
+    registry.subscribe(listener);
+    expect(registry.getSnapshot().warnings).toEqual([
+      expect.objectContaining({ code: "invalid_selection", source: "storage", value: "oops" }),
+    ]);
+
+    select(registry, "pricing", "v1");
+
+    expect(storage.getItem(VARIANT_STORAGE_KEY)).toBe("hero:b");
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(registry.getSnapshot().warnings).toEqual([]);
+    select(registry, "pricing", "v1");
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("remembering selections", () => {
   it("stores non-default selections and forgets the slot when the default is selected", () => {
     const { registry, storage } = page("", "hero:b");
@@ -248,6 +286,33 @@ describe("remembering selections", () => {
     select(registry, "pricing", "v3");
     expect(state.search).toBe("?a=1%3A2&iterbar=pricing:v3,hero:b&z=+");
     expect(registry.getSnapshot().warnings.map((entry) => entry.code)).toEqual(["unknown_slot"]);
+  });
+
+  it(`keeps a new stored selection when storage already holds ${MAX_SLOTS} others, dropping the oldest`, () => {
+    const others = Array.from({ length: MAX_SLOTS }, (_, index) => `s${index}:a`);
+    const { registry, storage } = page("", others.join(","));
+    registry.register(pricing);
+    select(registry, "pricing", "v2");
+
+    const stored = storage.getItem(VARIANT_STORAGE_KEY)?.split(",");
+    expect(stored).toHaveLength(MAX_SLOTS);
+    expect(stored?.at(-1)).toBe("pricing:v2");
+    expect(stored?.slice(0, -1)).toEqual(others.slice(1));
+
+    const reloaded = createVariantsRegistry({ environment: { readSearch: () => "", storage: () => storage } });
+    reloaded.register(pricing);
+    expect(slotOf(reloaded.getSnapshot(), "pricing")?.activeVersion).toBe("v2");
+  });
+
+  it(`keeps the slot's URL entry when the URL names more than ${MAX_SLOTS} slots, dropping the earliest others`, () => {
+    const others = Array.from({ length: MAX_SLOTS }, (_, index) => `s${index}:a`);
+    const { registry, state } = page(`?iterbar=${others.join(",")},pricing:v1`);
+    registry.register(pricing);
+    select(registry, "pricing", "v3");
+
+    const entries = new URLSearchParams(state.search).get("iterbar")?.split(",");
+    expect(entries).toHaveLength(MAX_SLOTS);
+    expect(entries).toEqual([...others.slice(1), "pricing:v3"]);
   });
 
   it("leaves the URL alone when it does not name the slot", () => {

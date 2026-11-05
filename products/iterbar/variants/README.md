@@ -9,12 +9,14 @@ Framework bindings such as `@iterbar/react` use it; you rarely call it
 directly. It is meant for development builds only.
 
 ```ts
-import { getVariantsRegistry, markSlotRoot } from "@iterbar/variants";
+import { getVariantsRegistry, markSlotRange, markSlotRoot } from "@iterbar/variants";
 
 const registry = getVariantsRegistry(); // also installs window.__ITERBAR__
 const definition = { slot: "pricing", versions: ["v1", "v2"], defaultVersion: "v1" };
 const unregister = registry.register(definition);
 const unmark = markSlotRoot(element, "pricing"); // data-iterbar-slot="pricing"
+// Or mark every element between two boundary nodes, following later changes:
+const unmarkRange = markSlotRange(startTemplate, endTemplate, "pricing");
 const stop = registry.subscribe(() => render(registry.activeVersion(definition)));
 ```
 
@@ -35,7 +37,11 @@ storage reads as empty.
 `window.__ITERBAR__.select({ schemaVersion: 1, slot, version })` switches a
 mounted slot, stores the choice (forgetting the slot when it is the default)
 and, when the URL already names the slot, rewrites that URL entry with
-`history.replaceState` so a reload keeps the choice. Unknown slots or versions
+`history.replaceState` so a reload keeps the choice. Both hold at most 256
+selections: local storage is shared by every page of the origin, so when it
+is full the earliest other selections are dropped to keep the new one.
+Subscribers are notified whenever the snapshot changes, including when
+remembering a choice drops a malformed URL or stored entry and its warning. Unknown slots or versions
 and malformed selections leave every slot unchanged and are recorded as
 `source: "api"` warnings (the most recent 32).
 

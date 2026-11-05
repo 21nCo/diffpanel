@@ -1,28 +1,37 @@
 import {
   getVariantsRegistry,
-  slotRootAttributes,
+  markSlotRange,
   validateSlotDefinition,
   type VariantsRegistry,
 } from "@iterbar/variants";
 import {
   createContext,
+  createElement,
   Fragment,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
+  type ComponentType,
   type JSX,
   type ReactNode,
 } from "react";
 
 export type { VariantsRegistry } from "@iterbar/variants";
 
+/**
+ * One version of a slot: a component that takes no props (`PricingV2`), rendered as `<PricingV2 />`, or any
+ * React node (`<PricingV2 compact />`, text, `null`).
+ */
+export type VersionContent = ComponentType | ReactNode;
+
 /** Props for {@link Variants}. */
-export interface VariantsProps<Versions extends Readonly<Record<string, ReactNode>>> {
+export interface VariantsProps<Versions extends Readonly<Record<string, VersionContent>>> {
   /** The slot name shown in the bar and used in the `iterbar` URL parameter, such as `pricing`. */
   readonly slot: string;
-  /** Each version's content, keyed by version name (1-64 letters, digits, `_`, `.` or `-`). */
+  /** Each version, keyed by version name (1-64 letters, digits, `_`, `.` or `-`). */
   readonly versions: Versions;
   /** The version to render when nothing selects another, and the only one rendered in production. */
   readonly default: Extract<keyof Versions, string>;
@@ -53,24 +62,40 @@ function isDevelopment(): boolean {
   }
 }
 
-function versionContent(versions: Readonly<Record<string, ReactNode>>, version: string): ReactNode {
-  return Object.hasOwn(versions, version) ? versions[version] : null;
+/** `memo`, `forwardRef` and `lazy` components are objects rather than functions. */
+const COMPONENT_OBJECT_TYPES = new Set<unknown>([
+  Symbol.for("react.memo"),
+  Symbol.for("react.forward_ref"),
+  Symbol.for("react.lazy"),
+]);
+
+function isComponentType(content: VersionContent): content is ComponentType {
+  if (typeof content === "function") return true;
+  return typeof content === "object" && content !== null
+    && COMPONENT_OBJECT_TYPES.has((content as { $$typeof?: unknown }).$$typeof);
+}
+
+function renderVersion(versions: Readonly<Record<string, VersionContent>>, version: string): ReactNode {
+  if (!Object.hasOwn(versions, version)) return null;
+  const content = versions[version];
+  return isComponentType(content) ? createElement(content) : content;
 }
 
 /**
  * Renders one version of a slot. In development the version comes from the `iterbar` URL parameter
  * (`?iterbar=pricing:v2`), then local storage, then `default`, and the bar can switch it in place through
- * `window.__ITERBAR__`; the content is wrapped in a `display: contents` element marked with
- * `data-iterbar-slot`. In production it renders `default` only, with no wrapper and no registry.
+ * `window.__ITERBAR__`. The version's top-level elements are marked with `data-iterbar-slot`; empty
+ * `<template>` elements before and after it delimit the slot, so it adds no wrapper and stays valid inside
+ * `<p>`, `<ul>` and `<tbody>`. In production it renders `default` only, with no markers and no registry.
  */
-export function Variants<Versions extends Readonly<Record<string, ReactNode>>>(
+export function Variants<Versions extends Readonly<Record<string, VersionContent>>>(
   props: VariantsProps<Versions>,
 ): JSX.Element {
-  if (!isDevelopment()) return <>{versionContent(props.versions, props.default)}</>;
+  if (!isDevelopment()) return <>{renderVersion(props.versions, props.default)}</>;
   return <DevelopmentVariants {...props} />;
 }
 
-function DevelopmentVariants<Versions extends Readonly<Record<string, ReactNode>>>({
+function DevelopmentVariants<Versions extends Readonly<Record<string, VersionContent>>>({
   slot,
   versions,
   default: defaultVersion,
@@ -87,12 +112,23 @@ function DevelopmentVariants<Versions extends Readonly<Record<string, ReactNode>
   const getSnapshot = useCallback(() => registry().activeVersion(definition), [registry, definition]);
   const getServerSnapshot = useCallback(() => definition.defaultVersion, [definition]);
   const activeVersion = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const start = useRef<HTMLTemplateElement>(null);
+  const end = useRef<HTMLTemplateElement>(null);
 
   useEffect(() => registry().register(definition), [registry, definition]);
 
+  // Re-run on every switch so the new version's elements are marked as soon as it commits; between
+  // switches, the range observer follows elements the version itself adds or replaces.
+  useEffect(() => {
+    if (!start.current || !end.current) return undefined;
+    return markSlotRange(start.current, end.current, definition.slot);
+  }, [definition.slot, activeVersion]);
+
   return (
-    <div {...slotRootAttributes(definition.slot)} style={{ display: "contents" }}>
-      <Fragment key={activeVersion}>{versionContent(versions, activeVersion)}</Fragment>
-    </div>
+    <>
+      <template ref={start} />
+      <Fragment key={activeVersion}>{renderVersion(versions, activeVersion)}</Fragment>
+      <template ref={end} />
+    </>
   );
 }

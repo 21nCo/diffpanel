@@ -30,6 +30,20 @@ const MAX_WARNINGS = 256;
 /** Rejected `select()` calls the registry remembers; older ones are dropped first. */
 const MAX_API_WARNINGS = 32;
 
+/**
+ * Drops the earliest selections other than `slot`'s until at most {@link MAX_SLOTS} remain, the most a URL
+ * parameter or stored value may hold. Local storage is shared by every page of the origin, so it can
+ * collect selections for more slots than one page mounts; the newest choice must still be saved.
+ */
+function withinSelectionLimit(selections: readonly ActiveVariant[], slot: string): ActiveVariant[] {
+  let excess = selections.length - MAX_SLOTS;
+  return selections.filter((entry) => {
+    if (excess <= 0 || entry.slot === slot) return true;
+    excess -= 1;
+    return false;
+  });
+}
+
 /** One slot as a component declares it. */
 export interface SlotDefinition {
   readonly slot: string;
@@ -211,11 +225,13 @@ export class VariantsRegistry {
       ));
       return;
     }
+    // Remembering the choice can also drop malformed URL or stored entries, which changes the warnings; so
+    // compare whole snapshots rather than only the slot's own state.
+    const before = JSON.stringify(this.getSnapshot());
     this.#remember(record.definition, version);
-    const changed = record.activeVersion !== version || record.warnings.length > 0;
     record.activeVersion = version;
     record.warnings = [];
-    if (changed) this.#notify();
+    if (JSON.stringify(this.getSnapshot()) !== before) this.#notify();
   }
 
   /** Calls `listener` after every change to slots, selections or warnings; returns the unsubscribe function. */
@@ -300,14 +316,13 @@ export class VariantsRegistry {
    * still applies to this page.
    */
   #remember(definition: SlotDefinition, version: string): void {
-    const replace = (selections: readonly ActiveVariant[], keep: boolean) => [
-      ...selections.filter((entry) => entry.slot !== definition.slot),
-      ...(keep ? [{ slot: definition.slot, version }] : []),
-    ];
+    const { slot } = definition;
     try {
       const storage = this.#environment.storage();
       if (storage) {
-        const stored = formatVariantParam(replace(this.#read("storage").selections, version !== definition.defaultVersion));
+        const others = this.#read("storage").selections.filter((entry) => entry.slot !== slot);
+        const kept = version === definition.defaultVersion ? others : [...others, { slot, version }];
+        const stored = formatVariantParam(withinSelectionLimit(kept, slot));
         if (stored) storage.setItem(VARIANT_STORAGE_KEY, stored);
         else storage.removeItem(VARIANT_STORAGE_KEY);
       }
@@ -316,8 +331,9 @@ export class VariantsRegistry {
     }
     try {
       const url = this.#read("url").selections;
-      if (this.#environment.replaceSearch && url.some((entry) => entry.slot === definition.slot)) {
-        const value = formatVariantParam(url.map((entry) => entry.slot === definition.slot ? { ...entry, version } : entry));
+      if (this.#environment.replaceSearch && url.some((entry) => entry.slot === slot)) {
+        const updated = url.map((entry) => entry.slot === slot ? { ...entry, version } : entry);
+        const value = formatVariantParam(withinSelectionLimit(updated, slot));
         this.#environment.replaceSearch(withVariantParam(this.#environment.readSearch(), value));
       }
     } catch {
