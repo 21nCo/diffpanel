@@ -1,0 +1,88 @@
+# Iterbar MCP tools
+
+`iterbar mcp` serves these tools over stdio. Each one calls the project's daemon (`iterbar dev`), the only writer of
+`.iterbar/`. A successful result carries its data as structured content and as the same JSON in a text block.
+
+## Errors
+
+A failed call is an MCP tool error (`isError: true`) whose structured content is
+`{ "error": { "code": "<code>", "message": "<text>" } }`; the text block reads `<code>: <message>`.
+
+| Code | Meaning | What to do |
+| --- | --- | --- |
+| `daemon_unavailable` | No daemon serves the project: none was started, it stopped, or `.iterbar/daemon.json` is stale or for another project. | Ask the user to run `iterbar dev` in the project root, then retry. |
+| `not_found` | No feedback item (or attachment) has that id. | List again; the id came from somewhere else. |
+| `invalid_request` | The input was refused, for example a `cursor` that no tool returned. | Fix the input. |
+| `unsupported_schema_version` | The daemon speaks a newer protocol than this server. | Ask the user to update Iterbar. |
+| `internal` | Anything unexpected. | Report the message to the user. |
+
+Inputs that do not match a tool's schema (an unknown status, a timeout above 1,800 seconds) are refused by the MCP
+server before any daemon call, as an `Input validation error` tool error.
+
+## Feedback items
+
+Every tool that returns feedback returns full items:
+
+- `id`, `kind` (`comment` or `choose_variant`), `status` (`open`, `working`, `needs-info`, `done`, `resolved`),
+  `createdAt`, `updatedAt`;
+- `text`: the comment, or the optional note of a variant choice; `choice: { slot, version }` for `choose_variant`;
+- `pageUrl` and `activeVariants` (`[{ slot, version }]`, the versions shown when it was sent);
+- `target`: `null`, or the element: `selector`, `textExcerpt`, `boundingBox` and `sourceLocation`
+  (`{ path, line, column }`, project relative, or `null`);
+- `screenshot` and `evidence` attachment references (or `null`), and `screenshotUnavailableReason`;
+- `replies`: `[{ id, author: { kind: "user" | "agent", name }, text, createdAt }]`, oldest first.
+
+## `list_feedback`
+
+Inputs, all optional: `status`, `kind`, `since` (ISO 8601; items updated at or after it).
+
+Result: `{ items, cursor }`, oldest first. `cursor` covers everything that existed when the call started; pass it to
+`wait_for_feedback`.
+
+## `get_feedback`
+
+Inputs: `feedbackId`; `includeAttachments` (default `true`).
+
+Result: `{ feedback, attachments }`, where each attachment is `{ id, kind, mediaType, byteLength, path, inlined }`.
+With `includeAttachments`, the content also has the screenshot as an `image` block (PNG) and the evidence as a
+`resource` block (JSON text, `file://` URI of its file). Evidence larger than 1 MiB is not inlined; read the file at
+its `path` instead.
+
+## `reply`
+
+Inputs: `feedbackId`, `text` (plain text, not blank, at most 20,000 characters).
+
+Result: `{ feedback }` with the new reply last. The reply's author is `{ kind: "agent", name }`, named after your MCP
+client.
+
+## `set_status`
+
+Inputs: `feedbackId`, `status`: `working`, `needs-info`, `done` or `resolved`. Agents never set `open`.
+
+Result: `{ feedback }`. Setting the current status again changes nothing.
+
+## `list_slots`
+
+No inputs. Result: `{ pages }`, one entry per page URL that reported its slots, most recently reported last:
+`{ pageUrl, reportedAt, slots: [{ slot, versions, defaultVersion, activeVersion, mounts }] }`. Pages report while
+they are open in a browser with the bar; the list is kept in the daemon's memory and starts empty when it restarts.
+
+## `wait_for_feedback`
+
+Inputs: `cursor` (optional, from the previous `list_feedback` or `wait_for_feedback`); `timeoutSeconds` (integer,
+default 300, 0 to 1,800).
+
+Blocks until something new arrives after the cursor, or the timeout passes. New means a feedback item was created or
+a user replied in a thread. Agent replies and status changes are not new. Without a cursor, everything that exists
+when the call starts counts as seen.
+
+Result: `{ outcome, items, events, cursor }`:
+
+- `outcome`: `feedback` or `timeout`;
+- `items`: the items with something new, oldest first (empty on timeout);
+- `events`: `[{ feedbackId, kind: "created" | "user_reply", at, replyId? }]`;
+- `cursor`: pass it to the next wait.
+
+A client that sends a progress token receives a progress notification about every 15 seconds while the wait lasts,
+so clients that reset their request timeout on progress keep waiting. If the daemon stops during the wait, the call
+fails with `daemon_unavailable`; wait again with the same cursor once `iterbar dev` runs again.
