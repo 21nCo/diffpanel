@@ -2,8 +2,9 @@ import { EventEmitter } from "node:events";
 import type { Feedback, FeedbackListQuery } from "iterbar";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import { baselineCursor, type FeedbackCursor } from "./cursor.js";
+import { baselineCursor, decodeCursor, encodeCursor, type FeedbackCursor } from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
+import { daemonUnavailable, IterbarToolError } from "./errors.js";
 import { feedbackItem } from "./test-support/feedback.js";
 import { MIN_WAIT_REQUEST_MS, waitForFeedback, type WaitOptions } from "./wait.js";
 
@@ -29,8 +30,9 @@ function fakeClient(list: Lister, open: Opener = async () => new FakeSocket()): 
   } as unknown as DaemonClient;
 }
 
-/** A request that never answers; it fails only when its signal aborts, as `fetch` does. */
+/** A request that never answers; it fails only when its signal aborts (or already has), as `fetch` does. */
 const hang = (signal: AbortSignal) => new Promise<never>((_, reject) => {
+  if (signal.aborted) reject(signal.reason as Error);
   signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
 });
 
@@ -207,5 +209,134 @@ describe("waitForFeedback", { timeout: 10_000 }, () => {
     await step(items);
     await step(items);
     expect(delivered).toEqual(["feedback:feedback-b", "feedback:feedback-c", "reply:reply-user"]);
+  });
+});
+
+describe("waitForFeedback without a cursor", { timeout: 10_000 }, () => {
+  const base = Date.now() - 60_000;
+  const a = feedbackItem("feedback-a", base);
+
+  /**
+   * A store holding feedback-a, where feedback-b commits at the moment `commitB` names; `stall` makes the matching
+   * request hang until the wait's deadline aborts it.
+   */
+  function store(commitB: "open" | "third-listing", stall: "open" | "third-listing") {
+    const state = { listings: 0, opened: 0, b: false };
+    const client = fakeClient(async (_query, signal) => {
+      state.listings += 1;
+      if (commitB === "third-listing" && state.listings === 3) state.b = true;
+      if (stall === "third-listing" && state.listings === 3) return hang(signal);
+      return [a, ...(state.b ? [feedbackItem("feedback-b", base + 10)] : [])];
+    }, async (signal) => {
+      state.opened += 1;
+      if (commitB === "open" && state.opened === 1) state.b = true;
+      return stall === "open" && state.opened === 1 ? hang(signal) : new FakeSocket();
+    });
+    return { client, state };
+  }
+
+  /** Waits with `cursor` until nothing more arrives; returns every event key handed over. */
+  async function drain(client: DaemonClient, cursor: FeedbackCursor | undefined): Promise<string[]> {
+    const delivered: string[] = [];
+    let current = cursor;
+    for (;;) {
+      const result = await wait(client, { ...(current ? { cursor: current } : {}), timeoutMs: 0 });
+      delivered.push(...result.events.map((event) => event.key));
+      current = result.cursor;
+      if (result.outcome === "timeout") return delivered;
+    }
+  }
+
+  it("returns a cursor when the deadline cuts the event stream short, and that cursor delivers what arrived", async () => {
+    const { client, state } = store("open", "open");
+    const first = await wait(client, { timeoutMs: 300 });
+    expect(state).toMatchObject({ listings: 2, opened: 1, b: true });
+    expect(first.outcome).toBe("timeout");
+    expect(first.cursor).toBeDefined();
+    expect(await drain(client, first.cursor)).toEqual(["feedback:feedback-b"]);
+  });
+
+  it("returns a cursor when the deadline cuts its first listing after subscribing short", async () => {
+    const { client, state } = store("third-listing", "third-listing");
+    const first = await wait(client, { timeoutMs: 300 });
+    expect(state).toMatchObject({ listings: 3, b: true });
+    expect(first.outcome).toBe("timeout");
+    expect(first.cursor).toBeDefined();
+    expect(await drain(client, first.cursor)).toEqual(["feedback:feedback-b"]);
+  });
+
+  it("returns at once what was committed between its two baseline listings", async () => {
+    let listings = 0;
+    let opened = 0;
+    const client = fakeClient(async () => {
+      listings += 1;
+      return [a, ...(listings >= 2 ? [feedbackItem("feedback-b", base + 10)] : [])];
+    }, async () => {
+      opened += 1;
+      return new FakeSocket();
+    });
+    const result = await wait(client, { timeoutMs: 1000 });
+    expect([listings, opened]).toEqual([2, 0]);
+    expect(result.outcome).toBe("feedback");
+    expect(result.events).toMatchObject([{ key: "feedback:feedback-b", kind: "created" }]);
+    expect(await drain(client, result.cursor)).toEqual([]);
+  });
+
+  it("returns a compact cursor that decodes after a baseline of more than 10,000 events", async () => {
+    const many = Array.from({ length: 10_001 }, (_, index) => feedbackItem(`feedback-${index}`, base + index));
+    let opened = 0;
+    const client = fakeClient(
+      async () => [...many, ...(opened ? [feedbackItem("feedback-late", base + 20_000)] : [])],
+      async (signal) => (++opened === 1 ? hang(signal) : new FakeSocket()),
+    );
+    const first = await wait(client, { timeoutMs: 300 });
+    expect(first.outcome).toBe("timeout");
+    const decoded = decodeCursor(encodeCursor(first.cursor!));
+    expect(decoded.seen.size).toBeLessThanOrEqual(1);
+    expect(await drain(client, decoded)).toEqual(["feedback:feedback-late"]);
+  });
+
+  it("carries its cursor in a daemon_unavailable failure after the baseline", async () => {
+    let b = false;
+    let up = true;
+    const client = fakeClient(async () => [a, ...(b ? [feedbackItem("feedback-b", base + 10)] : [])], async () => {
+      if (!up) return new FakeSocket();
+      // feedback-b commits, then the daemon stops before the stream opens.
+      b = true;
+      up = false;
+      throw daemonUnavailable("The daemon is gone.");
+    });
+    const failure = await wait(client, { timeoutMs: 1000 }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(IterbarToolError);
+    expect((failure as IterbarToolError).code).toBe("daemon_unavailable");
+    const { cursor } = (failure as IterbarToolError).details;
+    expect(typeof cursor).toBe("string");
+    expect(await drain(client, decodeCursor(cursor as string))).toEqual(["feedback:feedback-b"]);
+  });
+
+  it("lets its second baseline listing finish past the deadline, so the baseline it acknowledged stays resumable", async () => {
+    let listings = 0;
+    let b = false;
+    const client = fakeClient(async (_query, signal) => {
+      listings += 1;
+      // The second listing outlasts the deadline (a wait of 0 gives its requests a second); feedback-b commits meanwhile.
+      if (listings === 2) {
+        b = true;
+        await Promise.race([pause(MIN_WAIT_REQUEST_MS + 200), hang(signal)]);
+        return [a];
+      }
+      return [a, ...(b ? [feedbackItem("feedback-b", base + 10)] : [])];
+    }, async (signal) => hang(signal));
+    const first = await wait(client, { timeoutMs: 0 });
+    expect(first.outcome).toBe("timeout");
+    expect(first.cursor).toBeDefined();
+    const later = fakeClient(async (query, signal) => client.listFeedback(query, signal));
+    expect(await drain(later, first.cursor)).toEqual(["feedback:feedback-b"]);
+  });
+
+  it("returns no cursor when the deadline cuts its first listing short, so nothing is acknowledged", async () => {
+    const client = fakeClient(async (_query, signal) => hang(signal));
+    const result = await wait(client, { timeoutMs: 0 });
+    expect(result).toEqual({ outcome: "timeout", items: [], events: [], cursor: undefined });
   });
 });

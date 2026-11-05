@@ -6,14 +6,24 @@ import type { DaemonErrorCode } from "iterbar";
  */
 export type IterbarToolErrorCode = "daemon_unavailable" | DaemonErrorCode;
 
-/** A tool failure the agent can act on; reported as an MCP tool error carrying `{ error: { code, message } }`. */
+export interface IterbarToolErrorOptions extends ErrorOptions {
+  /** Fields reported next to `error`, such as the `cursor` a failed wait resumes from. */
+  readonly details?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * A tool failure the agent can act on; reported as an MCP tool error carrying `{ error: { code, message } }` and any
+ * `details`.
+ */
 export class IterbarToolError extends Error {
   readonly code: IterbarToolErrorCode;
+  readonly details: Readonly<Record<string, unknown>>;
 
-  constructor(code: IterbarToolErrorCode, message: string, options?: ErrorOptions) {
+  constructor(code: IterbarToolErrorCode, message: string, options: IterbarToolErrorOptions = {}) {
     super(message, options);
     this.name = "IterbarToolError";
     this.code = code;
+    this.details = options.details ?? {};
   }
 }
 

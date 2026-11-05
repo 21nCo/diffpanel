@@ -54,9 +54,12 @@ switches between them in place, and the `iterbar` URL parameter (`?iterbar=prici
 
 Work in a loop, one feedback item at a time, oldest first:
 
-1. `list_feedback` with `status: "open"`, passing your latest `cursor` once you have one. Keep the returned
-   `cursor`. A filtered listing hands your cursor back unchanged, so a thread the filter hides (such as one waiting in
-   `needs-info`) still reaches you through the next wait; without a cursor, the returned one starts from now.
+1. At the start of a session, before you have a cursor, call `list_feedback` without filters and keep its `cursor`.
+   It counts everything listed as seen, so pick out what still needs you: `open` items, `working` items an earlier
+   session left unfinished (handle them like open ones), and any other unresolved thread whose last reply is from the
+   user (an answer to a `needs-info` question or a follow-up; continue the thread). Afterwards, list with `status: "open"` and your latest `cursor`. A filtered
+   listing hands your cursor back unchanged, so a thread the filter hides (such as one waiting in `needs-info`) still
+   reaches you through the next wait.
 2. For each item, `get_feedback`. Use `target.sourceLocation` (project-relative `path:line:column`), the selector,
    the text excerpt, the screenshot and `activeVariants` to find exactly what the user meant. A comment applies to
    the version that was active when it was sent (`activeVariants`); change that version, not the others, unless the
@@ -83,7 +86,8 @@ replies and status changes never end a wait. The default timeout is 300 seconds 
 gives up on long tool calls, use a shorter `timeoutSeconds` and wait again.
 
 If any tool fails with `daemon_unavailable` during the loop, the user stopped the dev server or daemon. Tell them to
-run `iterbar dev` again; keep your cursor, and continue with it once it is back.
+run `iterbar dev` again; keep your cursor, and continue with it once it is back. A failed wait may carry a newer
+`cursor` next to its error; use that one when it does.
 
 ## Collapse to a chosen version
 

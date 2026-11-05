@@ -374,8 +374,15 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     const waiting = call(client, "wait_for_feedback", { timeoutSeconds: 30 });
     await new Promise((resolve) => setTimeout(resolve, 500));
     await daemon.close();
-    const error = errorOf(await waiting);
-    expect(error.code).toBe("daemon_unavailable");
+    const failed = await waiting;
+    expect(errorOf(failed).code).toBe("daemon_unavailable");
+    // The failure carries the cursor of the wait's baseline, so the agent resumes from it once the daemon is back.
+    const { cursor } = failed.structuredContent as { cursor?: unknown };
+    expect(typeof cursor).toBe("string");
+    const restarted = await start();
+    const feedback = await sendFeedback(restarted);
+    const resumed = await ok<WaitOutput>(client, "wait_for_feedback", { cursor, timeoutSeconds: 10 });
+    expect(resumed).toMatchObject({ outcome: "feedback", events: [{ feedbackId: feedback.id, kind: "created" }] });
   });
 
   it("ends with the server when the client disconnects mid-wait", { timeout: 30_000 }, async () => {

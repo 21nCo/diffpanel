@@ -6,7 +6,9 @@
 ## Errors
 
 A failed call is an MCP tool error (`isError: true`) whose structured content is
-`{ "error": { "code": "<code>", "message": "<text>" } }`; the text block reads `<code>: <message>`.
+`{ "error": { "code": "<code>", "message": "<text>" } }`; the text block reads `<code>: <message>`. A failed
+`wait_for_feedback` that had got as far as a cursor also carries it, as `cursor` next to `error` (and as JSON on a
+second line of the text block); continue with that cursor.
 
 | Code | Meaning | What to do |
 | --- | --- | --- |
@@ -81,16 +83,19 @@ Inputs: `cursor` (optional, from the previous `list_feedback` or `wait_for_feedb
 default 300, 0 to 1,800).
 
 Blocks until something new arrives after the cursor, or the timeout passes. New means a feedback item was created or
-a user replied in a thread. Agent replies and status changes are not new. Without a cursor, the wait first lists the
-feedback and counts everything in that listing as seen; anything that lands after it is new, even if it arrives
-before the wait is listening for events.
+a user replied in a thread. Agent replies and status changes are not new. Without a cursor, the wait first takes a
+baseline: it lists the feedback and counts everything in that listing as seen, then lists once more, which returns at
+once anything sent after the first listing; anything that lands later is new too, even if it arrives before the wait
+is listening for events. From then on, every outcome (and a failure) carries a cursor that resumes from the baseline.
 
 A cursor relies only on the order in which the daemon commits feedback, never on how long a write or a listing takes:
 an item that takes long to save is still returned once it is saved.
 
 The wait ends at its timeout however much else changes meanwhile; a daemon request still running then is cut short,
 and the returned cursor still covers whatever it would have found. A `timeoutSeconds` of 0 checks once and returns
-(within about a second).
+(within about a second). The one exception is the second baseline listing of a wait without a cursor: it always
+finishes (or fails with `daemon_unavailable` after the daemon's 30-second request limit), so that the baseline it
+acknowledged is never left without a cursor.
 
 Result: `{ outcome, items, events, cursor }`:
 
@@ -98,8 +103,10 @@ Result: `{ outcome, items, events, cursor }`:
 - `items`: the items with something new, oldest first (empty on timeout);
 - `events`: `[{ feedbackId, kind: "created" | "user_reply", at, replyId? }]`;
 - `cursor`: pass it to the next wait. It is missing only when a wait without a cursor timed out before its first
-  listing finished; wait again without one.
+  listing finished, so nothing was counted as seen. Then call `list_feedback` without filters, which shows every
+  item, including anything sent meanwhile, and continue with its cursor.
 
 A client that sends a progress token receives a progress notification every 15 seconds while the wait lasts,
 so clients that reset their request timeout on progress keep waiting. If the daemon stops during the wait, the call
-fails with `daemon_unavailable`; wait again with the same cursor once `iterbar dev` runs again.
+fails with `daemon_unavailable`. Once `iterbar dev` runs again, wait again with the `cursor` in the failure, or with
+the one you passed when the failure has none; if neither exists, start with `list_feedback` without filters.

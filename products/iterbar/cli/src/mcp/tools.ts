@@ -46,8 +46,9 @@ function success(structured: Record<string, unknown>, extra: readonly ContentBlo
 }
 
 function failure(error: IterbarToolError): CallToolResult {
-  const body = { error: { code: error.code, message: error.message } };
-  return { isError: true, content: [{ type: "text", text: `${error.code}: ${error.message}` }], structuredContent: body };
+  const body = { error: { code: error.code, message: error.message }, ...error.details };
+  const details = Object.keys(error.details).length ? `\n${JSON.stringify(error.details)}` : "";
+  return { isError: true, content: [{ type: "text", text: `${error.code}: ${error.message}${details}` }], structuredContent: body };
 }
 
 /** Runs a tool body, turning every failure into a typed tool error; unexpected ones are also reported. */
@@ -237,7 +238,7 @@ export function registerTools(context: ToolContext): void {
       outcome: result.outcome,
       items: result.items,
       events: describeEvents(result.events),
-      // Missing only when a wait without a cursor ended before its first listing; wait again without one.
+      // Missing only when a wait without a cursor timed out before its first listing: nothing was acknowledged.
       ...(result.cursor ? { cursor: encodeCursor(result.cursor) } : {}),
     });
   }));
