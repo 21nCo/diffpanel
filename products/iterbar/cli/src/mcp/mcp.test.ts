@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startDaemon, type RunningDaemon } from "../daemon/index.js";
 import { bearer, json, multipart, send } from "../daemon/test-support/client.js";
 import { chooseVariantDraft, commentDraft, deadPid, EVIDENCE, PNG, temporaryProject } from "../store/test-support/helpers.js";
+import { MAX_CURSOR_TIME_MS } from "./cursor.js";
 import { createIterbarMcpServer } from "./server.js";
 import { deliveryContractProblems } from "./test-support/delivery.js";
 
@@ -484,6 +485,19 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     expect(toAnswer).toEqual([{ feedbackId: followedUp.id, replyId: followUpId }]);
     const quiet = await ok<WaitOutput>(second.client, "wait_for_feedback", { cursor: started.cursor, timeoutSeconds: 1 });
     expect(quiet).toMatchObject({ outcome: "timeout", events: [] });
+  });
+
+  it("accepts a cursor at the latest time the daemon's since filter takes, and refuses a later one", async () => {
+    await start();
+    const { client } = await connect();
+    const encode = (time: number) => Buffer.from(JSON.stringify({ v: 1, w: time, c: time, s: [] })).toString("base64url");
+    const latest = await ok<WaitOutput>(client, "wait_for_feedback", { cursor: encode(MAX_CURSOR_TIME_MS), timeoutSeconds: 0 });
+    expect(latest).toMatchObject({ outcome: "timeout", events: [] });
+    await ok(client, "wait_for_feedback", { cursor: latest.cursor, timeoutSeconds: 0 });
+    for (const name of ["list_feedback", "wait_for_feedback"]) {
+      const result = await call(client, name, { cursor: encode(MAX_CURSOR_TIME_MS + 1), ...(name === "list_feedback" ? {} : { timeoutSeconds: 0 }) });
+      expect([name, errorOf(result).code]).toEqual([name, "invalid_request"]);
+    }
   });
 
   it("fails with daemon_unavailable when the daemon stops during the wait", async () => {

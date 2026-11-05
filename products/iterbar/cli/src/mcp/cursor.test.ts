@@ -102,11 +102,11 @@ describe("feedback cursor", () => {
     }
   });
 
-  it("accepts times up to the latest Date and refuses any later one before it is turned into a since filter", () => {
+  it("accepts times up to the end of year 9999 and refuses any later one before it is turned into a since filter", () => {
     const encode = (w: number, c: number) => Buffer.from(JSON.stringify({ v: 1, w, c, s: [] })).toString("base64url");
     const latest = decodeCursor(encode(MAX_CURSOR_TIME_MS, MAX_CURSOR_TIME_MS));
     expect(latest).toEqual({ watermark: MAX_CURSOR_TIME_MS, committed: MAX_CURSOR_TIME_MS, seen: new Set() });
-    expect(cursorSince(latest)).toBe(new Date(MAX_CURSOR_TIME_MS).toISOString());
+    expect(cursorSince(latest)).toBe("9999-12-31T23:59:59.999Z");
     for (const [w, c] of [[0, MAX_CURSOR_TIME_MS + 1], [MAX_CURSOR_TIME_MS + 1, MAX_CURSOR_TIME_MS + 1]]) {
       expect(() => decodeCursor(encode(w!, c!))).toThrow(expect.objectContaining({ code: "invalid_request" }));
     }

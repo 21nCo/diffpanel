@@ -101,7 +101,7 @@ describe("wait_for_feedback at its deadline", { timeout: 30_000 }, () => {
   });
 });
 
-describe("a cursor whose times a Date cannot hold", () => {
+describe("a cursor whose times are past the end of year 9999", () => {
   it("is refused as invalid_request by list_feedback and wait_for_feedback, not reported as internal", async () => {
     const client = await connect(() => []);
     const encode = (w: number, c: number) => Buffer.from(JSON.stringify({ v: 1, w, c, s: [] })).toString("base64url");
