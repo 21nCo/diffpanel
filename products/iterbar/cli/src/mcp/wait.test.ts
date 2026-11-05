@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { Feedback, FeedbackListQuery } from "iterbar";
 import type WebSocket from "ws";
 import { afterEach, describe, expect, it } from "vitest";
-import { cursorAt, type FeedbackCursor } from "./cursor.js";
+import { baselineCursor, type FeedbackCursor } from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { feedbackItem } from "./test-support/feedback.js";
 import { MIN_WAIT_REQUEST_MS, waitForFeedback, type WaitOptions } from "./wait.js";
@@ -67,7 +67,8 @@ describe("waitForFeedback", { timeout: 10_000 }, () => {
     const socket = new FakeSocket();
     let listings = 0;
     const client = fakeClient(async (_query, signal) => (++listings === 1 ? [] : hang(signal)), async () => socket);
-    const cursor: FeedbackCursor = cursorAt(Date.now() - 1000);
+    const at = Date.now() - 1000;
+    const cursor: FeedbackCursor = { watermark: at, seen: new Set(), committed: at };
     setTimeout(() => socket.push(feedbackItem("feedback-a", Date.now())), 50);
     const started = Date.now();
     const result = await wait(client, { cursor, timeoutMs: 1200 });
@@ -75,14 +76,13 @@ describe("waitForFeedback", { timeout: 10_000 }, () => {
     expect(listings).toBe(2);
     expect(result.outcome).toBe("timeout");
     // Nothing the cut-short listing would have found is acknowledged.
-    expect(result.cursor.watermark).toBe(cursor.watermark);
-    expect(result.cursor.seen.size).toBe(0);
+    expect(result.cursor).toEqual(cursor);
   });
 
   it("gives a wait with no time left one bounded listing, so a timeout of 0 polls", async () => {
     const client = fakeClient(async (_query, signal) => hang(signal));
     const started = Date.now();
-    const result = await wait(client, { cursor: cursorAt(started), timeoutMs: 0 });
+    const result = await wait(client, { cursor: baselineCursor([]), timeoutMs: 0 });
     expect(result.outcome).toBe("timeout");
     expect(Date.now() - started).toBeLessThan(MIN_WAIT_REQUEST_MS + 300);
   });
@@ -117,18 +117,19 @@ describe("waitForFeedback", { timeout: 10_000 }, () => {
 
   it("returns a user reply that a listing missed while it listed a newer item, on the next wait", async () => {
     const old = Date.now() - 60_000;
+    const a = feedbackItem("feedback-a", old);
     let listedAt = 0;
     let listing: () => Feedback[] = () => [
       // The listing read feedback-a before its user reply was committed, half a second after the listing started,
       // and reached feedback-b, created more than six seconds after that, only later.
-      feedbackItem("feedback-a", old),
+      a,
       feedbackItem("feedback-b", listedAt + 6_500),
     ];
     const client = fakeClient(async () => {
       listedAt = Date.now();
       return listing();
     });
-    const first = await wait(client, { timeoutMs: 1000 });
+    const first = await wait(client, { cursor: baselineCursor([a]), timeoutMs: 1000 });
     expect(first.items.map((item) => item.id)).toEqual(["feedback-b"]);
 
     const replyAt = listedAt + 500;
@@ -140,5 +141,71 @@ describe("waitForFeedback", { timeout: 10_000 }, () => {
     const second = await wait(client, { cursor: first.cursor, timeoutMs: 1000 });
     expect(second.outcome).toBe("feedback");
     expect(second.events).toMatchObject([{ key: "reply:reply-user", kind: "user_reply", feedbackId: "feedback-a" }]);
+  });
+
+  it("returns an item whose write committed long after its timestamp, after listings that did not show it", async () => {
+    // feedback-slow is stamped a minute ago, but its write (attachments, fsync, rename) is still running while the
+    // agent lists and waits; nothing bounds how long that takes. The store writes one at a time, so the newest commit
+    // anyone sees meanwhile is older than its stamp.
+    const stamped = Date.now() - 60_000;
+    const other = feedbackItem("feedback-other", stamped - 1_000);
+    let committed = false;
+    const client = fakeClient(async () => [other, ...(committed ? [feedbackItem("feedback-slow", stamped)] : [])]);
+    const quiet = await wait(client, { cursor: baselineCursor([other]), timeoutMs: 0 });
+    const idle = await wait(client, { cursor: quiet.cursor, timeoutMs: 0 });
+    expect([quiet.outcome, idle.outcome]).toEqual(["timeout", "timeout"]);
+    committed = true;
+    const next = await wait(client, { cursor: idle.cursor, timeoutMs: 1000 });
+    expect(next.outcome).toBe("feedback");
+    expect(next.events).toMatchObject([{ key: "feedback:feedback-slow", kind: "created" }]);
+  });
+
+  it("without a cursor, returns a write stamped before the call that commits after it subscribed", async () => {
+    const before = feedbackItem("feedback-before", Date.now() - 60_000);
+    let subscribed = false;
+    const stamped = Date.now() - 1_000;
+    const client = fakeClient(
+      async () => [before, ...(subscribed ? [feedbackItem("feedback-stamped-earlier", stamped)] : [])],
+      async () => {
+        subscribed = true;
+        return new FakeSocket();
+      },
+    );
+    const result = await wait(client, { timeoutMs: 1000 });
+    expect(result.outcome).toBe("feedback");
+    expect(result.events).toMatchObject([{ key: "feedback:feedback-stamped-earlier", kind: "created" }]);
+  });
+
+  it("hands each event over exactly once across repeated waits", async () => {
+    const base = Date.now() - 60_000;
+    let items: Feedback[] = [feedbackItem("feedback-a", base)];
+    const client = fakeClient(async () => items);
+    const start = await wait(client, { timeoutMs: 0 });
+    expect(start.outcome).toBe("timeout");
+
+    const delivered: string[] = [];
+    let cursor = start.cursor;
+    const step = async (next: Feedback[]) => {
+      items = next;
+      const result = await wait(client, { ...(cursor ? { cursor } : {}), timeoutMs: 0 });
+      delivered.push(...result.events.map((event) => event.key));
+      cursor = result.cursor;
+    };
+    // Same-millisecond writes, an agent reply and a status change in between, and quiet turns.
+    await step([feedbackItem("feedback-a", base), feedbackItem("feedback-b", base + 10)]);
+    await step([feedbackItem("feedback-a", base), feedbackItem("feedback-b", base + 10), feedbackItem("feedback-c", base + 10)]);
+    await step([
+      feedbackItem("feedback-a", base, [["reply-agent", "agent", base + 20]]),
+      feedbackItem("feedback-b", base + 10, [], base + 25),
+      feedbackItem("feedback-c", base + 10),
+    ]);
+    await step([
+      feedbackItem("feedback-a", base, [["reply-agent", "agent", base + 20], ["reply-user", "user", base + 30]]),
+      feedbackItem("feedback-b", base + 10, [], base + 25),
+      feedbackItem("feedback-c", base + 10),
+    ]);
+    await step(items);
+    await step(items);
+    expect(delivered).toEqual(["feedback:feedback-b", "feedback:feedback-c", "reply:reply-user"]);
   });
 });

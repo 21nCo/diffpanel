@@ -34,10 +34,17 @@ Every tool that returns feedback returns full items:
 
 ## `list_feedback`
 
-Inputs, all optional: `status`, `kind`, `since` (ISO 8601; items updated at or after it).
+Inputs, all optional: `status`, `kind`, `since` (ISO 8601; items updated at or after it); `cursor` (your latest one,
+from `list_feedback` or `wait_for_feedback`).
 
-Result: `{ items, cursor }`, oldest first. `cursor` covers everything that existed when the call started; pass it to
-`wait_for_feedback`.
+Result: `{ items, cursor }`, oldest first; with a `cursor` and no filters, also `events` (as in
+`wait_for_feedback`): what is new since that cursor. Pass the returned `cursor` to `wait_for_feedback`. It counts as
+seen only what you were shown:
+
+- no filters, with a cursor: every listed item is shown, so the cursor moves past all of it;
+- filters, with a cursor: your cursor comes back unchanged, so events on items the filters hid (a user's answer on a
+  `needs-info` thread while you list `open` ones) are still returned by the next wait;
+- without a cursor: the cursor starts now, and everything sent before the call counts as seen.
 
 ## `get_feedback`
 
@@ -74,8 +81,12 @@ Inputs: `cursor` (optional, from the previous `list_feedback` or `wait_for_feedb
 default 300, 0 to 1,800).
 
 Blocks until something new arrives after the cursor, or the timeout passes. New means a feedback item was created or
-a user replied in a thread. Agent replies and status changes are not new. Without a cursor, everything sent before
-the call started counts as seen, and anything sent after it is new, even if it arrives before the wait is listening.
+a user replied in a thread. Agent replies and status changes are not new. Without a cursor, the wait first lists the
+feedback and counts everything in that listing as seen; anything that lands after it is new, even if it arrives
+before the wait is listening for events.
+
+A cursor relies only on the order in which the daemon commits feedback, never on how long a write or a listing takes:
+an item that takes long to save is still returned once it is saved.
 
 The wait ends at its timeout however much else changes meanwhile; a daemon request still running then is cut short,
 and the returned cursor still covers whatever it would have found. A `timeoutSeconds` of 0 checks once and returns
@@ -86,7 +97,8 @@ Result: `{ outcome, items, events, cursor }`:
 - `outcome`: `feedback` or `timeout`;
 - `items`: the items with something new, oldest first (empty on timeout);
 - `events`: `[{ feedbackId, kind: "created" | "user_reply", at, replyId? }]`;
-- `cursor`: pass it to the next wait.
+- `cursor`: pass it to the next wait. It is missing only when a wait without a cursor timed out before its first
+  listing finished; wait again without one.
 
 A client that sends a progress token receives a progress notification every 15 seconds while the wait lasts,
 so clients that reset their request timeout on progress keep waiting. If the daemon stops during the wait, the call

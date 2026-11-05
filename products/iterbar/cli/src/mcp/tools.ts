@@ -12,7 +12,15 @@ import {
 } from "iterbar";
 import { attachmentPath } from "iterbar/node";
 import { z } from "zod";
-import { advanceCursor, decodeCursor, encodeCursor, ORIGIN_CURSOR, type FeedbackEvent } from "./cursor.js";
+import {
+  cursorAfter,
+  decodeCursor,
+  encodeCursor,
+  observeListing,
+  unseenEvents,
+  type FeedbackCursor,
+  type FeedbackEvent,
+} from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { IterbarToolError } from "./errors.js";
 import { DEFAULT_WAIT_SECONDS, MAX_WAIT_SECONDS, waitForFeedback } from "./wait.js";
@@ -72,6 +80,8 @@ function describeEvents(events: readonly FeedbackEvent[]) {
   }));
 }
 
+const cursorInput = z.string().max(1_000_000).optional();
+
 const feedbackId = idSchema.describe("The feedback item's id, as returned by list_feedback or wait_for_feedback.");
 
 export function registerTools(context: ToolContext): void {
@@ -81,27 +91,41 @@ export function registerTools(context: ToolContext): void {
     title: "List Iterbar feedback",
     description:
       "List feedback items (comments and variant choices) that users sent from the Iterbar dev bar, oldest first, each " +
-      "with its thread of replies, status and attachment references. Filters are optional. Also returns a cursor: pass " +
-      "it to wait_for_feedback to wait for anything that arrives after this listing.",
+      "with its thread of replies, status and attachment references. Filters are optional. Also returns a cursor for " +
+      "wait_for_feedback. Pass your latest cursor in: without filters, the result says what is new since that cursor " +
+      "and the cursor moves past it; with filters, your cursor comes back unchanged, so nothing the filters hid is " +
+      "skipped. Without a cursor, the returned one counts everything sent so far as seen.",
     inputSchema: {
       status: feedbackStatusSchema.optional().describe("Only items with this status, e.g. \"open\" for unhandled feedback."),
       kind: feedbackKindSchema.optional().describe("\"comment\" or \"choose_variant\"."),
       since: timestampSchema.optional().describe("Only items updated at or after this ISO 8601 timestamp."),
+      cursor: cursorInput.describe("Your latest cursor from list_feedback or wait_for_feedback."),
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, (input) => run(context, async () => {
-    // The cursor comes from a full listing made before the filtered one, so an item that arrives in between is
-    // returned again by the next wait, never missed.
-    const listedAt = Date.now();
-    const cursor = advanceCursor(ORIGIN_CURSOR, await client.listFeedback(), listedAt);
+    const cursor = input.cursor === undefined ? undefined : decodeCursor(input.cursor);
     const filtered = input.status !== undefined || input.kind !== undefined || input.since !== undefined;
-    const query = {
+    if (!filtered) {
+      const items = await client.listFeedback();
+      if (cursor) {
+        // Every listed event is shown to the agent, so the cursor may move past all of them.
+        const events = unseenEvents(cursor, items);
+        return success({ items, events: describeEvents(events), cursor: encodeCursor(observeListing(cursor, items)) });
+      }
+      // A second listing proves when the first was committed, so the cursor keeps only the newest events by key.
+      const shown = await client.listFeedback();
+      return success({ items: shown, cursor: encodeCursor(cursorAfter(items, shown)) });
+    }
+    // The agent sees only the filtered items, so the cursor must not count anything else as seen: an agent's cursor
+    // comes back unchanged. Without one, the cursor starts now; it is taken before the filtered listing, so an item
+    // that arrives in between is handed over again by the next wait, never skipped.
+    const next: FeedbackCursor = cursor ?? cursorAfter(await client.listFeedback(), await client.listFeedback());
+    const items = await client.listFeedback({
       ...(input.status ? { status: input.status } : {}),
       ...(input.kind ? { kind: input.kind } : {}),
       ...(input.since ? { since: input.since } : {}),
-    };
-    const items = filtered ? await client.listFeedback(query) : await client.listFeedback();
-    return success({ items, cursor: encodeCursor(cursor) });
+    });
+    return success({ items, cursor: encodeCursor(next) });
   }));
 
   server.registerTool("get_feedback", {
@@ -180,7 +204,7 @@ export function registerTools(context: ToolContext): void {
       "wait_for_feedback call so nothing in between is missed; without one, only what arrives after the call counts. " +
       "Your own replies and status changes never end the wait.",
     inputSchema: {
-      cursor: z.string().max(1_000_000).optional().describe("The cursor from the previous list_feedback or wait_for_feedback result."),
+      cursor: cursorInput.describe("The cursor from the previous list_feedback or wait_for_feedback result."),
       timeoutSeconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).default(DEFAULT_WAIT_SECONDS)
         .describe(`How long to wait, in seconds (default ${DEFAULT_WAIT_SECONDS}, at most ${MAX_WAIT_SECONDS}).`),
     },
@@ -213,7 +237,8 @@ export function registerTools(context: ToolContext): void {
       outcome: result.outcome,
       items: result.items,
       events: describeEvents(result.events),
-      cursor: encodeCursor(result.cursor),
+      // Missing only when a wait without a cursor ended before its first listing; wait again without one.
+      ...(result.cursor ? { cursor: encodeCursor(result.cursor) } : {}),
     });
   }));
 }

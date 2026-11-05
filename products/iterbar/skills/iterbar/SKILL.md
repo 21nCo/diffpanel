@@ -54,7 +54,9 @@ switches between them in place, and the `iterbar` URL parameter (`?iterbar=prici
 
 Work in a loop, one feedback item at a time, oldest first:
 
-1. `list_feedback` with `status: "open"`. Keep the returned `cursor`.
+1. `list_feedback` with `status: "open"`, passing your latest `cursor` once you have one. Keep the returned
+   `cursor`. A filtered listing hands your cursor back unchanged, so a thread the filter hides (such as one waiting in
+   `needs-info`) still reaches you through the next wait; without a cursor, the returned one starts from now.
 2. For each item, `get_feedback`. Use `target.sourceLocation` (project-relative `path:line:column`), the selector,
    the text excerpt, the screenshot and `activeVariants` to find exactly what the user meant. A comment applies to
    the version that was active when it was sent (`activeVariants`); change that version, not the others, unless the
@@ -75,7 +77,8 @@ previous wait). It returns when a user sends new feedback or replies in a thread
   reply (`user_reply` with its `replyId`). Continue with the returned `cursor`.
 - `outcome: "timeout"`: nothing arrived. Wait again with the returned `cursor`, or tell the user you are stopping.
 
-Always pass the most recent cursor, so nothing sent while you were working is missed or handed to you twice. Your own
+Always pass the most recent cursor, to `list_feedback` as well as to `wait_for_feedback`, so nothing sent while you
+were working is missed or handed to you twice. Never start over without one once you have it. Your own
 replies and status changes never end a wait. The default timeout is 300 seconds and the maximum 1,800; if your client
 gives up on long tool calls, use a shorter `timeoutSeconds` and wait again.
 

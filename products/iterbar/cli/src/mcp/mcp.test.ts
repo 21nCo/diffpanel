@@ -338,6 +338,36 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     expect(result.events).toEqual([expect.objectContaining({ feedbackId: feedback.id, kind: "user_reply", replyId: userReplyId })]);
   });
 
+  it("hands over a user's answer on a needs-info thread after a filtered re-list, exactly once", async () => {
+    const daemon = await start();
+    const { client } = await connect();
+    const feedback = await sendFeedback(daemon);
+    // The skill's loop: list the open items, ask a question, then come back to the open items.
+    const open = await ok<{ items: Feedback[]; cursor: string }>(client, "list_feedback", { status: "open" });
+    expect(open.items.map((item) => item.id)).toEqual([feedback.id]);
+    await ok(client, "set_status", { feedbackId: feedback.id, status: "needs-info" });
+    await ok(client, "reply", { feedbackId: feedback.id, text: "Which button?" });
+    const answered = await userReply(daemon, feedback.id, "The Buy now button.");
+    const answerId = answered.replies.find((reply) => reply.author.kind === "user")?.id;
+
+    // The thread stays needs-info, so the filter hides it; the cursor must not count its answer as seen.
+    const relisted = await ok<{ items: Feedback[]; cursor: string }>(client, "list_feedback", { status: "open", cursor: open.cursor });
+    expect(relisted).toEqual({ items: [], cursor: open.cursor });
+    const result = await ok<WaitOutput>(client, "wait_for_feedback", { cursor: relisted.cursor, timeoutSeconds: 5 });
+    expect(result.outcome).toBe("feedback");
+    expect(result.events).toEqual([expect.objectContaining({ feedbackId: feedback.id, kind: "user_reply", replyId: answerId })]);
+
+    // An unfiltered listing with the cursor says what is new and moves past it; nothing is handed over twice.
+    const again = await userReply(daemon, feedback.id, "The one in the header.");
+    const secondId = again.replies.at(-1)?.id;
+    const full = await ok<{ items: Feedback[]; events: WaitOutput["events"]; cursor: string }>(client, "list_feedback", {
+      cursor: result.cursor,
+    });
+    expect(full.events).toEqual([expect.objectContaining({ feedbackId: feedback.id, kind: "user_reply", replyId: secondId })]);
+    const quiet = await ok<WaitOutput>(client, "wait_for_feedback", { cursor: full.cursor, timeoutSeconds: 1 });
+    expect(quiet).toMatchObject({ outcome: "timeout", items: [] });
+  });
+
   it("fails with daemon_unavailable when the daemon stops during the wait", async () => {
     const daemon = await start();
     const { client } = await connect();

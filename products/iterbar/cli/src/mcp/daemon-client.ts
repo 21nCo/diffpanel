@@ -110,7 +110,17 @@ export class DaemonClient {
     return info;
   }
 
-  async #request(endpoint: DaemonEndpointName, params: Record<string, string>, options: RequestOptions = {}): Promise<Response> {
+  /**
+   * Sends a request and reads its whole body with `read`. A daemon that cannot be reached, stops answering within the
+   * request timeout, or drops the connection before the body is complete is `daemon_unavailable`; an abort of
+   * `options.signal` is passed through as it is.
+   */
+  async #request<T>(
+    endpoint: DaemonEndpointName,
+    params: Record<string, string>,
+    read: (response: Response) => Promise<T>,
+    options: RequestOptions = {},
+  ): Promise<T> {
     const info = await this.info();
     const { method } = daemonEndpoints[endpoint];
     let path: string;
@@ -127,6 +137,7 @@ export class DaemonClient {
     }
     const signals = [AbortSignal.timeout(this.#timeoutMs), ...(options.signal ? [options.signal] : [])];
     let response: Response;
+    let body: T;
     try {
       response = await fetch(url, {
         method,
@@ -138,26 +149,33 @@ export class DaemonClient {
         signal: AbortSignal.any(signals),
         redirect: "error",
       });
+      if (!response.ok) await this.#throwFor(response, info);
+      body = await read(response);
     } catch (error) {
-      if (options.signal?.aborted) throw error;
-      const code = causeCode(error);
-      if ((error as Error).name === "TimeoutError") {
-        throw daemonUnavailable(`The Iterbar daemon at ${info.host}:${info.port} did not answer within ${this.#timeoutMs} ms.`);
-      }
-      if (code === undefined || UNREACHABLE_CODES.has(code)) {
-        throw daemonUnavailable(`The Iterbar daemon at ${info.host}:${info.port} could not be reached (${code ?? "fetch failed"}).`, { cause: error });
-      }
-      throw error;
+      if (error instanceof IterbarToolError || options.signal?.aborted) throw error;
+      throw this.#transportError(error, info);
     }
-    if (response.ok) return response;
-    await this.#throwFor(response, info);
-    return response;
+    return body;
+  }
+
+  /** A failure to exchange bytes with the daemon at `info`, before or while the response arrived. */
+  #transportError(error: unknown, info: DaemonInfo): unknown {
+    if ((error as Error | undefined)?.name === "TimeoutError") {
+      return daemonUnavailable(`The Iterbar daemon at ${info.host}:${info.port} did not answer within ${this.#timeoutMs} ms.`, { cause: error });
+    }
+    const code = causeCode(error);
+    if (code === undefined || UNREACHABLE_CODES.has(code)) {
+      return daemonUnavailable(`The Iterbar daemon at ${info.host}:${info.port} could not be reached (${code ?? "fetch failed"}).`, { cause: error });
+    }
+    return error;
   }
 
   async #throwFor(response: Response, info: DaemonInfo): Promise<never> {
+    // A body cut short is a transport failure, not an unreadable answer.
+    const text = await response.text();
     let body: unknown;
     try {
-      body = await response.json();
+      body = JSON.parse(text);
     } catch {
       body = undefined;
     }
@@ -172,10 +190,19 @@ export class DaemonClient {
     throw new IterbarToolError(parsed.success ? parsed.data.error.code : "internal", message);
   }
 
-  async #json<T>(response: Response, parse: (json: unknown) => T): Promise<T> {
+  /** Sends a request and parses its complete JSON body with `parse`. */
+  async #json<T>(
+    endpoint: DaemonEndpointName,
+    params: Record<string, string>,
+    parse: (json: unknown) => T,
+    options: RequestOptions = {},
+  ): Promise<T> {
+    // The whole body is read as part of the request, so a connection lost halfway is daemon_unavailable; only a
+    // complete body that is not JSON is the daemon's fault.
+    const text = await this.#request(endpoint, params, (response) => response.text(), options);
     let json: unknown;
     try {
-      json = await response.json();
+      json = JSON.parse(text);
     } catch (error) {
       throw new IterbarToolError("internal", "The daemon sent a response that is not valid JSON", { cause: error });
     }
@@ -189,34 +216,35 @@ export class DaemonClient {
     }
   }
 
-  async listFeedback(query: FeedbackListQuery = {}, signal?: AbortSignal): Promise<Feedback[]> {
-    const response = await this.#request("listFeedback", {}, { query, ...(signal ? { signal } : {}) });
-    return this.#json(response, (json) => parseMessage(feedbackListResponseSchema, json, "feedback list").items);
+  listFeedback(query: FeedbackListQuery = {}, signal?: AbortSignal): Promise<Feedback[]> {
+    return this.#json("listFeedback", {}, (json) => parseMessage(feedbackListResponseSchema, json, "feedback list").items, {
+      query,
+      ...(signal ? { signal } : {}),
+    });
   }
 
-  async getFeedback(feedbackId: string): Promise<Feedback> {
-    const response = await this.#request("getFeedback", { feedbackId });
-    return this.#json(response, (json) => parseMessage(feedbackSchema, json, "feedback"));
+  getFeedback(feedbackId: string): Promise<Feedback> {
+    return this.#json("getFeedback", { feedbackId }, (json) => parseMessage(feedbackSchema, json, "feedback"));
   }
 
   async getAttachment(feedbackId: string, attachmentId: string): Promise<Uint8Array> {
-    const response = await this.#request("getAttachment", { feedbackId, attachmentId });
-    return new Uint8Array(await response.arrayBuffer());
+    return new Uint8Array(await this.#request("getAttachment", { feedbackId, attachmentId }, (response) => response.arrayBuffer()));
   }
 
-  async reply(feedbackId: string, author: ReplyAuthor, text: string): Promise<Feedback> {
-    const response = await this.#request("reply", { feedbackId }, { json: { schemaVersion: SCHEMA_VERSION, author, text } });
-    return this.#json(response, (json) => parseMessage(feedbackSchema, json, "feedback"));
+  reply(feedbackId: string, author: ReplyAuthor, text: string): Promise<Feedback> {
+    return this.#json("reply", { feedbackId }, (json) => parseMessage(feedbackSchema, json, "feedback"), {
+      json: { schemaVersion: SCHEMA_VERSION, author, text },
+    });
   }
 
-  async setStatus(feedbackId: string, status: FeedbackStatus): Promise<Feedback> {
-    const response = await this.#request("setStatus", { feedbackId }, { json: { schemaVersion: SCHEMA_VERSION, status } });
-    return this.#json(response, (json) => parseMessage(feedbackSchema, json, "feedback"));
+  setStatus(feedbackId: string, status: FeedbackStatus): Promise<Feedback> {
+    return this.#json("setStatus", { feedbackId }, (json) => parseMessage(feedbackSchema, json, "feedback"), {
+      json: { schemaVersion: SCHEMA_VERSION, status },
+    });
   }
 
-  async listSlots(): Promise<SlotReport[]> {
-    const response = await this.#request("listSlots", {});
-    return this.#json(response, (json) => parseMessage(slotListResponseSchema, json, "slot list").pages);
+  listSlots(): Promise<SlotReport[]> {
+    return this.#json("listSlots", {}, (json) => parseMessage(slotListResponseSchema, json, "slot list").pages);
   }
 
   /**
