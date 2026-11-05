@@ -90,8 +90,10 @@ export function registerTools(context: ToolContext): void {
     },
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, (input) => run(context, async () => {
-    // The cursor is taken before the listing, so an item that arrives in between is returned again, never missed.
-    const cursor = advanceCursor(ORIGIN_CURSOR, await client.listFeedback());
+    // The cursor comes from a full listing made before the filtered one, so an item that arrives in between is
+    // returned again by the next wait, never missed.
+    const listedAt = Date.now();
+    const cursor = advanceCursor(ORIGIN_CURSOR, await client.listFeedback(), listedAt);
     const filtered = input.status !== undefined || input.kind !== undefined || input.since !== undefined;
     const query = {
       ...(input.status ? { status: input.status } : {}),

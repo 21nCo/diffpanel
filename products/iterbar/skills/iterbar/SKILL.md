@@ -32,7 +32,9 @@ switches between them in place, and the `iterbar` URL parameter (`?iterbar=prici
    digits, `_`, `.` or `-`, starting with a letter or digit; they must not contain `:` or `,`.
 2. Keep the current implementation as the first version, unchanged, so the user can compare against it. Write each
    new version as its own component next to it, named after the version (`PricingV2`, `PricingCompact`).
-3. Render them through the framework's Variants component, with the current version as the default:
+3. Render them through the framework's Variants component, with the current version as the default. The snippet is
+   illustrative: the framework packages are not published yet, so the project's Iterbar setup decides the exact import
+   and props; follow what the project already uses.
 
    ```tsx
    import { Variants } from "@iterbar/react";
@@ -40,8 +42,7 @@ switches between them in place, and the `iterbar` URL parameter (`?iterbar=prici
    <Variants slot="pricing" versions={{ v1: PricingV1, v2: PricingV2, v3: PricingV3 }} default="v1" />
    ```
 
-   Use the Svelte component in a Svelte app. The project's Iterbar setup decides the exact import; follow what the
-   project already uses. In production builds `Variants` renders only the default.
+   Use the Svelte component in a Svelte app. In production builds `Variants` renders only the default.
 4. Make the versions genuinely different in the dimension the user asked about (layout, density, copy, emphasis),
    and keep everything else equal so the comparison is fair. Each version must work on its own: same props, same
    data, no shared state that only one of them sets.

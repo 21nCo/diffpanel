@@ -3,11 +3,12 @@ import { z } from "zod";
 import { IterbarToolError } from "./errors.js";
 
 /**
- * How far behind the newest event a cursor's watermark stays. Items become visible to `GET /feedback` after their
- * timestamps are taken, so two near-simultaneous writes can appear out of order; events this close to the newest
- * one are remembered by key instead of being assumed seen by time.
+ * How far behind the start of the listing it was taken from a cursor's watermark stays. The store gives a write its
+ * timestamp before the write is visible to `GET /feedback`, so an event a listing did not observe can carry a timestamp
+ * up to this long before the listing started; events in this window are remembered by key instead of by time. It
+ * bounds only the time from a store write's timestamp to its commit, never how long a listing takes.
  */
-export const CURSOR_GRACE_MS = 5_000;
+export const CURSOR_GRACE_MS = 30_000;
 
 /**
  * Something a user did that an agent waits for: a new feedback item (`created`) or a user reply in an existing
@@ -58,21 +59,33 @@ export function unseenEvents(cursor: FeedbackCursor, items: readonly Feedback[])
 }
 
 /**
- * The cursor after `cursor` has also seen every event of `items`. `items` must hold every item with an event at
- * or after `cursor.watermark` (a `GET /feedback?since=<watermark>` listing does), so that nothing between the old
- * and the new watermark is skipped.
+ * A cursor for a wait that starts at `startedAt` (epoch milliseconds, taken before anything is listed or subscribed):
+ * every event from before it is seen, every later one is new. The store's timestamps are at least the wall-clock time
+ * of the write, so a write made after the call started never carries an earlier timestamp.
  */
-export function advanceCursor(cursor: FeedbackCursor, items: readonly Feedback[]): FeedbackCursor {
+export function cursorAt(startedAt: number): FeedbackCursor {
+  return { watermark: Math.max(0, Math.floor(startedAt)), seen: new Set<string>() };
+}
+
+/**
+ * The cursor after `cursor` has also seen every event of `items`, a listing that started at `listedAt` (epoch
+ * milliseconds, taken before the request was sent). `items` must hold every item with an event at or after
+ * `cursor.watermark` (a `GET /feedback?since=<watermark>` listing does).
+ *
+ * A listing is not a snapshot: the store reads one record after another, so an event committed while it ran may be
+ * missing even though a newer one on another record is present. Every event it missed was committed after the
+ * listing started, so its timestamp is at least `listedAt - CURSOR_GRACE_MS`. The watermark therefore never passes
+ * that point, however new the listed events are; the events at or after it are acknowledged by key only.
+ */
+export function advanceCursor(cursor: FeedbackCursor, items: readonly Feedback[], listedAt: number): FeedbackCursor {
   const events = items.flatMap(feedbackEvents);
-  const newest = events.reduce((latest, event) => Math.max(latest, event.at), cursor.watermark);
-  const watermark = Math.max(cursor.watermark, newest - CURSOR_GRACE_MS);
-  const seen = new Set<string>();
-  for (const key of cursor.seen) seen.add(key);
+  const watermark = Math.max(cursor.watermark, Math.floor(listedAt) - CURSOR_GRACE_MS);
+  const seen = new Set<string>(cursor.seen);
   for (const event of events) seen.add(event.key);
   // Keys older than the watermark are covered by it; only the grace window is kept by key.
-  const atOrAfter = new Map(events.map((event) => [event.key, event.at]));
+  const atOf = new Map(events.map((event) => [event.key, event.at]));
   for (const key of seen) {
-    const at = atOrAfter.get(key);
+    const at = atOf.get(key);
     if (at !== undefined && at < watermark) seen.delete(key);
   }
   return { watermark, seen };

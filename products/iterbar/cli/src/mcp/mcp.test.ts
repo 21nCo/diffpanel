@@ -291,18 +291,12 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     const { client } = await connect();
     const before = await sendFeedback(daemon);
     const waiting = ok<WaitOutput>(client, "wait_for_feedback", { timeoutSeconds: 30 });
-    let settled = false;
-    void waiting.finally(() => (settled = true));
-    // The wait may not be subscribed yet when the first item is sent; keep sending until it resolves.
-    const sent: string[] = [];
-    while (!settled && sent.length < 50) {
-      sent.push((await sendFeedback(daemon, chooseVariantDraft, false)).id);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
+    // Exactly one arrival once the call has reached the server, whether or not its event stream is open yet.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const after = await sendFeedback(daemon, chooseVariantDraft, false);
     const result = await waiting;
     expect(result.outcome).toBe("feedback");
-    expect(result.items.length).toBeGreaterThan(0);
-    for (const item of result.items) expect(sent).toContain(item.id);
+    expect(result.items.map((item) => item.id)).toEqual([after.id]);
     expect(result.items.map((item) => item.id)).not.toContain(before.id);
   });
 
@@ -394,6 +388,47 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     await expect(waiting).rejects.toThrow();
     // The server sees the cancellation and ends the wait; afterEach checks that nothing was reported.
     await new Promise((resolve) => setTimeout(resolve, 300));
+    await mcp.close();
+  });
+
+  it("times out on schedule and keeps sending progress while status changes keep arriving", async () => {
+    const daemon = await start();
+    const feedback = await sendFeedback(daemon);
+    const mcp = createIterbarMcpServer({ projectRoot: root, heartbeatMs: 100, onError: (error) => unexpected.push(error) });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await mcp.server.connect(serverTransport);
+    const client = new Client(CLIENT_INFO);
+    await client.connect(clientTransport);
+    clients.push(client);
+    const { cursor } = await ok<{ cursor: string }>(client, "list_feedback");
+
+    const progress: number[] = [];
+    const started = Date.now();
+    let settled = false;
+    const waiting = client.callTool({ name: "wait_for_feedback", arguments: { cursor, timeoutSeconds: 2 } }, undefined, {
+      onprogress: (update) => progress.push(update.progress),
+      timeout: 1000,
+      resetTimeoutOnProgress: true,
+    }).finally(() => (settled = true));
+    // Status changes from another agent, as fast as the daemon takes them, until the wait ends.
+    let changes = 0;
+    while (!settled) {
+      const status = changes++ % 2 ? "working" : "needs-info";
+      const response = await send(daemon.info, {
+        method: "POST",
+        path: `/feedback/${feedback.id}/status`,
+        headers: { ...bearer(daemon.info.token), ...json },
+        body: JSON.stringify({ schemaVersion: 1, status }),
+      });
+      expect(response.status, response.text).toBe(200);
+    }
+    const result = await waiting;
+    const elapsed = Date.now() - started;
+    expect((result.structuredContent as WaitOutput).outcome).toBe("timeout");
+    expect(elapsed).toBeGreaterThanOrEqual(2000);
+    expect(elapsed).toBeLessThan(3500);
+    expect(changes).toBeGreaterThan(10);
+    expect(progress.length).toBeGreaterThanOrEqual(10);
     await mcp.close();
   });
 

@@ -46,7 +46,8 @@ Inputs: `feedbackId`; `includeAttachments` (default `true`).
 Result: `{ feedback, attachments }`, where each attachment is `{ id, kind, mediaType, byteLength, path, inlined }`.
 With `includeAttachments`, the content also has the screenshot as an `image` block (PNG) and the evidence as a
 `resource` block (JSON text, `file://` URI of its file). Evidence larger than 1 MiB is not inlined; read the file at
-its `path` instead.
+its `path` instead. Screenshots are always inlined when attachments are requested; they can be up to the store's
+screenshot limit, so pass `includeAttachments: false` and read the `path` when you do not need the image.
 
 ## `reply`
 
@@ -73,8 +74,12 @@ Inputs: `cursor` (optional, from the previous `list_feedback` or `wait_for_feedb
 default 300, 0 to 1,800).
 
 Blocks until something new arrives after the cursor, or the timeout passes. New means a feedback item was created or
-a user replied in a thread. Agent replies and status changes are not new. Without a cursor, everything that exists
-when the call starts counts as seen.
+a user replied in a thread. Agent replies and status changes are not new. Without a cursor, everything sent before
+the call started counts as seen, and anything sent after it is new, even if it arrives before the wait is listening.
+
+The wait ends at its timeout however much else changes meanwhile; a daemon request still running then is cut short,
+and the returned cursor still covers whatever it would have found. A `timeoutSeconds` of 0 checks once and returns
+(within about a second).
 
 Result: `{ outcome, items, events, cursor }`:
 
@@ -83,6 +88,6 @@ Result: `{ outcome, items, events, cursor }`:
 - `events`: `[{ feedbackId, kind: "created" | "user_reply", at, replyId? }]`;
 - `cursor`: pass it to the next wait.
 
-A client that sends a progress token receives a progress notification about every 15 seconds while the wait lasts,
+A client that sends a progress token receives a progress notification every 15 seconds while the wait lasts,
 so clients that reset their request timeout on progress keep waiting. If the daemon stops during the wait, the call
 fails with `daemon_unavailable`; wait again with the same cursor once `iterbar dev` runs again.

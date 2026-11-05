@@ -2,8 +2,8 @@ import { daemonEventSchema, safeParseMessage, type Feedback } from "iterbar";
 import type WebSocket from "ws";
 import {
   advanceCursor,
+  cursorAt,
   cursorSince,
-  ORIGIN_CURSOR,
   unseenEvents,
   type FeedbackCursor,
   type FeedbackEvent,
@@ -18,13 +18,19 @@ export const MAX_WAIT_SECONDS = 1800;
 /** Pause before reopening an event stream that closed while the daemon kept running. */
 const RECONNECT_DELAY_MS = 250;
 
+/**
+ * The least time a wait gives its daemon requests, so that a wait with a timeout of 0 still lists once (a poll).
+ * A wait with a longer timeout aborts whatever request is in flight at its deadline.
+ */
+export const MIN_WAIT_REQUEST_MS = 1_000;
+
 export interface WaitOptions {
-  /** Where to resume; without one, everything that exists when the wait starts counts as seen. */
+  /** Where to resume; without one, every event from before the wait started counts as seen. */
   readonly cursor?: FeedbackCursor;
   readonly timeoutMs: number;
   /** Aborts the wait (the tool call was cancelled or the server is closing). */
   readonly signal: AbortSignal;
-  /** Called about every `heartbeatMs` while nothing has arrived, with the milliseconds waited so far. */
+  /** Called every `heartbeatMs` until the wait ends, with the milliseconds waited so far. */
   readonly onHeartbeat?: (elapsedMs: number) => void;
   readonly heartbeatMs?: number;
 }
@@ -86,17 +92,7 @@ class Wakeups {
   /** Resolves on an event, the stream closing, the signal, or after `ms`. */
   sleep(ms: number, signal: AbortSignal): Promise<void> {
     if (this.#pending || this.#closed || signal.aborted) return Promise.resolve();
-    return new Promise((resolve) => {
-      const done = () => {
-        clearTimeout(timer);
-        signal.removeEventListener("abort", done);
-        this.#notify = undefined;
-        resolve();
-      };
-      const timer = setTimeout(done, ms);
-      signal.addEventListener("abort", done, { once: true });
-      this.#notify = done;
-    });
+    return delay(ms, signal, (wake) => (this.#notify = wake)).finally(() => (this.#notify = undefined));
   }
 
   close(): void {
@@ -106,61 +102,85 @@ class Wakeups {
   }
 }
 
+/** Resolves after `ms`, on the signal, or when `register`'s callback is called; never rejects. */
+function delay(ms: number, signal: AbortSignal, register?: (wake: () => void) => void): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, Math.max(0, ms));
+    signal.addEventListener("abort", done, { once: true });
+    register?.(done);
+  });
+}
+
 /**
  * Waits until a user sends new feedback or replies in a thread, or the timeout passes. The event stream is open
  * before the first listing, so nothing that arrives during the wait is missed; the listing decides what is new.
  * A stream that closes is reopened when the daemon is still there (or was restarted); when it is gone, the wait
  * fails with `daemon_unavailable`.
+ *
+ * The deadline holds whatever happens meanwhile: it is checked on every turn of the loop, however many events keep
+ * arriving, and it aborts the daemon request in flight. A wait that ends at its deadline returns the cursor of its
+ * last complete listing, so nothing a cut-short listing would have found is lost.
  */
 export async function waitForFeedback(client: DaemonClient, options: WaitOptions): Promise<WaitResult> {
   const { signal, timeoutMs } = options;
-  const heartbeatMs = options.heartbeatMs ?? Number.POSITIVE_INFINITY;
+  // Taken before anything is subscribed or listed: without a cursor, what arrives from here on is new.
   const started = Date.now();
   const deadline = started + timeoutMs;
+  const expired = AbortSignal.timeout(Math.max(timeoutMs, MIN_WAIT_REQUEST_MS));
+  const requests = AbortSignal.any([signal, expired]);
   const wakeups = new Wakeups();
-  try {
-    wakeups.attach(await client.openEvents(signal));
-    let cursor = options.cursor;
-    const check = async (): Promise<WaitResult | null> => {
-      const base = cursor ?? ORIGIN_CURSOR;
-      const since = cursorSince(base);
-      const items = await client.listFeedback(since === undefined ? {} : { since }, signal);
-      const events = cursor ? unseenEvents(cursor, items) : [];
-      cursor = advanceCursor(base, items);
-      if (!events.length) return null;
-      const ids = new Set(events.map((event) => event.feedbackId));
-      return { outcome: "feedback", items: items.filter((item) => ids.has(item.id)), events, cursor };
-    };
+  let cursor = options.cursor ?? cursorAt(started);
+  const timedOut = (): WaitResult => ({ outcome: "timeout", items: [], events: [], cursor });
+  const heartbeatMs = options.heartbeatMs ?? Number.POSITIVE_INFINITY;
+  const onHeartbeat = options.onHeartbeat;
+  const heartbeat = onHeartbeat && Number.isFinite(heartbeatMs)
+    ? setInterval(() => onHeartbeat(Date.now() - started), heartbeatMs)
+    : undefined;
 
+  const check = async (): Promise<WaitResult | null> => {
+    const since = cursorSince(cursor);
+    const listedAt = Date.now();
+    const items = await client.listFeedback(since === undefined ? {} : { since }, requests);
+    const events = unseenEvents(cursor, items);
+    cursor = advanceCursor(cursor, items, listedAt);
+    if (!events.length) return null;
+    const ids = new Set(events.map((event) => event.feedbackId));
+    return { outcome: "feedback", items: items.filter((item) => ids.has(item.id)), events, cursor };
+  };
+
+  try {
+    wakeups.attach(await client.openEvents(requests));
     let result = await check();
-    let lastBeat = started;
     while (!result) {
       if (signal.aborted) throw cancelled();
+      const now = Date.now();
+      if (now >= deadline) return timedOut();
       if (wakeups.takePending()) {
         result = await check();
-        continue;
-      }
-      const now = Date.now();
-      if (now >= deadline) return { outcome: "timeout", items: [], events: [], cursor: cursor as FeedbackCursor };
-      if (wakeups.closed) {
+      } else if (wakeups.closed) {
         // Fails with daemon_unavailable when the daemon is gone; picks up a restarted daemon from daemon.json.
-        await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY_MS));
-        wakeups.attach(await client.openEvents(signal));
+        await delay(Math.min(RECONNECT_DELAY_MS, deadline - now), requests);
+        if (requests.aborted || Date.now() >= deadline) continue;
+        wakeups.attach(await client.openEvents(requests));
         result = await check();
-        continue;
+      } else {
+        await wakeups.sleep(deadline - now, signal);
       }
-      if (now - lastBeat >= heartbeatMs) {
-        lastBeat = now;
-        options.onHeartbeat?.(now - started);
-      }
-      await wakeups.sleep(Math.min(deadline - now, heartbeatMs - (now - lastBeat)), signal);
     }
     return result;
   } catch (error) {
-    // Aborting fails whichever request was in flight; that is a cancellation, not a daemon failure.
+    // Aborting fails whichever request was in flight; that is a cancellation or the deadline, not a daemon failure.
     if (signal.aborted) throw cancelled();
+    if (expired.aborted) return timedOut();
     throw error;
   } finally {
+    clearInterval(heartbeat);
     wakeups.close();
   }
 }

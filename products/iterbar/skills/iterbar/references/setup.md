@@ -23,10 +23,11 @@ tools report `daemon_unavailable` until one does.
 
 Pass `--root` with the project's absolute path whenever the agent might start the server from another directory.
 
-Claude Code, from the project root (`--scope project` writes `.mcp.json` for everyone on the project):
+Claude Code, from the project root (add `--scope project` before `iterbar` to write `.mcp.json` for everyone on the
+project instead of registering it only for you):
 
 ```bash
-claude mcp add iterbar -- iterbar mcp
+claude mcp add iterbar -- iterbar mcp --root "$PWD"
 ```
 
 Codex, in `~/.codex/config.toml`:
