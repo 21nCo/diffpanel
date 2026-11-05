@@ -304,6 +304,41 @@ describe("repeated slots and unregistering", () => {
     expect(slotOf(memory.getSnapshot(), "pricing")?.activeVersion).toBe("v3");
   });
 
+  it("keeps a version chosen with select() across handovers while the next definition has it", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The URL names the old version and cannot be rewritten; nothing is stored.
+    const stale = createVariantsRegistry({
+      environment: {
+        readSearch: () => "?iterbar=pricing:v1",
+        replaceSearch: () => {
+          throw new Error("history is read-only");
+        },
+        storage: () => null,
+      },
+    });
+    const first = stale.register({ slot: "pricing", versions: ["v1", "v2"], defaultVersion: "v1" });
+    stale.register(pricing);
+    select(stale, "pricing", "v2");
+    first();
+    expect(slotOf(stale.getSnapshot(), "pricing")?.activeVersion).toBe("v2");
+
+    // A chain of handovers whose defaults change, one of them to the selected version.
+    const chain = page().registry;
+    const handovers = ["v1", "v2", "v3"].map((defaultVersion) => chain.register({ ...pricing, defaultVersion }));
+    select(chain, "pricing", "v2");
+    handovers[0]!();
+    handovers[1]!();
+    expect(slotOf(chain.getSnapshot(), "pricing")?.activeVersion).toBe("v2");
+
+    // An explicitly selected default, which storage forgets, survives a changed default.
+    const explicit = page().registry;
+    const before = explicit.register(pricing);
+    explicit.register({ ...pricing, defaultVersion: "v2" });
+    select(explicit, "pricing", "v1");
+    before();
+    expect(slotOf(explicit.getSnapshot(), "pricing")?.activeVersion).toBe("v1");
+  });
+
   it("notifies subscribers on register, select and unregister", () => {
     const { registry } = page();
     const listener = vi.fn();

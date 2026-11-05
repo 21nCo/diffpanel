@@ -56,10 +56,9 @@ function; the snapshot reports `mounts`. Instances of one slot share its
 selection. The earliest mounted instance's versions and default define the
 slot; an instance that declares others is logged and renders its own default
 when the active version is not one of its versions. When the defining
-instance unregisters, the next one's definition applies and the slot chooses
-its version again as on its first registration (a version selected in the
-page with nothing in the URL or storage stays when the new definition has
-it), so after every instance re-registers with new versions (a hot update,
+instance unregisters, the next one's definition applies: a version chosen
+with `select()` stays while the new definition has it, and otherwise the slot
+chooses its version again as on its first registration. So after every instance re-registers with new versions (a hot update,
 for example) the slot offers the new versions. The slot leaves the snapshot when its last instance
 unregisters and chooses its version again when it next registers.
 

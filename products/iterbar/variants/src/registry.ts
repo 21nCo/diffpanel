@@ -60,6 +60,8 @@ interface SlotRecord {
   /** One entry per mounted instance, earliest first. The earliest one's definition defines the slot. */
   readonly instances: SlotInstance[];
   activeVersion: string;
+  /** Whether `select()` chose the active version in this page, as opposed to the URL, storage or default. */
+  selectedInPage: boolean;
   /** Why the active version is the default even though the URL or storage named another one. */
   warnings: RegistryWarning[];
 }
@@ -182,7 +184,9 @@ export class VariantsRegistry {
         throw new InvalidMessageError("slot definition", [`a page may register at most ${MAX_SLOTS} slots`]);
       }
       const resolved = this.#resolve(valid);
-      record = { instances: [instance], activeVersion: resolved.version, warnings: resolved.warnings };
+      record = {
+        instances: [instance], activeVersion: resolved.version, selectedInPage: false, warnings: resolved.warnings,
+      };
       this.#slots.set(valid.slot, record);
     }
     this.#notify();
@@ -214,18 +218,17 @@ export class VariantsRegistry {
   }
 
   /**
-   * After the defining instance unregisters, chooses the slot's version again for the next definition as a
-   * first registration would: the URL, then storage (an unknown version there shows the default and is
-   * reported), then the default. With neither naming the slot, a version selected in the page that the new
-   * definition still has stays active.
+   * After the defining instance unregisters, keeps a version chosen with `select()` while the next definition
+   * has it, even if remembering it failed. Otherwise the slot chooses again as a first registration would:
+   * the URL, then storage (an unknown version there shows the default and is reported), then the default.
    */
   #refreshDefinition(record: SlotRecord, previous: SlotDefinition): void {
     const definition = definitionOf(record);
     if (sameDefinition(definition, previous)) return;
+    if (record.selectedInPage && definition.versions.includes(record.activeVersion)) return;
     const resolved = this.#resolve(definition);
-    const keep = !resolved.selected && record.activeVersion !== previous.defaultVersion
-      && definition.versions.includes(record.activeVersion);
-    if (!keep) record.activeVersion = resolved.version;
+    record.activeVersion = resolved.version;
+    record.selectedInPage = false;
     record.warnings = resolved.warnings;
   }
 
@@ -261,6 +264,7 @@ export class VariantsRegistry {
     const before = JSON.stringify(this.getSnapshot());
     this.#remember(definition, version);
     record.activeVersion = version;
+    record.selectedInPage = true;
     record.warnings = [];
     if (JSON.stringify(this.getSnapshot()) !== before) this.#notify();
   }
@@ -307,16 +311,12 @@ export class VariantsRegistry {
     };
   }
 
-  /** The version the URL, storage or default selects for `definition`; `selected` when the URL or storage names the slot. */
-  #resolve(definition: SlotDefinition): { version: string; warnings: RegistryWarning[]; selected: boolean } {
+  #resolve(definition: SlotDefinition): { version: string; warnings: RegistryWarning[] } {
     for (const source of ["url", "storage"] as const) {
       const selection = this.#read(source).selections.find((entry) => entry.slot === definition.slot);
       if (!selection) continue;
-      if (definition.versions.includes(selection.version)) {
-        return { version: selection.version, warnings: [], selected: true };
-      }
+      if (definition.versions.includes(selection.version)) return { version: selection.version, warnings: [] };
       return {
-        selected: true,
         version: definition.defaultVersion,
         warnings: [warning(
           "unknown_version", source, `${selection.slot}:${selection.version}`,
@@ -325,7 +325,7 @@ export class VariantsRegistry {
         )],
       };
     }
-    return { version: definition.defaultVersion, warnings: [], selected: false };
+    return { version: definition.defaultVersion, warnings: [] };
   }
 
   #read(source: SelectionSource): ParsedVariantParam {

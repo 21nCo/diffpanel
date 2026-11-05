@@ -47,7 +47,12 @@ reads the `process` global, as React does.
 
 The entry starts with `"use client"`, so React Server Components (for
 example the Next.js App Router) can import `Variants` and `VariantsProvider`
-and render them as client components.
+and render them as client components. Their props then cross the server to
+client boundary, which carries elements but not server functions or class
+instances: in a Server Component, pass versions as elements
+(`{ v1: <PricingTable />, v2: <PricingCards /> }`) or as components from a
+`"use client"` module, and render `VariantsProvider` inside a client
+component. A client component can pass any of the version forms above.
 
 Server rendering always renders `default`; after hydration the client
 switches to the selected version.
