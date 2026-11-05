@@ -65,6 +65,12 @@ export function feedbackEvents(feedback: Feedback): FeedbackEvent[] {
   return events;
 }
 
+/** Orders strings by UTF-16 code unit, the same on every host and locale, so an encoded cursor is stable. */
+function compareText(left: string, right: string): number {
+  if (left < right) return -1;
+  return left > right ? 1 : 0;
+}
+
 /** The empty history: everything is new. */
 export const ORIGIN_CURSOR: FeedbackCursor = Object.freeze({ watermark: 0, seen: new Set<string>(), committed: 0 });
 
@@ -169,10 +175,10 @@ export async function observe(
   }
   if (cursor.seen.size > MAX_CURSOR_SEEN) {
     // Forgetting a key keeps the watermark, so the event comes back as new: a duplicate, never a loss.
-    cursor = { ...cursor, seen: new Set([...cursor.seen].sort().slice(0, MAX_CURSOR_SEEN)) };
+    cursor = { ...cursor, seen: new Set([...cursor.seen].sort(compareText).slice(0, MAX_CURSOR_SEEN)) };
   }
   const ordered = [...latest.values()].sort((left, right) =>
-    Date.parse(left.createdAt) - Date.parse(right.createdAt) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0));
+    Date.parse(left.createdAt) - Date.parse(right.createdAt) || compareText(left.id, right.id));
   return { items: ordered, events, cursor };
 }
 
@@ -185,7 +191,7 @@ export function cursorSince(cursor: FeedbackCursor): string | undefined {
 export function encodeCursor(cursor: FeedbackCursor): string {
   // An issued cursor must decode on the next call; observe() keeps every cursor the tools issue within the limit.
   if (cursor.seen.size > MAX_CURSOR_SEEN) throw new Error(`A cursor holds ${cursor.seen.size} event keys`);
-  return Buffer.from(JSON.stringify({ v: 1, w: cursor.watermark, c: cursor.committed, s: [...cursor.seen].sort() })).toString("base64url");
+  return Buffer.from(JSON.stringify({ v: 1, w: cursor.watermark, c: cursor.committed, s: [...cursor.seen].sort(compareText) })).toString("base64url");
 }
 
 export function decodeCursor(value: string): FeedbackCursor {

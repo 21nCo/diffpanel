@@ -39,7 +39,7 @@ switches between them in place, and the `iterbar` URL parameter (`?iterbar=prici
    ```tsx
    import { Variants } from "@iterbar/react";
 
-   <Variants slot="pricing" versions={{ v1: PricingV1, v2: PricingV2, v3: PricingV3 }} default="v1" />
+   <Variants slot="pricing" versions={{ v1: Pricing, v2: PricingV2, v3: PricingCompact }} default="v1" />
    ```
 
    Use the Svelte component in a Svelte app. In production builds `Variants` renders only the default.
@@ -57,9 +57,11 @@ Work in a loop, one feedback item at a time, oldest first:
 1. At the start of a session, before you have a cursor, call `list_feedback` without filters and keep its `cursor`.
    It counts everything listed as seen, so pick out what still needs you: `open` items, `working` items an earlier
    session left unfinished (handle them like open ones), and any other unresolved thread whose last reply is from the
-   user (an answer to a `needs-info` question or a follow-up; continue the thread). Afterwards, list with `status: "open"` and your latest `cursor`. A filtered
-   listing hands your cursor back unchanged, so a thread the filter hides (such as one waiting in `needs-info`) still
-   reaches you through the next wait.
+   user (an answer to a `needs-info` question or a follow-up; continue the thread).
+   To pick up what arrived while you worked, call `list_feedback` again without filters and with your latest
+   `cursor`: its `events` are exactly what is new (`created` items and `user_reply` answers), and the cursor it
+   returns moves past them. Never take work from a filtered listing: it hands your cursor back unchanged, so the next
+   wait returns its items again even after you have handled them.
 2. For each item, `get_feedback`. Use `target.sourceLocation` (project-relative `path:line:column`), the selector,
    the text excerpt, the screenshot and `activeVariants` to find exactly what the user meant. A comment applies to
    the version that was active when it was sent (`activeVariants`); change that version, not the others, unless the
@@ -73,17 +75,19 @@ Work in a loop, one feedback item at a time, oldest first:
 7. When the user says a thread is finished, or you have answered a question that needs no change, `set_status` to
    `resolved`.
 
-When the open items are handled, call `wait_for_feedback` with the latest `cursor` (from `list_feedback` or the
-previous wait). It returns when a user sends new feedback or replies in a thread:
+When nothing new is left, call `wait_for_feedback` with the latest `cursor` (from the unfiltered `list_feedback`
+or the previous wait). It returns when a user sends new feedback or replies in a thread:
 
 - `outcome: "feedback"`: handle each item in `items`; `events` says whether it is new (`created`) or has a new user
   reply (`user_reply` with its `replyId`). Continue with the returned `cursor`.
 - `outcome: "timeout"`: nothing arrived. Wait again with the returned `cursor`, or tell the user you are stopping.
 
 Always pass the most recent cursor, to `list_feedback` as well as to `wait_for_feedback`, so nothing sent while you
-were working is missed or handed to you twice. Never start over without one once you have it. Your own
-replies and status changes never end a wait. The default timeout is 300 seconds and the maximum 1,800; if your client
-gives up on long tool calls, use a shorter `timeoutSeconds` and wait again.
+were working is missed or handed to you twice. Never start over without one once you have it. A filtered
+`list_feedback` is only for looking something up; if you did act on an item it showed, skip that event when a later
+call hands it to you again. Your own replies and status changes never end a wait. The default timeout is 300
+seconds and the maximum 1,800; if your client gives up on long tool calls, use a shorter `timeoutSeconds` and wait
+again.
 
 If any tool fails with `daemon_unavailable` during the loop, the user stopped the dev server or daemon. Tell them to
 run `iterbar dev` again; keep your cursor, and continue with it once it is back. A failed wait may carry a newer

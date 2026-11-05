@@ -45,7 +45,9 @@ seen only what you were shown:
 
 - no filters, with a cursor: every listed item is shown, so the cursor moves past all of it;
 - filters, with a cursor: your cursor comes back unchanged, so events on items the filters hid (a user's answer on a
-  `needs-info` thread while you list `open` ones) are still returned by the next wait;
+  `needs-info` thread while you list `open` ones) are still returned by the next wait. So are the events of the items
+  it did show: take work from an unfiltered listing with your cursor, whose `events` say what is new, and use a
+  filtered one only to look things up;
 - without a cursor: the cursor starts now, and everything sent before the call counts as seen.
 
 ## `get_feedback`

@@ -57,7 +57,7 @@ async function run(context: ToolContext, body: () => Promise<CallToolResult>): P
 /** The reply author for this connection: the agent, named after the MCP client when it says who it is. */
 function agentAuthor(server: McpServer): ReplyAuthor {
   const name = server.server.getClientVersion()?.name?.trim().slice(0, 100);
-  return { kind: "agent", name: name ? name : null };
+  return { kind: "agent", name: name || null };
 }
 
 function attachmentsOf(feedback: Feedback): AttachmentRef[] {

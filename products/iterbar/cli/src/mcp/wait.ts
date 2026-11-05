@@ -139,79 +139,123 @@ function delay(ms: number, signal: AbortSignal, register?: (wake: () => void) =>
  * of its last complete listing, so nothing a cut-short listing would have found is lost.
  */
 export async function waitForFeedback(client: DaemonClient, options: WaitOptions): Promise<WaitResult> {
-  const { signal, timeoutMs } = options;
-  const started = Date.now();
-  const deadline = started + timeoutMs;
-  const expired = AbortSignal.timeout(Math.max(timeoutMs, MIN_WAIT_REQUEST_MS));
-  const requests = AbortSignal.any([signal, expired]);
-  const wakeups = new Wakeups();
-  let cursor = options.cursor;
-  const timedOut = (): WaitResult => ({ outcome: "timeout", items: [], events: [], cursor });
-  const heartbeatMs = options.heartbeatMs ?? Number.POSITIVE_INFINITY;
-  const onHeartbeat = options.onHeartbeat;
-  const heartbeat = onHeartbeat && Number.isFinite(heartbeatMs)
-    ? setInterval(() => onHeartbeat(Date.now() - started), heartbeatMs)
-    : undefined;
-
-  const list = (since: string | undefined, bound: AbortSignal) => client.listFeedback(since === undefined ? {} : { since }, bound);
-  /**
-   * Lists what can be new after `from`; `cursor` then covers this listing too. A listing that needs compacting found
-   * new events (an issued cursor is small, and only new events grow it), so the wait is about to return them: those
-   * extra listings are bounded by cancellation and the daemon request timeout, not the deadline, and a failure among
-   * them leaves `cursor` at `from`, which acknowledges none of them.
-   */
-  const check = async (from: FeedbackCursor, bound: AbortSignal = requests): Promise<WaitResult | null> => {
-    const observed = await observe(from, await list(cursorSince(from), bound), (since) => list(since, signal));
-    const { events } = observed;
-    cursor = observed.cursor;
-    if (!events.length) return null;
-    const ids = new Set(events.map((event) => event.feedbackId));
-    return { outcome: "feedback", items: observed.items.filter((item) => ids.has(item.id)), events, cursor: observed.cursor };
-  };
-  /** Lists again from wherever the wait has got to; a cursor always exists once the baseline is taken. */
-  const recheck = () => {
-    if (!cursor) throw new Error("waitForFeedback listed again before it had a baseline");
-    return check(cursor);
-  };
-
+  const wait = new FeedbackWait(client, options);
+  const heartbeat = startHeartbeat(options, wait.started);
   try {
-    if (!cursor) {
-      // Listed before subscribing: whatever the baseline misses is committed later and found by a later listing.
-      const baseline = baselineCursor(await client.listFeedback({}, requests));
-      const arrived = await check(baseline, signal);
-      if (arrived) return arrived;
-    }
-    wakeups.attach(await client.openEvents(requests));
-    let result = await recheck();
-    while (!result) {
-      if (signal.aborted) throw cancelled();
-      const now = Date.now();
-      if (now >= deadline) return timedOut();
-      if (wakeups.takePending()) {
-        result = await recheck();
-      } else if (wakeups.closed) {
-        // Fails with daemon_unavailable when the daemon is gone; picks up a restarted daemon from daemon.json.
-        await delay(Math.min(RECONNECT_DELAY_MS, deadline - now), requests);
-        if (requests.aborted || Date.now() >= deadline) continue;
-        wakeups.attach(await client.openEvents(requests));
-        result = await recheck();
-      } else {
-        await wakeups.sleep(deadline - now, signal);
-      }
-    }
-    return result;
+    return await wait.run();
   } catch (error) {
-    // Aborting fails whichever request was in flight; that is a cancellation or the deadline, not a daemon failure.
-    if (signal.aborted) throw cancelled();
-    if (error instanceof IterbarToolError) {
-      // The agent resumes from here once the daemon is back, instead of starting over past what arrived meanwhile.
-      if (!cursor) throw error;
-      throw new IterbarToolError(error.code, error.message, { cause: error, details: { cursor: encodeCursor(cursor) } });
-    }
-    if (expired.aborted) return timedOut();
-    throw error;
+    if (wait.expired.aborted && !options.signal.aborted && !(error instanceof IterbarToolError)) return wait.timedOut();
+    throw waitFailure(error, options.signal, wait.cursor);
   } finally {
     clearInterval(heartbeat);
-    wakeups.close();
+    wait.wakeups.close();
   }
+}
+
+/** The state of one wait: its deadline, its event stream, and the cursor of its last complete listing. */
+class FeedbackWait {
+  readonly started = Date.now();
+  readonly deadline: number;
+  readonly signal: AbortSignal;
+  /** Aborts at the deadline (at least {@link MIN_WAIT_REQUEST_MS} after the start). */
+  readonly expired: AbortSignal;
+  /** Bounds the daemon requests that obey the deadline. */
+  readonly requests: AbortSignal;
+  readonly wakeups = new Wakeups();
+  cursor: FeedbackCursor | undefined;
+
+  constructor(private readonly client: DaemonClient, options: WaitOptions) {
+    this.deadline = this.started + options.timeoutMs;
+    this.signal = options.signal;
+    this.expired = AbortSignal.timeout(Math.max(options.timeoutMs, MIN_WAIT_REQUEST_MS));
+    this.requests = AbortSignal.any([this.signal, this.expired]);
+    this.cursor = options.cursor;
+  }
+
+  timedOut(): WaitResult {
+    return { outcome: "timeout", items: [], events: [], cursor: this.cursor };
+  }
+
+  async run(): Promise<WaitResult> {
+    if (!this.cursor) {
+      // Listed before subscribing: whatever the baseline misses is committed later and found by a later listing.
+      const baseline = baselineCursor(await this.client.listFeedback({}, this.requests));
+      const arrived = await this.check(baseline, this.signal);
+      if (arrived) return arrived;
+    }
+    this.wakeups.attach(await this.client.openEvents(this.requests));
+    let result = await this.recheck();
+    while (!result) {
+      if (this.signal.aborted) throw cancelled();
+      const now = Date.now();
+      if (now >= this.deadline) return this.timedOut();
+      result = await this.next(now);
+    }
+    return result;
+  }
+
+  /** One turn of the loop: list again after an event or a reopened stream, else sleep until something happens. */
+  private async next(now: number): Promise<WaitResult | null> {
+    if (this.wakeups.takePending()) return this.recheck();
+    if (!this.wakeups.closed) {
+      await this.wakeups.sleep(this.deadline - now, this.signal);
+      return null;
+    }
+    // Fails with daemon_unavailable when the daemon is gone; picks up a restarted daemon from daemon.json.
+    await delay(Math.min(RECONNECT_DELAY_MS, this.deadline - now), this.requests);
+    if (this.requests.aborted || Date.now() >= this.deadline) return null;
+    this.wakeups.attach(await this.client.openEvents(this.requests));
+    return this.recheck();
+  }
+
+  /** Lists what can be new after `from` (see {@link checkFrom}); the cursor then covers this listing too. */
+  private async check(from: FeedbackCursor, bound: AbortSignal = this.requests): Promise<WaitResult | null> {
+    const checked = await checkFrom(this.client, from, bound, this.signal);
+    this.cursor = checked.cursor;
+    return checked.result;
+  }
+
+  /** Lists again from wherever the wait has got to; a cursor always exists once the baseline is taken. */
+  private recheck(): Promise<WaitResult | null> {
+    if (!this.cursor) throw new Error("waitForFeedback listed again before it had a baseline");
+    return this.check(this.cursor);
+  }
+}
+
+/** Calls `onHeartbeat` every `heartbeatMs` from now on, with the milliseconds since `started`. */
+function startHeartbeat(options: WaitOptions, started: number): ReturnType<typeof setInterval> | undefined {
+  const { onHeartbeat, heartbeatMs } = options;
+  if (!onHeartbeat || heartbeatMs === undefined || !Number.isFinite(heartbeatMs)) return undefined;
+  return setInterval(() => onHeartbeat(Date.now() - started), heartbeatMs);
+}
+
+/**
+ * Lists what can be new after `from`, bounded by `bound`, and observes it. A listing that needs compacting found new
+ * events (an issued cursor is small, and only new events grow it), so the wait is about to return them: those extra
+ * listings are bounded by `signal` (cancellation) and the daemon request timeout, not the deadline, and a failure
+ * among them throws before any cursor is returned, which leaves the wait at `from` and acknowledges none of them.
+ */
+async function checkFrom(
+  client: DaemonClient,
+  from: FeedbackCursor,
+  bound: AbortSignal,
+  signal: AbortSignal,
+): Promise<{ result: WaitResult | null; cursor: FeedbackCursor }> {
+  const list = (since: string | undefined, by: AbortSignal) => client.listFeedback(since === undefined ? {} : { since }, by);
+  const observed = await observe(from, await list(cursorSince(from), bound), (since) => list(since, signal));
+  const { events, cursor } = observed;
+  if (!events.length) return { result: null, cursor };
+  const ids = new Set(events.map((event) => event.feedbackId));
+  return { result: { outcome: "feedback", items: observed.items.filter((item) => ids.has(item.id)), events, cursor }, cursor };
+}
+
+/**
+ * What a wait that did not time out throws. Aborting fails whichever request was in flight; that is a cancellation,
+ * not a daemon failure. A tool error carries the wait's cursor so that the agent resumes from here once the daemon is
+ * back, instead of starting over past what arrived meanwhile.
+ */
+function waitFailure(error: unknown, signal: AbortSignal, cursor: FeedbackCursor | undefined): unknown {
+  if (signal.aborted) return cancelled();
+  if (!(error instanceof IterbarToolError) || !cursor) return error;
+  return new IterbarToolError(error.code, error.message, { cause: error, details: { cursor: encodeCursor(cursor) } });
 }

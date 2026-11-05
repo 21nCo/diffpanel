@@ -368,6 +368,31 @@ describe("wait_for_feedback", { timeout: 60_000 }, () => {
     expect(quiet).toMatchObject({ outcome: "timeout", items: [] });
   });
 
+  it("follows the skill's loop without handing over handled work again, unlike a filtered listing", async () => {
+    const daemon = await start();
+    const { client } = await connect();
+    const session = await ok<{ cursor: string }>(client, "list_feedback");
+    const arrived = await sendFeedback(daemon);
+
+    // A filtered listing shows the new item but hands the cursor back unchanged: the next wait returns it again.
+    const filtered = await ok<{ items: Feedback[]; cursor: string }>(client, "list_feedback", { status: "open", cursor: session.cursor });
+    expect(filtered).toEqual({ items: [expect.objectContaining({ id: arrived.id })], cursor: session.cursor });
+
+    // The skill takes work from an unfiltered listing with the cursor, whose events say what is new.
+    const pickup = await ok<{ items: Feedback[]; events: WaitOutput["events"]; cursor: string }>(client, "list_feedback", {
+      cursor: session.cursor,
+    });
+    expect(pickup.events).toEqual([expect.objectContaining({ feedbackId: arrived.id, kind: "created" })]);
+    await ok(client, "set_status", { feedbackId: arrived.id, status: "working" });
+    await ok(client, "reply", { feedbackId: arrived.id, text: "Made the button larger." });
+    await ok(client, "set_status", { feedbackId: arrived.id, status: "done" });
+
+    const quiet = await ok<WaitOutput>(client, "wait_for_feedback", { cursor: pickup.cursor, timeoutSeconds: 1 });
+    expect(quiet).toMatchObject({ outcome: "timeout", items: [], events: [] });
+    const repeated = await ok<WaitOutput>(client, "wait_for_feedback", { cursor: filtered.cursor, timeoutSeconds: 0 });
+    expect(repeated.events).toEqual([expect.objectContaining({ feedbackId: arrived.id, kind: "created" })]);
+  });
+
   it("fails with daemon_unavailable when the daemon stops during the wait", async () => {
     const daemon = await start();
     const { client } = await connect();

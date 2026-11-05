@@ -20,4 +20,11 @@ mkdir -p "$HOME/.claude/skills"
 ln -s "$PWD/products/iterbar/skills/iterbar" "$HOME/.claude/skills/iterbar"
 ```
 
+For Cursor (which also loads skills from the two directories above):
+
+```bash
+mkdir -p "$HOME/.cursor/skills"
+ln -s "$PWD/products/iterbar/skills/iterbar" "$HOME/.cursor/skills/iterbar"
+```
+
 A symlink keeps the installed skill in step with the checkout.
