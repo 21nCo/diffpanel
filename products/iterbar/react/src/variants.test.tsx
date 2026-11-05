@@ -328,6 +328,88 @@ describe("markup in development", () => {
   });
 });
 
+describe("nested slots", () => {
+  function Inner() {
+    return <Variants slot="inner" versions={{ a: <p>Inner A</p>, b: <p>Inner B</p> }} default="a" />;
+  }
+
+  /** Lets the range observers, which run as microtasks after each commit, settle before asserting. */
+  async function settle() {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+
+  function marks(container: ParentNode) {
+    return { inner: roots(container, "inner"), outer: roots(container, "outer") };
+  }
+
+  const nestings: { name: string; versions: Record<string, ReactNode | typeof Inner>; own: string[] }[] = [
+    { name: "a component-type version", versions: { v1: Inner, v2: <p>Outer two</p> }, own: [] },
+    {
+      name: "a fragment version",
+      versions: { v1: <><Inner /><p>Outer one</p></>, v2: <p>Outer two</p> },
+      own: ["Outer one"],
+    },
+  ];
+
+  it.each(nestings)("keeps each slot's marks when an inner slot is the top level of $name", async ({ versions, own }) => {
+    const errors = collectErrors();
+    const { container, unmount } = render(
+      <StrictMode><div><Variants slot="outer" versions={versions} default="v1" /></div></StrictMode>,
+    );
+    await settle();
+    expect(marks(container)).toEqual({ inner: ["Inner A"], outer: own });
+
+    select("inner", "b");
+    await settle();
+    expect(marks(container)).toEqual({ inner: ["Inner B"], outer: own });
+
+    select("outer", "v2");
+    await settle();
+    expect(marks(container)).toEqual({ inner: [], outer: ["Outer two"] });
+    expect(slots().map((state) => state.slot)).toEqual(["outer"]);
+
+    select("outer", "v1");
+    await settle();
+    expect(marks(container)).toEqual({ inner: ["Inner B"], outer: own });
+
+    const elements = [...container.querySelectorAll("p")];
+    unmount();
+    expect(elements.filter((element) => element.hasAttribute("data-iterbar-slot"))).toEqual([]);
+    expect(slots()).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it("keeps the outer slot's marks while an inner slot mounts and unmounts inside the same version", async () => {
+    function Toggle() {
+      const [shown, setShown] = useState(false);
+      return (
+        <>
+          {shown ? <Inner /> : null}
+          <button type="button" onClick={() => setShown(!shown)}>toggle</button>
+        </>
+      );
+    }
+    const { container } = render(<div><Variants slot="outer" versions={{ v1: Toggle }} default="v1" /></div>);
+    await settle();
+    expect(marks(container)).toEqual({ inner: [], outer: ["toggle"] });
+
+    act(() => screen.getByRole("button").click());
+    await settle();
+    expect(marks(container)).toEqual({ inner: ["Inner A"], outer: ["toggle"] });
+
+    select("inner", "b");
+    await settle();
+    expect(marks(container)).toEqual({ inner: ["Inner B"], outer: ["toggle"] });
+
+    act(() => screen.getByRole("button").click());
+    await settle();
+    expect(marks(container)).toEqual({ inner: [], outer: ["toggle"] });
+    expect(slots().map((state) => state.slot)).toEqual(["outer"]);
+  });
+});
+
 describe("in production", () => {
   beforeEach(() => {
     vi.stubEnv("NODE_ENV", "production");

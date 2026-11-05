@@ -31,6 +31,11 @@ version whose output has no element (plain text, `null`) has nothing to mark.
 The templates are elements, so in development they count for structural
 selectors such as `:first-child`.
 
+Slots can nest. The templates carry `data-iterbar-slot-boundary="start"` and
+`"end"`, and a slot skips everything between a nested slot's templates, so a
+`Variants` rendered at the top level of another slot's version keeps its own
+marks: each element is marked with the innermost slot that renders it.
+
 In production `Variants` renders the `default` version only: no templates, no
 marks, no registry and no `window.__ITERBAR__`. Your bundler must replace
 `process.env.NODE_ENV`, as it already must for React; without that

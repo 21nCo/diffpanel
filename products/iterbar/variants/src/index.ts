@@ -15,7 +15,13 @@ export {
   type VariantsEnvironment,
   type VariantStorage,
 } from "./environment.js";
-export { markSlotRange, markSlotRoot, slotRootAttributes } from "./slot-root.js";
+export {
+  markSlotRange,
+  markSlotRoot,
+  SLOT_BOUNDARY_ATTRIBUTE,
+  slotBoundaryAttributes,
+  slotRootAttributes,
+} from "./slot-root.js";
 export {
   PAGE_API_GLOBAL,
   SLOT_ATTRIBUTE,

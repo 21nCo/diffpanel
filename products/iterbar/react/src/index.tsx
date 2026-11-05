@@ -1,6 +1,7 @@
 import {
   getVariantsRegistry,
   markSlotRange,
+  slotBoundaryAttributes,
   validateSlotDefinition,
   type VariantsRegistry,
 } from "@iterbar/variants";
@@ -86,7 +87,8 @@ function renderVersion(versions: Readonly<Record<string, VersionContent>>, versi
  * (`?iterbar=pricing:v2`), then local storage, then `default`, and the bar can switch it in place through
  * `window.__ITERBAR__`. The version's top-level elements are marked with `data-iterbar-slot`; empty
  * `<template>` elements before and after it delimit the slot, so it adds no wrapper and stays valid inside
- * `<p>`, `<ul>` and `<tbody>`. In production it renders `default` only, with no markers and no registry.
+ * `<p>`, `<ul>` and `<tbody>`. A slot rendered at the top level of another slot's version keeps its own marks:
+ * each element is marked with the innermost slot that renders it. In production it renders `default` only, with no markers and no registry.
  */
 export function Variants<Versions extends Readonly<Record<string, VersionContent>>>(
   props: VariantsProps<Versions>,
@@ -94,6 +96,9 @@ export function Variants<Versions extends Readonly<Record<string, VersionContent
   if (!isDevelopment()) return <>{renderVersion(props.versions, props.default)}</>;
   return <DevelopmentVariants {...props} />;
 }
+
+const START_BOUNDARY = slotBoundaryAttributes("start");
+const END_BOUNDARY = slotBoundaryAttributes("end");
 
 function DevelopmentVariants<Versions extends Readonly<Record<string, VersionContent>>>({
   slot,
@@ -126,9 +131,9 @@ function DevelopmentVariants<Versions extends Readonly<Record<string, VersionCon
 
   return (
     <>
-      <template ref={start} />
+      <template ref={start} {...START_BOUNDARY} />
       <Fragment key={activeVersion}>{renderVersion(versions, activeVersion)}</Fragment>
-      <template ref={end} />
+      <template ref={end} {...END_BOUNDARY} />
     </>
   );
 }

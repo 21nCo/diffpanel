@@ -17,6 +17,7 @@ const unregister = registry.register(definition);
 const unmark = markSlotRoot(element, "pricing"); // data-iterbar-slot="pricing"
 // Or mark every element between two boundary nodes, following later changes:
 const unmarkRange = markSlotRange(startTemplate, endTemplate, "pricing");
+// Give the boundaries slotBoundaryAttributes("start") and ("end") so an enclosing range skips this one.
 const stop = registry.subscribe(() => render(registry.activeVersion(definition)));
 ```
 

@@ -13,6 +13,7 @@ import {
   installPageApi,
   markSlotRoot,
   MAX_SLOTS,
+  slotBoundaryAttributes,
   slotRootAttributes,
   withVariantParam,
   type SlotDefinition,
@@ -434,5 +435,6 @@ describe("browser helpers", () => {
     unmark();
     expect(attributes.size).toBe(0);
     expect(slotRootAttributes("pricing")).toEqual({ "data-iterbar-slot": "pricing" });
+    expect(slotBoundaryAttributes("start")).toEqual({ "data-iterbar-slot-boundary": "start" });
   });
 });

@@ -16,10 +16,44 @@ export function markSlotRoot(element: Element, slot: string): () => void {
 const ELEMENT_NODE = 1;
 
 /**
+ * Attribute on the boundary nodes of a slot range, `start` or `end`. A range skips every node between a
+ * nested range's boundaries, so each element belongs to the innermost slot whose range contains it.
+ */
+export const SLOT_BOUNDARY_ATTRIBUTE = "data-iterbar-slot-boundary";
+
+/** Attributes for the first (`start`) or last (`end`) boundary node of a slot range. */
+export function slotBoundaryAttributes(edge: "start" | "end"): { readonly [SLOT_BOUNDARY_ATTRIBUTE]: string } {
+  return { [SLOT_BOUNDARY_ATTRIBUTE]: edge };
+}
+
+function boundaryEdge(node: Node): string | null {
+  return node.nodeType === ELEMENT_NODE ? (node as Element).getAttribute(SLOT_BOUNDARY_ATTRIBUTE) : null;
+}
+
+/** The elements a range owns: its top-level elements outside nested ranges, without templates. */
+function rangeElements(start: Node, end: Node): Set<Element> {
+  const owned = new Set<Element>();
+  if (!start.parentNode || start.parentNode !== end.parentNode) return owned;
+  let depth = 0;
+  for (let node = start.nextSibling; node && node !== end; node = node.nextSibling) {
+    const edge = boundaryEdge(node);
+    if (edge === "start") depth += 1;
+    else if (edge === "end") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && node.nodeType === ELEMENT_NODE && (node as Element).localName !== "template") {
+      owned.add(node as Element);
+    }
+  }
+  return owned;
+}
+
+/**
  * Marks every element between the sibling nodes `start` and `end` (exclusive) as a root of `slot`, and keeps
  * the marks current while elements in that range are added, removed or replaced. `<template>` elements are
  * skipped, so the boundaries themselves can be templates, which HTML and React allow inside `<p>`, `<ul>`,
- * `<table>`, `<tbody>` and `<tr>`. Text nodes cannot carry the attribute and are left unmarked. Returns a
+ * `<table>`, `<tbody>` and `<tr>`. Text nodes cannot carry the attribute and are left unmarked.
+ *
+ * Ranges may nest: when `start` and `end` carry {@link slotBoundaryAttributes}, an enclosing range skips the
+ * nodes between them, so the inner slot keeps its marks whichever range marks or updates first. Returns a
  * function that stops observing and removes the marks it set.
  */
 export function markSlotRange(start: Node, end: Node, slot: string): () => void {
@@ -29,13 +63,7 @@ export function markSlotRange(start: Node, end: Node, slot: string): () => void 
     marked.delete(element);
   };
   const update = () => {
-    const current = new Set<Element>();
-    if (start.parentNode && start.parentNode === end.parentNode) {
-      for (let node = start.nextSibling; node && node !== end; node = node.nextSibling) {
-        const element = node as Element;
-        if (node.nodeType === ELEMENT_NODE && element.localName !== "template") current.add(element);
-      }
-    }
+    const current = rangeElements(start, end);
     for (const element of [...marked]) if (!current.has(element)) unmark(element);
     for (const element of current) {
       element.setAttribute(SLOT_ATTRIBUTE, slot);
