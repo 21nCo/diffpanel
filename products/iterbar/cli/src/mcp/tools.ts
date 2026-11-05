@@ -76,13 +76,15 @@ function describeEvents(events: readonly FeedbackEvent[]) {
 /**
  * How an agent recognises an event it already handled. Delivery is at least once: when a cursor cannot keep every key
  * (a very large burst, or a wait whose timeout cut its compaction short), it keeps its watermark and forgets keys, so
- * events come back rather than being skipped. Shared by the server instructions and the tool descriptions.
+ * events come back rather than being skipped. Only the event's own id proves it was handled: a later agent reply does
+ * not, since a user may have replied while the agent worked. Shared by the server instructions and tool descriptions.
  */
 export const HANDLED_EVENT_RULE =
   "Events are delivered at least once: after a very large burst, or when a wait's timeout cuts its cursor upkeep " +
-  "short, an event you already got can come back. Before acting on an event, read the item's replies: skip a created " +
-  "event when the thread already has an agent reply, and a user_reply event when an agent reply comes after the reply " +
-  "with that replyId. A user reply that comes after your last reply is always new.";
+  "short, an event you already got can come back. A created event is identified by its feedbackId and a user_reply " +
+  "event by its replyId: remember the ones you have handled (a user reply you read and answered counts) and skip an " +
+  "event you already handled. Any other event is new, including a user reply that arrived while you were working, " +
+  "even when your own reply now comes after it.";
 
 const cursorInput = z.string().max(1_000_000).optional();
 

@@ -101,9 +101,9 @@ call, however much feedback arrived: after a large burst, the tool lists a few m
 Events are delivered at least once, by `list_feedback` and `wait_for_feedback` alike. When those extra listings still
 leave too much (feedback committed faster than the daemon lists it), or a wait's timeout cuts them short, the cursor
 keeps its position but forgets which recent events it returned, so some of them can be handed over again; none is
-skipped. Before acting on an event, read the item's `replies`: skip a `created` event when the thread already has an
-agent reply, and a `user_reply` event when an agent reply comes after the reply with that `replyId`. A user reply that
-comes after your last reply is always new.
+skipped. A `created` event is identified by its `feedbackId` and a `user_reply` event by its `replyId`: remember the
+ones you have handled (a user reply you read and answered counts) and skip an event you already handled. Any other
+event is new, including a user reply that arrived while you were working, even when your own reply now comes after it.
 
 The wait ends at its timeout however much else changes meanwhile: every daemon request it makes, including both
 baseline listings and the extra listings after a burst, is cut short at the timeout. The returned cursor stays at the

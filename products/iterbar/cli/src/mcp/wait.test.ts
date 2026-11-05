@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { baselineCursor, cursorAfter, decodeCursor, encodeCursor, MAX_CURSOR_SEEN, type FeedbackCursor } from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { daemonUnavailable, IterbarToolError } from "./errors.js";
-import { alreadyHandled } from "./test-support/delivery.js";
+import { eventId } from "./test-support/delivery.js";
 import { feedbackItem, type ReplySpec } from "./test-support/feedback.js";
 import { MIN_WAIT_REQUEST_MS, waitForFeedback, type WaitOptions, type WaitResult } from "./wait.js";
 
@@ -433,7 +433,7 @@ describe("waitForFeedback after a burst", { timeout: 30_000 }, () => {
     expect(quiet).toBe(true);
   });
 
-  it("hands over a deadline-cut burst again, and the documented rule acts on none of it but on a newer user reply", async () => {
+  it("hands over a deadline-cut burst again; the documented rule acts on no replay but on every reply it has not handled", async () => {
     const replies = (extra: ReplySpec[]) => feedbackItem("feedback-a", base, [
       ...Array.from({ length: count }, (_, index) => [`reply-${String(index).padStart(5, "0")}`, "user", base + 1_000 + index] as const),
       ...extra,
@@ -446,31 +446,39 @@ describe("waitForFeedback after a burst", { timeout: 30_000 }, () => {
       if (++listings > 1 && !answering.now) await Promise.race([pause(4_000), hang(signal)]);
       return items;
     });
-    /** The events of a result an agent following the documented rule acts on. */
-    const actOn = (result: WaitResult) => result.events.filter((event) =>
-      !alreadyHandled(result.items.find((item) => item.id === event.feedbackId)!, event));
+    // The agent remembers the events it handled by the documented id and acts on every other one.
+    const handled = new Set<string>();
+    const actOn = (result: WaitResult) => {
+      const acted = result.events.filter((event) => !handled.has(eventId(event))).map((event) => event.key);
+      result.events.forEach((event) => handled.add(eventId(event)));
+      return acted;
+    };
 
     const burst = await wait(client, { cursor: cursorAfter([a], [a]), timeoutMs: 300 });
     const delivered = new Set(burst.events.map((event) => event.key));
     expect([delivered.size, actOn(burst).length]).toEqual([count, count]);
-    // The agent answers the burst, then follows the documented loop with the cursors the waits return.
-    items = [replies([["reply-agent", "agent", base + 1_000 + count]])];
+    // While the agent works, the user follows up; the agent's answer to the burst lands after that follow-up.
+    items = [replies([["reply-during", "user", base + 1_000 + count], ["reply-agent", "agent", base + 1_001 + count]])];
     answering.now = true;
     let cursor = decodeCursor(encodeCursor(burst.cursor!));
     let replayed = 0;
-    for (let turn = 0; turn < 3; turn += 1) {
+    const acted: string[] = [];
+    for (let turn = 0; turn < 4; turn += 1) {
       const next = await wait(client, { cursor, timeoutMs: 0 });
-      next.events.forEach((event) => expect(delivered.has(event.key)).toBe(true));
-      replayed += next.events.length;
-      expect(actOn(next)).toEqual([]);
+      replayed += next.events.filter((event) => delivered.has(event.key)).length;
+      acted.push(...actOn(next));
       cursor = decodeCursor(encodeCursor(next.cursor!));
       if (next.outcome === "timeout") break;
     }
     expect(replayed).toBeGreaterThan(0);
-    // A user reply after the agent's is new on the same thread, and the rule acts on it.
-    items = [replies([["reply-agent", "agent", base + 1_000 + count], ["reply-later", "user", base + 2_000 + count]])];
+    // No replay is acted on again, and the follow-up the agent's reply now comes after is acted on, once.
+    expect(acted).toEqual(["reply:reply-during"]);
+    items = [replies([
+      ["reply-during", "user", base + 1_000 + count], ["reply-agent", "agent", base + 1_001 + count],
+      ["reply-later", "user", base + 2_000 + count],
+    ])];
     const later = await wait(client, { cursor, timeoutMs: 1_000 });
-    expect(actOn(later).map((event) => event.key)).toEqual(["reply:reply-later"]);
+    expect(actOn(later)).toEqual(["reply:reply-later"]);
   });
 
   it("is cancelled, not timed out, when its call is cancelled while it compacts", async () => {

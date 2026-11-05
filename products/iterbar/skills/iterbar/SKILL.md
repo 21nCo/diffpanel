@@ -88,13 +88,11 @@ looking something up. Your own replies and status changes never end a wait. The 
 the maximum 1,800; if your client gives up on long tool calls, use a shorter `timeoutSeconds` and wait again.
 
 Events are delivered at least once: after a very large burst, or when a wait's timeout cuts its cursor upkeep short,
-an event you already got can come back, from either tool. Before acting on an event, read the item's `replies`:
-
-- skip a `created` event when the thread already has an agent reply;
-- skip a `user_reply` event when an agent reply comes after the reply with that `replyId`.
-
-A user reply that comes after your last reply is always new; handle it. The same check covers an item you acted on
-after a filtered lookup showed it.
+an event you already got can come back, from either tool. A `created` event is identified by its `feedbackId` and a
+`user_reply` event by its `replyId`: remember the ones you have handled (a user reply you read and answered counts)
+and skip an event you already handled. Any other event is new, including a user reply that arrived while you were
+working, even when your own reply now comes after it: read the thread with `get_feedback` and handle it. The same
+check covers an item you acted on after a filtered lookup showed it.
 
 If any tool fails with `daemon_unavailable` during the loop, the user stopped the dev server or daemon. Tell them to
 run `iterbar dev` again; keep your cursor, and continue with it once it is back. A failed wait may carry a newer
