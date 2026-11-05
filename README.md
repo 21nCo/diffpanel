@@ -37,7 +37,7 @@ pnpm validate
 
 ## Publishing packages
 
-Public packages are released by pushing a package-specific version tag in the form `<slug>-v<version>`. The **Publish tagged package** workflow resolves the slug through `release-packages.json`, checks that the tag matches the package's exact `package.json` version, builds and tests that package, verifies its tarball in a clean consumer and publishes it with the `NPM_TOKEN` secret. Prerelease versions (for example `0.1.0-beta.1`) publish under the `next` dist-tag.
+Public packages are released by pushing a package-specific version tag in the form `<slug>-v<version>`. The **Publish tagged package** workflow resolves the slug through `release-packages.json`, checks that the tag matches the package's exact `package.json` version, builds and tests that package, verifies its tarball in a clean consumer, then hands that tarball to a separate publish job that publishes it through npm trusted publishing (OIDC). Each package's trusted publisher on npm points at `21nCo/devroll` and `publish-tag.yml`. The `NPM_TOKEN` secret remains only as a fallback for a package's first release, before its trusted publisher can be added. Prerelease versions (for example `0.1.0-beta.1`) publish under the `next` dist-tag.
 
 ```bash
 git tag devroll-v0.0.1
