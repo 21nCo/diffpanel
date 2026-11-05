@@ -55,9 +55,12 @@ switches between them in place, and the `iterbar` URL parameter (`?iterbar=prici
 Work in a loop, one feedback item at a time, oldest first:
 
 1. At the start of a session, before you have a cursor, call `list_feedback` without filters and keep its `cursor`.
-   It counts everything listed as seen, so pick out what still needs you: `open` items, `working` items an earlier
-   session left unfinished (handle them like open ones), and any other unresolved thread whose last reply is from the
-   user (an answer to a `needs-info` question or a follow-up; continue the thread).
+   A listing without a cursor counts everything sent before it as seen, so at the start of a session read every item
+   that is not resolved with `get_feedback`, done ones included: handle `open` and `working` items (an earlier session
+   left those unfinished), and answer any user reply that no later agent reply answers, judged by what the replies
+   say, not by who wrote last. A user may have replied after an earlier session read the thread and before it
+   replied; that reply comes before the agent's, yet nobody has answered it. A thread whose user replies are all
+   answered needs nothing.
    To pick up what arrived while you worked, call `list_feedback` again without filters and with your latest
    `cursor`: its `events` say what arrived since that cursor (`created` items and `user_reply` answers), and the
    cursor it returns moves past them. Never take work from a filtered listing: it hands your cursor back unchanged,
@@ -69,9 +72,11 @@ Work in a loop, one feedback item at a time, oldest first:
    read it when the comment is about broken behavior.
 3. `set_status` to `working` before you change code.
 4. Make the change. Keep it scoped to what the comment asks.
-5. `reply` with what you changed in a sentence or two (file and version), then `set_status` to `done`.
+5. Right before you reply and set a thread done or needs-info, read it again with `get_feedback` so your reply
+   covers every user reply in it. Then `reply` with what you changed in a sentence or two (file and version), and
+   `set_status` to `done`.
 6. When the comment is ambiguous, `reply` with one specific question and `set_status` to `needs-info` instead of
-   guessing. Their answer arrives as a user reply in the same thread.
+   guessing (read the thread again first, as above). Their answer arrives as a user reply in the same thread.
 7. When the user says a thread is finished, or you have answered a question that needs no change, `set_status` to
    `resolved`.
 
@@ -80,7 +85,10 @@ or the previous wait). It returns when a user sends new feedback or replies in a
 
 - `outcome: "feedback"`: handle each item in `items`; `events` says whether it is new (`created`) or has a new user
   reply (`user_reply` with its `replyId`). Continue with the returned `cursor`.
-- `outcome: "timeout"`: nothing arrived. Wait again with the returned `cursor`, or tell the user you are stopping.
+- `outcome: "timeout"`: nothing arrived. Wait again with the returned `cursor`, or stop.
+
+Before you stop, call `list_feedback` without filters and with your latest cursor once more, and handle what it
+returns: a user reply sent after you last read a thread arrives there. Then tell the user you are stopping.
 
 Always pass the most recent cursor, to `list_feedback` as well as to `wait_for_feedback`, so nothing sent while you
 were working is missed. Never start over without one once you have it. A filtered `list_feedback` is only for

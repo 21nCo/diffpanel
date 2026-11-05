@@ -45,10 +45,15 @@ export const MAX_CURSOR_SEEN = 5_000;
 /** Extra listings {@link observe} makes to compact a cursor before it falls back to forgetting keys. */
 export const MAX_COMPACTIONS = 3;
 
+/** The latest time a JavaScript `Date` can hold, in milliseconds; a cursor's watermark and commit time are at most this. */
+export const MAX_CURSOR_TIME_MS = 8_640_000_000_000_000;
+
+const cursorTime = z.number().int().nonnegative().max(MAX_CURSOR_TIME_MS);
+
 const encodedCursorSchema = z.object({
   v: z.literal(1),
-  w: z.number().int().nonnegative(),
-  c: z.number().int().nonnegative(),
+  w: cursorTime,
+  c: cursorTime,
   s: z.array(z.string().min(1).max(256)).max(MAX_CURSOR_SEEN),
 });
 
@@ -198,8 +203,8 @@ export function encodeCursor(cursor: FeedbackCursor): string {
 
 /**
  * The cursor an agent passed back. Validation is structural: anything that is not a well-formed cursor within the
- * issued size limits is refused as `invalid_request`. It does not prove that a tool issued the value; a hand-made
- * cursor only changes what that agent's own calls report as new.
+ * issued size limits, or whose times a `Date` cannot hold, is refused as `invalid_request`. It does not prove that a
+ * tool issued the value; a hand-made cursor only changes what that agent's own calls report as new.
  */
 export function decodeCursor(value: string): FeedbackCursor {
   let json: unknown;

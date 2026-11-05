@@ -86,6 +86,21 @@ export const HANDLED_EVENT_RULE =
   "event you already handled. Any other event is new, including a user reply that arrived while you were working, " +
   "even when your own reply now comes after it.";
 
+/**
+ * What still needs the agent when a session starts or ends. A listing without a cursor counts everything as seen, and
+ * who wrote a thread's last reply does not show whether an earlier user reply was read: a user can reply between the
+ * agent's get_feedback and its reply, and the session can end before a cursor call returns that reply. So a session
+ * starts by reading every unresolved thread, re-reads a thread right before finishing it, and makes one more unfiltered
+ * cursor call before it stops. Shared by the server instructions and tool descriptions.
+ */
+export const SESSION_RULE =
+  "A listing without a cursor counts everything sent before it as seen, so at the start of a session read every item " +
+  "that is not resolved with get_feedback, done ones included: handle open and working items, and answer any user " +
+  "reply that no later agent reply answers, judged by what the replies say, not by who wrote last. Right before you " +
+  "reply and set a thread done or needs-info, read it again with get_feedback so your reply covers every user reply " +
+  "in it. Before you stop, call list_feedback without filters and with your latest cursor once more, and handle what " +
+  "it returns.";
+
 const cursorInput = z.string().max(1_000_000).optional();
 
 const feedbackId = idSchema.describe("The feedback item's id, as returned by list_feedback or wait_for_feedback.");
@@ -102,8 +117,7 @@ export function registerTools(context: ToolContext): void {
       "wait_for_feedback. Pass your latest cursor in: without filters, the result says what is new since that cursor " +
       "and the cursor moves past it; with filters, your cursor comes back unchanged, so nothing the filters hid is " +
       "skipped, but the items it shows come back too: take work only from an unfiltered listing (or a wait) and use " +
-      "filters to look things up. Without a cursor, the returned one counts everything sent so far as seen. " +
-      HANDLED_EVENT_RULE,
+      "filters to look things up. " + SESSION_RULE + " " + HANDLED_EVENT_RULE,
     inputSchema: {
       status: feedbackStatusSchema.optional().describe("Only items with this status (a lookup; it leaves your cursor unchanged)."),
       kind: feedbackKindSchema.optional().describe("\"comment\" or \"choose_variant\"."),
@@ -214,7 +228,7 @@ export function registerTools(context: ToolContext): void {
       "something new, what is new in each, and a cursor. Pass the cursor from the previous list_feedback or " +
       "wait_for_feedback call so nothing in between is missed, and continue with the cursor it returns; without one, " +
       "only what arrives after the call counts. " +
-      "Your own replies and status changes never end the wait. " + HANDLED_EVENT_RULE,
+      "Your own replies and status changes never end the wait. " + SESSION_RULE + " " + HANDLED_EVENT_RULE,
     inputSchema: {
       cursor: cursorInput.describe("The cursor from the previous list_feedback or wait_for_feedback result."),
       timeoutSeconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).default(DEFAULT_WAIT_SECONDS)

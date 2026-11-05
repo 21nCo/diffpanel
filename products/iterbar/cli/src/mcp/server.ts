@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { DaemonClient } from "./daemon-client.js";
-import { HANDLED_EVENT_RULE, registerTools } from "./tools.js";
+import { HANDLED_EVENT_RULE, registerTools, SESSION_RULE } from "./tools.js";
 
 /** The MCP server's name and version as it reports them to clients. */
 export const ITERBAR_MCP_SERVER_INFO = Object.freeze({ name: "iterbar", version: "0.0.0" });
@@ -13,19 +13,20 @@ export const DEFAULT_HEARTBEAT_MS = 15_000;
  * skill: work comes only from an unfiltered `list_feedback` with the latest cursor or from `wait_for_feedback`, since a
  * filtered listing hands the cursor back unchanged and the next wait would return its items again. Delivery is at
  * least once (a cursor compacted after a large burst, or cut short by a wait's timeout, can hand an event over again),
- * so it also gives the rule for recognising an event the agent already handled.
+ * so it also gives the rule for recognising an event the agent already handled, and the session rule for what still
+ * needs the agent when a session starts or ends.
  */
 export const ITERBAR_MCP_INSTRUCTIONS = `Iterbar collects UI feedback that users leave on a running dev page (comments on elements and choices between
 variants) and shows your replies and statuses in its dev bar. Every tool talks to the project's Iterbar daemon; when it
 is not running, tools fail with error code daemon_unavailable and you should ask the user to run \`iterbar dev\`.
-Loop: start with list_feedback without filters and keep its cursor; handle its open items, working items an earlier
-session left, and unresolved threads whose last reply is from the user. After that, take new work only from
-list_feedback without filters and with your latest cursor (its events are what arrived since that cursor, and its
-cursor moves past them) or from wait_for_feedback with your latest cursor. For each item: get_feedback, set_status
-"working", change the code, reply with what you did, set_status "done" (or reply with a question and set_status
-"needs-info"). Always continue with the newest cursor, including one that a failed wait_for_feedback returns next to
+Loop: start with list_feedback without filters and keep its cursor, then pick out what still needs you as the session
+rule below says. After that, take new work only from list_feedback without filters and with your latest cursor (its
+events are what arrived since that cursor, and its cursor moves past them) or from wait_for_feedback with your latest
+cursor. For each item: get_feedback, set_status "working", change the code, read the thread again, reply with what
+you did, set_status "done" (or reply with a question and set_status "needs-info"). Always continue with the newest cursor, including one that a failed wait_for_feedback returns next to
 its error. A filtered list_feedback (status, kind or since) hands your cursor back unchanged, so use it only to look
 things up, never to pick up work.
+${SESSION_RULE}
 ${HANDLED_EVENT_RULE}`;
 
 export interface IterbarMcpServerOptions {

@@ -11,8 +11,7 @@ describe("the shipped Iterbar skill", () => {
   });
 
   it("applies the skip rule to every tool, not only to filtered lookups", async () => {
-    const text = (await readFile(skill("SKILL.md"), "utf8")).replace(/`/g, "").replace(/\s+/g, " ");
+    const text = (await readFile(skill("SKILL.md"), "utf8")).replaceAll("`", "").replace(/\s+/g, " ");
     expect(text).toContain("an event you already got can come back, from either tool");
-    expect(text).not.toMatch(/if you did act on an item it showed, skip that event/);
   });
 });

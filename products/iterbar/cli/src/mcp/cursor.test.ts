@@ -6,6 +6,7 @@ import {
   decodeCursor,
   encodeCursor,
   MAX_CURSOR_SEEN,
+  MAX_CURSOR_TIME_MS,
   observe,
   observeListing,
   ORIGIN_CURSOR,
@@ -98,6 +99,16 @@ describe("feedback cursor", () => {
       encode({ v: 1, w: 10, c: 5, s: [] }),
     ]) {
       expect(() => decodeCursor(value)).toThrow(expect.objectContaining({ code: "invalid_request" }));
+    }
+  });
+
+  it("accepts times up to the latest Date and refuses any later one before it is turned into a since filter", () => {
+    const encode = (w: number, c: number) => Buffer.from(JSON.stringify({ v: 1, w, c, s: [] })).toString("base64url");
+    const latest = decodeCursor(encode(MAX_CURSOR_TIME_MS, MAX_CURSOR_TIME_MS));
+    expect(latest).toEqual({ watermark: MAX_CURSOR_TIME_MS, committed: MAX_CURSOR_TIME_MS, seen: new Set() });
+    expect(cursorSince(latest)).toBe(new Date(MAX_CURSOR_TIME_MS).toISOString());
+    for (const [w, c] of [[0, MAX_CURSOR_TIME_MS + 1], [MAX_CURSOR_TIME_MS + 1, MAX_CURSOR_TIME_MS + 1]]) {
+      expect(() => decodeCursor(encode(w!, c!))).toThrow(expect.objectContaining({ code: "invalid_request" }));
     }
   });
 

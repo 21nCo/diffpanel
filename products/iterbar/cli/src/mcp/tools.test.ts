@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Feedback, FeedbackListQuery } from "iterbar";
 import { afterEach, describe, expect, it } from "vitest";
-import { MAX_CURSOR_SEEN } from "./cursor.js";
+import { MAX_CURSOR_SEEN, MAX_CURSOR_TIME_MS } from "./cursor.js";
 import type { DaemonClient } from "./daemon-client.js";
 import { feedbackItem } from "./test-support/feedback.js";
 import { registerTools } from "./tools.js";
@@ -98,5 +98,23 @@ describe("wait_for_feedback at its deadline", { timeout: 30_000 }, () => {
     expect((listed.items as Feedback[]).map((item) => item.id)).toEqual(["feedback-a", "feedback-b"]);
     const quiet = await ok(client, "wait_for_feedback", { cursor: listed.cursor, timeoutSeconds: 0 });
     expect(quiet).toMatchObject({ outcome: "timeout", events: [] });
+  });
+});
+
+describe("a cursor whose times a Date cannot hold", () => {
+  it("is refused as invalid_request by list_feedback and wait_for_feedback, not reported as internal", async () => {
+    const client = await connect(() => []);
+    const encode = (w: number, c: number) => Buffer.from(JSON.stringify({ v: 1, w, c, s: [] })).toString("base64url");
+    for (const name of ["list_feedback", "wait_for_feedback"]) {
+      const args = (cursor: string) => (name === "wait_for_feedback" ? { cursor, timeoutSeconds: 0 } : { cursor });
+      const latest = await ok(client, name, args(encode(MAX_CURSOR_TIME_MS, MAX_CURSOR_TIME_MS)));
+      expect(latest.cursor).toEqual(expect.any(String));
+      for (const cursor of [encode(0, MAX_CURSOR_TIME_MS + 1), encode(MAX_CURSOR_TIME_MS + 1, MAX_CURSOR_TIME_MS + 1)]) {
+        const result = (await client.callTool({ name, arguments: args(cursor) })) as CallToolResult;
+        expect([name, result.isError, result.structuredContent]).toEqual([
+          name, true, { error: expect.objectContaining({ code: "invalid_request" }) },
+        ]);
+      }
+    }
   });
 });

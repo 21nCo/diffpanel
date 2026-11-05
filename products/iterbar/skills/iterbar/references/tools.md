@@ -50,6 +50,13 @@ seen only what you were shown:
   filtered one only to look things up;
 - without a cursor: the cursor starts now, and everything sent before the call counts as seen.
 
+A listing without a cursor counts everything sent before it as seen, so at the start of a session read every item that
+is not resolved with `get_feedback`, done ones included: handle `open` and `working` items, and answer any user reply
+that no later agent reply answers, judged by what the replies say, not by who wrote last (a user can reply after you
+read a thread and before you reply, so their reply comes first and is still unanswered). Right before you reply and
+set a thread done or needs-info, read it again with `get_feedback` so your reply covers every user reply in it. Before
+you stop, call `list_feedback` without filters and with your latest cursor once more, and handle what it returns.
+
 ## `get_feedback`
 
 Inputs: `feedbackId`; `includeAttachments` (default `true`).
