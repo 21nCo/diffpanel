@@ -44,4 +44,4 @@ git tag devroll-v0.0.1
 git push origin devroll-v0.0.1
 ```
 
-To add a package to the release flow, add it to `release-packages.json` and add its `<slug>-v*.*.*` trigger to `.github/workflows/publish-tag.yml`; `scripts/release-targets.test.mjs` fails when the two drift apart. A failed run can be retried from the workflow's manual dispatch with the existing tag.
+To add a package to the release flow, add it to `release-packages.json` and add its `<slug>-v*.*.*` trigger to `.github/workflows/publish-tag.yml`; `scripts/release-targets.test.mjs` fails when the two drift apart. A failed run can be retried from the workflow's manual dispatch with the existing tag, run on that tag (`gh workflow run publish-tag.yml --ref <tag> -f release_tag=<tag>`) so npm provenance records the published commit.
