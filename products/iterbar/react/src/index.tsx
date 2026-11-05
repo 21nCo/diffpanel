@@ -1,7 +1,9 @@
+"use client";
+
 import {
   getVariantsRegistry,
   markSlotRange,
-  slotBoundaryAttributes,
+  SLOT_BOUNDARY_ATTRIBUTE,
   validateSlotDefinition,
   type VariantsRegistry,
 } from "@iterbar/variants";
@@ -38,7 +40,7 @@ export interface VariantsProps<Versions extends Readonly<Record<string, VersionC
   readonly default: Extract<keyof Versions, string>;
 }
 
-const RegistryContext = createContext<VariantsRegistry | null>(null);
+const RegistryContext = /* @__PURE__ */ createContext<VariantsRegistry | null>(null);
 
 /**
  * Makes every {@link Variants} below it use `registry` instead of the page's shared registry, for example in
@@ -49,18 +51,6 @@ export function VariantsProvider({ registry, children }: {
   readonly children?: ReactNode;
 }): JSX.Element {
   return <RegistryContext.Provider value={registry}>{children}</RegistryContext.Provider>;
-}
-
-/**
- * Bundlers replace `process.env.NODE_ENV` with a literal, as they must for React itself. Without that
- * replacement and without a `process` global, the component assumes production.
- */
-function isDevelopment(): boolean {
-  try {
-    return process.env.NODE_ENV !== "production";
-  } catch {
-    return false;
-  }
 }
 
 /** `memo`, `forwardRef` and `lazy` components are objects rather than functions. */
@@ -88,17 +78,20 @@ function renderVersion(versions: Readonly<Record<string, VersionContent>>, versi
  * `window.__ITERBAR__`. The version's top-level elements are marked with `data-iterbar-slot`; empty
  * `<template>` elements before and after it delimit the slot, so it adds no wrapper and stays valid inside
  * `<p>`, `<ul>` and `<tbody>`. A slot rendered at the top level of another slot's version keeps its own marks:
- * each element is marked with the innermost slot that renders it. In production it renders `default` only, with no markers and no registry.
+ * each element is marked with the innermost slot that renders it.
+ *
+ * Development means `process.env.NODE_ENV === "development"`; any other value, or none, renders `default`
+ * only, with no markers and no registry. The condition is written inline, as React writes its own, so a
+ * bundler that replaces `process.env.NODE_ENV` drops the development code from other builds.
  */
 export function Variants<Versions extends Readonly<Record<string, VersionContent>>>(
   props: VariantsProps<Versions>,
 ): JSX.Element {
-  if (!isDevelopment()) return <>{renderVersion(props.versions, props.default)}</>;
-  return <DevelopmentVariants {...props} />;
+  if (typeof process !== "undefined" && process.env.NODE_ENV === "development") {
+    return <DevelopmentVariants {...props} />;
+  }
+  return <>{renderVersion(props.versions, props.default)}</>;
 }
-
-const START_BOUNDARY = slotBoundaryAttributes("start");
-const END_BOUNDARY = slotBoundaryAttributes("end");
 
 function DevelopmentVariants<Versions extends Readonly<Record<string, VersionContent>>>({
   slot,
@@ -131,9 +124,9 @@ function DevelopmentVariants<Versions extends Readonly<Record<string, VersionCon
 
   return (
     <>
-      <template ref={start} {...START_BOUNDARY} />
+      <template ref={start} {...{ [SLOT_BOUNDARY_ATTRIBUTE]: "start" }} />
       <Fragment key={activeVersion}>{renderVersion(versions, activeVersion)}</Fragment>
-      <template ref={end} {...END_BOUNDARY} />
+      <template ref={end} {...{ [SLOT_BOUNDARY_ATTRIBUTE]: "end" }} />
     </>
   );
 }

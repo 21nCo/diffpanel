@@ -52,10 +52,14 @@ export interface SlotDefinition {
   readonly defaultVersion: string;
 }
 
-interface SlotRecord {
+interface SlotInstance {
   readonly definition: SlotDefinition;
+}
+
+interface SlotRecord {
+  /** One entry per mounted instance, earliest first. The earliest one's definition defines the slot. */
+  readonly instances: SlotInstance[];
   activeVersion: string;
-  mounts: number;
   /** Why the active version is the default even though the URL or storage named another one. */
   warnings: RegistryWarning[];
 }
@@ -90,6 +94,10 @@ function sameDefinition(left: SlotDefinition, right: SlotDefinition): boolean {
   return left.defaultVersion === right.defaultVersion
     && left.versions.length === right.versions.length
     && left.versions.every((version, index) => right.versions[index] === version);
+}
+
+function definitionOf(record: SlotRecord): SlotDefinition {
+  return record.instances[0]!.definition;
 }
 
 function warning(
@@ -151,19 +159,22 @@ export class VariantsRegistry {
 
   /**
    * Counts one mounted instance of `definition.slot` and returns its idempotent unregister function. The
-   * first instance decides the slot's versions and default; a later instance that declares different ones
-   * is logged and shares the first one's state. Throws `invalid_message` for an invalid definition or
-   * when the page already has {@link MAX_SLOTS} slots.
+   * earliest mounted instance decides the slot's versions and default; a later instance that declares
+   * different ones is logged and shares that state. When the earliest instance unregisters, the next one's
+   * definition applies, so a slot whose instances all re-register with new versions (for example after a hot
+   * update) ends up with the new versions. Throws `invalid_message` for an invalid definition or when the
+   * page already has {@link MAX_SLOTS} slots.
    */
   register(definition: SlotDefinition): () => void {
     const valid = validateSlotDefinition(definition);
+    const instance: SlotInstance = { definition: valid };
     let record = this.#slots.get(valid.slot);
     if (record) {
-      record.mounts += 1;
-      if (!sameDefinition(record.definition, valid)) {
+      record.instances.push(instance);
+      if (!sameDefinition(definitionOf(record), valid)) {
         console.warn(
           `Iterbar slot "${valid.slot}" is mounted with different versions or default; `
-          + "every instance follows the first one's selection.",
+          + "every instance follows the earliest mounted one's selection.",
         );
       }
     } else {
@@ -171,7 +182,7 @@ export class VariantsRegistry {
         throw new InvalidMessageError("slot definition", [`a page may register at most ${MAX_SLOTS} slots`]);
       }
       const resolved = this.#resolve(valid);
-      record = { definition: valid, activeVersion: resolved.version, mounts: 1, warnings: resolved.warnings };
+      record = { instances: [instance], activeVersion: resolved.version, warnings: resolved.warnings };
       this.#slots.set(valid.slot, record);
     }
     this.#notify();
@@ -181,9 +192,12 @@ export class VariantsRegistry {
     return () => {
       if (!active) return;
       active = false;
-      if (this.#slots.get(registered.definition.slot) !== registered) return;
-      registered.mounts -= 1;
-      if (registered.mounts === 0) this.#slots.delete(registered.definition.slot);
+      const index = registered.instances.indexOf(instance);
+      if (this.#slots.get(valid.slot) !== registered || index === -1) return;
+      const previous = definitionOf(registered);
+      registered.instances.splice(index, 1);
+      if (registered.instances.length === 0) this.#slots.delete(valid.slot);
+      else this.#refreshDefinition(registered, previous);
       this.#notify();
     };
   }
@@ -197,6 +211,23 @@ export class VariantsRegistry {
     const record = this.#slots.get(definition.slot);
     if (!record) return this.#resolve(definition).version;
     return definition.versions.includes(record.activeVersion) ? record.activeVersion : definition.defaultVersion;
+  }
+
+  /**
+   * After the defining instance unregisters, keeps the active version valid for the new definition. A slot
+   * that shows its default because the URL or storage named an unknown version chooses again, so a version
+   * added by a hot update is honoured.
+   */
+  #refreshDefinition(record: SlotRecord, previous: SlotDefinition): void {
+    const definition = definitionOf(record);
+    if (sameDefinition(definition, previous)) return;
+    if (record.warnings.length > 0) {
+      const resolved = this.#resolve(definition);
+      record.activeVersion = resolved.version;
+      record.warnings = resolved.warnings;
+    } else if (!definition.versions.includes(record.activeVersion)) {
+      record.activeVersion = definition.defaultVersion;
+    }
   }
 
   /**
@@ -219,7 +250,8 @@ export class VariantsRegistry {
       this.#rejectSelection(warning("unknown_slot", "api", `${slot}:${version}`, `No slot named "${slot}" is mounted.`));
       return;
     }
-    if (!record.definition.versions.includes(version)) {
+    const definition = definitionOf(record);
+    if (!definition.versions.includes(version)) {
       this.#rejectSelection(warning(
         "unknown_version", "api", `${slot}:${version}`, `Slot "${slot}" has no version "${version}".`,
       ));
@@ -228,7 +260,7 @@ export class VariantsRegistry {
     // Remembering the choice can also drop malformed URL or stored entries, which changes the warnings; so
     // compare whole snapshots rather than only the slot's own state.
     const before = JSON.stringify(this.getSnapshot());
-    this.#remember(record.definition, version);
+    this.#remember(definition, version);
     record.activeVersion = version;
     record.warnings = [];
     if (JSON.stringify(this.getSnapshot()) !== before) this.#notify();
@@ -262,13 +294,16 @@ export class VariantsRegistry {
     warnings.push(...this.#apiWarnings);
     return {
       schemaVersion: SCHEMA_VERSION,
-      slots: [...this.#slots.values()].map(({ definition, activeVersion, mounts }) => ({
-        slot: definition.slot,
-        versions: [...definition.versions],
-        defaultVersion: definition.defaultVersion,
-        activeVersion,
-        mounts,
-      })),
+      slots: [...this.#slots.values()].map((record) => {
+        const definition = definitionOf(record);
+        return {
+          slot: definition.slot,
+          versions: [...definition.versions],
+          defaultVersion: definition.defaultVersion,
+          activeVersion: record.activeVersion,
+          mounts: record.instances.length,
+        };
+      }),
       warnings: warnings.slice(0, MAX_WARNINGS).map((entry) => ({ ...entry })),
     };
   }
@@ -342,8 +377,10 @@ export class VariantsRegistry {
   }
 
   #rejectSelection(entry: RegistryWarning): void {
+    // Once the list is full of identical rejections, another one leaves the snapshot unchanged.
+    const before = JSON.stringify(this.getSnapshot());
     this.#apiWarnings = [...this.#apiWarnings, entry].slice(-MAX_API_WARNINGS);
-    this.#notify();
+    if (JSON.stringify(this.getSnapshot()) !== before) this.#notify();
   }
 
   #notify(): void {

@@ -1,4 +1,4 @@
-import { createVariantsRegistry, type VariantsRegistry } from "@iterbar/variants";
+import { createVariantsRegistry, markSlotRange, SLOT_BOUNDARY_ATTRIBUTE, type VariantsRegistry } from "@iterbar/variants";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { PAGE_API_GLOBAL, readPageApi, registrySnapshotSchema, VARIANT_STORAGE_KEY } from "iterbar";
 import {
@@ -84,7 +84,15 @@ function select(slot: string, version: string) {
 
 beforeEach(() => {
   visit("/plans");
+  vi.stubEnv("NODE_ENV", "development");
 });
+
+/** Lets the range observers, which run as microtasks after each commit, settle before asserting. */
+async function settle() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
 
 afterEach(() => {
   cleanup();
@@ -207,6 +215,26 @@ describe("in development", () => {
     render(<Pricing />, { container, hydrate: true });
     expect(container.textContent).toBe("Plan two");
     expect(errors).not.toHaveBeenCalled();
+  });
+
+  it("offers new versions once every instance of a repeated slot has re-rendered with them", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const before = { v1: <p>Plan one</p>, v2: <p>Plan two</p> };
+    const after = { ...before, v3: PlanThree };
+    const page = (first: typeof before, second: typeof before) => (
+      <StrictMode>
+        <Variants slot="pricing" versions={first} default="v1" />
+        <Variants slot="pricing" versions={second} default="v1" />
+      </StrictMode>
+    );
+    const { container, rerender, unmount } = render(page(before, before));
+    rerender(page(after, before));
+    rerender(page(after, after));
+    expect(slots()).toMatchObject([{ slot: "pricing", versions: ["v1", "v2", "v3"], mounts: 2 }]);
+    select("pricing", "v3");
+    expect(roots(container, "pricing")).toEqual(["Plan three", "Plan three"]);
+    unmount();
+    expect(slots()).toEqual([]);
   });
 
   it("throws an invalid_message error for an invalid slot definition", () => {
@@ -333,13 +361,6 @@ describe("nested slots", () => {
     return <Variants slot="inner" versions={{ a: <p>Inner A</p>, b: <p>Inner B</p> }} default="a" />;
   }
 
-  /** Lets the range observers, which run as microtasks after each commit, settle before asserting. */
-  async function settle() {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-  }
-
   function marks(container: ParentNode) {
     return { inner: roots(container, "inner"), outer: roots(container, "outer") };
   }
@@ -436,5 +457,79 @@ describe("in production", () => {
     );
     expect(container.textContent).toBe("Plan one");
     expect(slots(registry)).toEqual([]);
+  });
+});
+
+describe("development activation", () => {
+  // A server whose NODE_ENV is anything but "development" renders what a production client hydrates.
+  it.each([undefined, "test", "staging", "production"])("renders and hydrates only the default when NODE_ENV is %s", (value) => {
+    const tree = () => <div><Pricing /></div>;
+    vi.stubEnv("NODE_ENV", "production");
+    const productionHtml = renderToString(tree());
+    const errors = collectErrors();
+    visit("/plans?iterbar=pricing:v2");
+    window.localStorage.setItem(VARIANT_STORAGE_KEY, "pricing:v2");
+    vi.stubEnv("NODE_ENV", value);
+    const html = renderToString(tree());
+    expect(html).toBe(productionHtml);
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    document.body.append(container);
+
+    vi.stubEnv("NODE_ENV", "production");
+    render(tree(), { container, hydrate: true });
+    expect(container.innerHTML).toBe("<div><p>Plan one</p></div>");
+    expect(readPageApi(window)).toBeNull();
+    expect(errors).toEqual([]);
+  });
+});
+
+describe("slot ranges", () => {
+  function boundary(edge: "start" | "end") {
+    const template = document.createElement("template");
+    template.setAttribute(SLOT_BOUNDARY_ATTRIBUTE, edge);
+    return template;
+  }
+
+  function paragraph(text: string) {
+    const element = document.createElement("p");
+    element.textContent = text;
+    return element;
+  }
+
+  it("follows a range into each parent it moves to, keeps nested ownership and stops on cleanup", async () => {
+    const [start, end, innerStart, innerEnd] = [boundary("start"), boundary("end"), boundary("start"), boundary("end")];
+    const fragment = document.createDocumentFragment();
+    fragment.append(start, paragraph("One"), innerStart, paragraph("Inner"), innerEnd, end);
+    const stopInner = markSlotRange(innerStart, innerEnd, "inner");
+    const stop = markSlotRange(start, end, "outer");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const marks = () => ({ inner: roots(document.body, "inner"), outer: roots(document.body, "outer") });
+
+    host.append(fragment);
+    await settle();
+    expect(marks()).toEqual({ inner: ["Inner"], outer: ["One"] });
+
+    start.nextElementSibling?.replaceWith(paragraph("Two"));
+    innerStart.nextElementSibling?.replaceWith(paragraph("Inner two"));
+    await settle();
+    expect(marks()).toEqual({ inner: ["Inner two"], outer: ["Two"] });
+
+    const other = document.createElement("section");
+    document.body.append(other);
+    other.append(...host.childNodes);
+    await settle();
+    other.insertBefore(paragraph("Three"), end);
+    await settle();
+    expect(marks()).toEqual({ inner: ["Inner two"], outer: ["Two", "Three"] });
+
+    stop();
+    stopInner();
+    other.insertBefore(paragraph("Four"), end);
+    await settle();
+    expect(marks()).toEqual({ inner: [], outer: [] });
+    host.remove();
+    other.remove();
   });
 });

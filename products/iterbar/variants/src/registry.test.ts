@@ -160,6 +160,18 @@ describe("unknown and malformed selections", () => {
     expect(storage.values.size).toBe(0);
   });
 
+  it("does not notify when a rejected selection leaves the snapshot unchanged", () => {
+    const { registry } = page();
+    const listener = vi.fn();
+    registry.subscribe(listener);
+    for (let index = 0; index < 32; index += 1) select(registry, "missing", "v1");
+    expect(listener).toHaveBeenCalledTimes(32);
+    select(registry, "missing", "v1");
+    expect(listener).toHaveBeenCalledTimes(32);
+    select(registry, "missing", "v2");
+    expect(listener).toHaveBeenCalledTimes(33);
+  });
+
   it("keeps only the most recent rejected selections and a valid snapshot", () => {
     const { registry } = page();
     registry.register(pricing);
@@ -216,6 +228,42 @@ describe("repeated slots and unregistering", () => {
     expect(registry.activeVersion(other)).toBe("v1");
     select(registry, "pricing", "v2");
     expect(registry.activeVersion(other)).toBe("v4");
+  });
+
+  it("takes the next instance's definition when the defining one unregisters, so updated versions apply", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { registry } = page("?iterbar=pricing:v4");
+    const updated: SlotDefinition = { slot: "pricing", versions: ["v1", "v2", "v4"], defaultVersion: "v1" };
+    const first = registry.register(pricing);
+    const second = registry.register(pricing);
+    select(registry, "pricing", "v3");
+    expect(slotOf(registry.getSnapshot(), "pricing")?.activeVersion).toBe("v3");
+
+    // Each instance re-registers with the new versions in turn, as staggered hot updates do.
+    first();
+    const third = registry.register(updated);
+    expect(slotOf(registry.getSnapshot(), "pricing")?.versions).toEqual(["v1", "v2", "v3"]);
+    second();
+    expect(slotOf(registry.getSnapshot(), "pricing")).toMatchObject({
+      versions: ["v1", "v2", "v4"], activeVersion: "v1", mounts: 1,
+    });
+    select(registry, "pricing", "v4");
+    expect(registry.activeVersion(updated)).toBe("v4");
+    expect(registry.getSnapshot().warnings).toEqual([]);
+
+    third();
+    expect(registry.getSnapshot().slots).toEqual([]);
+  });
+
+  it("honours a URL version that only the next instance's definition has", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { registry } = page("?iterbar=pricing:v4");
+    const first = registry.register(pricing);
+    expect(registry.getSnapshot().warnings.map((entry) => entry.code)).toEqual(["unknown_version"]);
+    registry.register({ slot: "pricing", versions: ["v1", "v4"], defaultVersion: "v1" });
+    first();
+    expect(slotOf(registry.getSnapshot(), "pricing")?.activeVersion).toBe("v4");
+    expect(registry.getSnapshot().warnings).toEqual([]);
   });
 
   it("notifies subscribers on register, select and unregister", () => {

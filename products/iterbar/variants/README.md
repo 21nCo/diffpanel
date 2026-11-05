@@ -38,11 +38,14 @@ storage reads as empty.
 `window.__ITERBAR__.select({ schemaVersion: 1, slot, version })` switches a
 mounted slot, stores the choice (forgetting the slot when it is the default)
 and, when the URL already names the slot, rewrites that URL entry with
-`history.replaceState` so a reload keeps the choice. Both hold at most 256
-selections: local storage is shared by every page of the origin, so when it
-is full the earliest other selections are dropped to keep the new one.
+`history.replaceState` so a reload keeps the choice. Each value it writes
+holds at most 256 selections: local storage is shared by every page of the
+origin, so when it is full the earliest other selections are dropped to keep
+the new one. The cap applies when writing; longer values are still read, and
+a URL that does not name the slot is left as it is.
 Subscribers are notified whenever the snapshot changes, including when
-remembering a choice drops a malformed URL or stored entry and its warning. Unknown slots or versions
+remembering a choice drops a malformed URL or stored entry and its warning,
+and only then. Unknown slots or versions
 and malformed selections leave every slot unchanged and are recorded as
 `source: "api"` warnings (the most recent 32).
 
@@ -50,11 +53,13 @@ and malformed selections leave every slot unchanged and are recorded as
 
 Every `register` call counts one mount and returns an idempotent unregister
 function; the snapshot reports `mounts`. Instances of one slot share its
-selection. The first instance's versions and default define the slot; an
-instance that declares others is logged and renders its own default when the
-active version is not one of its versions. The slot leaves the snapshot when
-its last instance unregisters and chooses its version again when it next
-registers.
+selection. The earliest mounted instance's versions and default define the
+slot; an instance that declares others is logged and renders its own default
+when the active version is not one of its versions. When the defining
+instance unregisters, the next one's definition applies, so after every
+instance re-registers with new versions (a hot update, for example) the slot
+offers the new versions. The slot leaves the snapshot when its last instance
+unregisters and chooses its version again when it next registers.
 
 A definition with an invalid slot or version name, duplicate versions, more
 than 64 versions or a default outside its versions throws an

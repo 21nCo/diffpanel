@@ -48,7 +48,8 @@ function rangeElements(start: Node, end: Node): Set<Element> {
 
 /**
  * Marks every element between the sibling nodes `start` and `end` (exclusive) as a root of `slot`, and keeps
- * the marks current while elements in that range are added, removed or replaced. `<template>` elements are
+ * the marks current while elements in that range are added, removed or replaced, also after the range moves
+ * to another parent. `<template>` elements are
  * skipped, so the boundaries themselves can be templates, which HTML and React allow inside `<p>`, `<ul>`,
  * `<table>`, `<tbody>` and `<tr>`. Text nodes cannot carry the attribute and are left unmarked.
  *
@@ -62,24 +63,27 @@ export function markSlotRange(start: Node, end: Node, slot: string): () => void 
     if (element.getAttribute(SLOT_ATTRIBUTE) === slot) element.removeAttribute(SLOT_ATTRIBUTE);
     marked.delete(element);
   };
+  const Observer = (globalThis as { MutationObserver?: typeof MutationObserver }).MutationObserver;
+  const observer = typeof Observer === "function" ? new Observer(() => update()) : null;
+  let observed: Node | null = null;
   const update = () => {
+    // Follow the range when it moves to another parent, such as when its DocumentFragment is inserted.
+    const parent = start.parentNode;
+    if (observer && parent && parent !== observed) {
+      observer.disconnect();
+      observer.observe(parent, { childList: true });
+      observed = parent;
+    }
     const current = rangeElements(start, end);
-    for (const element of [...marked]) if (!current.has(element)) unmark(element);
+    for (const element of marked) if (!current.has(element)) unmark(element);
     for (const element of current) {
       element.setAttribute(SLOT_ATTRIBUTE, slot);
       marked.add(element);
     }
   };
   update();
-  const parent = start.parentNode;
-  const Observer = (globalThis as { MutationObserver?: typeof MutationObserver }).MutationObserver;
-  let observer: MutationObserver | null = null;
-  if (parent && typeof Observer === "function") {
-    observer = new Observer(update);
-    observer.observe(parent, { childList: true });
-  }
   return () => {
     observer?.disconnect();
-    for (const element of [...marked]) unmark(element);
+    for (const element of marked) unmark(element);
   };
 }

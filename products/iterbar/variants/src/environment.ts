@@ -48,7 +48,7 @@ export function readVariantParam(search: string): string | null {
 function decodeKey(part: string): string | null {
   const separator = part.indexOf("=");
   try {
-    return decodeURIComponent((separator === -1 ? part : part.slice(0, separator)).replace(/\+/g, " "));
+    return decodeURIComponent((separator === -1 ? part : part.slice(0, separator)).replaceAll("+", " "));
   } catch {
     return null;
   }
