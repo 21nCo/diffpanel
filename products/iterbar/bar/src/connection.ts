@@ -83,6 +83,9 @@ export class DaemonConnection {
   #socket: WebSocket | null = null;
   #retryTimer: ReturnType<typeof setTimeout> | null = null;
   #attempt = 0;
+  /** Resends the latest slot report after a transient failure, independently of the socket. */
+  #reportRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  #reportAttempt = 0;
   #connected = false;
   #stopped = false;
   #pendingReport: { pageUrl: string; slots: readonly SlotState[]; generation: number } | null = null;
@@ -110,6 +113,7 @@ export class DaemonConnection {
     this.#abort.abort();
     if (this.#retryTimer) clearTimeout(this.#retryTimer);
     this.#retryTimer = null;
+    this.#cancelReportRetry();
     const socket = this.#socket;
     this.#socket = null;
     socket?.close(1000);
@@ -117,11 +121,14 @@ export class DaemonConnection {
 
   /**
    * Tells the daemon which slots `pageUrl` shows. Only the latest report is kept; it is sent now when connected, or
-   * once the connection opens. A URL the contract does not accept (such as a `file:` page) is not reported.
+   * once the connection opens, and resent with backoff until the daemon accepts it or a newer report replaces it. A
+   * URL the contract does not accept (such as a `file:` page) is not reported.
    */
   reportSlots(pageUrl: string, slots: readonly SlotState[]): void {
+    if (this.#stopped) return;
     this.#reportGeneration += 1;
     this.#pendingReport = { pageUrl, slots, generation: this.#reportGeneration };
+    this.#reportAttempt = 0;
     if (this.#connected) this.#flushReport();
   }
 
@@ -204,6 +211,7 @@ export class DaemonConnection {
   #flushReport(): void {
     const pending = this.#pendingReport;
     if (!pending) return;
+    this.#cancelReportRetry();
     this.#pendingReport = null;
     const report = slotReportSchema.safeParse({
       schemaVersion: SCHEMA_VERSION,
@@ -212,13 +220,35 @@ export class DaemonConnection {
       slots: pending.slots,
     });
     if (!report.success) return;
-    this.#request("reportSlots", JSON.stringify(report.data)).catch((error: unknown) => {
-      if (error instanceof UnauthorizedError) this.#reject();
-      // Any other failure is retried on the next reconnect, unless a newer report has replaced this one since.
-      else if (!this.#stopped && this.#pendingReport === null && pending.generation === this.#reportGeneration) {
-        this.#pendingReport = pending;
+    this.#request("reportSlots", JSON.stringify(report.data)).then(() => {
+      if (pending.generation === this.#reportGeneration) this.#reportAttempt = 0;
+    }, (error: unknown) => {
+      if (error instanceof UnauthorizedError) {
+        this.#reject();
+        return;
       }
+      // A report that a newer one has replaced since is dropped; the latest one is resent with backoff, now if the
+      // socket is open or else as soon as it opens again.
+      if (this.#stopped || this.#pendingReport !== null || pending.generation !== this.#reportGeneration) return;
+      this.#pendingReport = pending;
+      this.#scheduleReportRetry();
     });
+  }
+
+  #scheduleReportRetry(): void {
+    if (this.#stopped || this.#reportRetryTimer) return;
+    const delay = RETRY_DELAYS_MS[Math.min(this.#reportAttempt, RETRY_DELAYS_MS.length - 1)] ?? 30_000;
+    this.#reportAttempt += 1;
+    this.#reportRetryTimer = setTimeout(() => {
+      this.#reportRetryTimer = null;
+      // While disconnected the report stays pending, and the next open sends it.
+      if (!this.#stopped && this.#connected) this.#flushReport();
+    }, delay);
+  }
+
+  #cancelReportRetry(): void {
+    if (this.#reportRetryTimer) clearTimeout(this.#reportRetryTimer);
+    this.#reportRetryTimer = null;
   }
 
   async #request(endpoint: "listFeedback" | "reportSlots", body?: string): Promise<Response> {

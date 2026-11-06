@@ -174,6 +174,87 @@ describe("DaemonConnection", () => {
     expect(pending("/slots").map((request) => (request.body as SlotReport).slots[0]?.activeVersion)).toEqual(["v2", "v2"]);
   });
 
+  const versions = () => pending("/slots").map((request) => (request.body as SlotReport).slots[0]?.activeVersion);
+
+  it("resends the latest slot report with backoff while the socket stays open", async () => {
+    const connection = connect();
+    socket().open();
+    pending("/feedback")[0]!.respond(200, list([]));
+    connection.reportSlots("http://localhost:5173/", [slot("v1")]);
+    connection.reportSlots("http://localhost:5173/", [slot("v2")]);
+    const [first, second] = pending("/slots");
+    second!.respond(503);
+    await settle();
+    first!.respond(500);
+    await settle();
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(versions()).toEqual(["v1", "v2"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(versions()).toEqual(["v1", "v2", "v2"]);
+    pending("/slots")[2]!.respond(500);
+    await settle();
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(versions()).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(versions()).toEqual(["v1", "v2", "v2", "v2"]);
+    pending("/slots")[3]!.respond(204);
+    await settle();
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(versions()).toEqual(["v1", "v2", "v2", "v2"]);
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  it("resends the latest slot report when it fails after a reconnect has already completed", async () => {
+    const connection = connect();
+    socket().open();
+    pending("/feedback")[0]!.respond(200, list([]));
+    connection.reportSlots("http://localhost:5173/", [slot("v1")]);
+    connection.reportSlots("http://localhost:5173/", [slot("v2")]);
+    const [superseded, latest] = pending("/slots");
+    socket().close();
+    await vi.advanceTimersByTimeAsync(1000);
+    socket().open();
+    pending("/feedback")[1]!.respond(200, list([]));
+    await settle();
+    // Both reports were already sent, so the reconnect had nothing to flush.
+    expect(versions()).toEqual(["v1", "v2"]);
+
+    latest!.respond(503);
+    await settle();
+    superseded!.respond(500);
+    await settle();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(versions()).toEqual(["v1", "v2", "v2"]);
+    pending("/slots")[2]!.respond(204);
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(versions()).toEqual(["v1", "v2", "v2"]);
+  });
+
+  it("stops resending a slot report once the connection stops or the token is rejected", async () => {
+    const connection = connect();
+    socket().open();
+    pending("/feedback")[0]!.respond(200, list([]));
+    connection.reportSlots("http://localhost:5173/", [slot("v1")]);
+    pending("/slots")[0]!.respond(503);
+    await settle();
+    connection.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(versions()).toEqual(["v1"]);
+
+    const rejected = connect();
+    socket().open();
+    pending("/feedback")[1]!.respond(200, list([]));
+    rejected.reportSlots("http://localhost:5173/", [slot("v2")]);
+    pending("/slots")[1]!.respond(401);
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(versions()).toEqual(["v1", "v2"]);
+    expect(statuses.at(-1)).toBe("unauthorized");
+  });
+
   it("keeps backing off while the socket opens but the listing fails, and resets once a listing succeeds", async () => {
     connect();
     const delays: number[] = [];
