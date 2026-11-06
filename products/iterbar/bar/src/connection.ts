@@ -54,6 +54,19 @@ export function parseDaemonConfig(
   return { ok: true, config: { url: parsed.origin, token: token as string } };
 }
 
+/** The `reportedAt` of the last slot report any connection on this page made, in epoch milliseconds. */
+let lastReportedAt = 0;
+
+/**
+ * A `reportedAt` strictly later than every earlier report from this page, even within one millisecond or across a
+ * replaced connection. The daemon keeps the last-arriving report on a tie, so two reports that shared a timestamp
+ * could leave a superseded one current when they arrive out of order.
+ */
+function nextReportedAt(): string {
+  lastReportedAt = Math.max(Date.now(), lastReportedAt + 1);
+  return new Date(lastReportedAt).toISOString();
+}
+
 /** Reconnect delays in milliseconds; the last one repeats. */
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15_000, 30_000];
 
@@ -216,7 +229,7 @@ export class DaemonConnection {
     const report = slotReportSchema.safeParse({
       schemaVersion: SCHEMA_VERSION,
       pageUrl: pending.pageUrl,
-      reportedAt: new Date().toISOString(),
+      reportedAt: nextReportedAt(),
       slots: pending.slots,
     });
     if (!report.success) return;

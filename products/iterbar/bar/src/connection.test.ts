@@ -233,6 +233,39 @@ describe("DaemonConnection", () => {
     expect(versions()).toEqual(["v1", "v2", "v2"]);
   });
 
+  it("gives a resend and a newer report made in the same millisecond strictly increasing reportedAt", async () => {
+    vi.setSystemTime(new Date("2026-03-01T00:00:00.000Z"));
+    const connection = connect();
+    socket().open();
+    pending("/feedback")[0]!.respond(200, list([]));
+    connection.reportSlots("http://localhost:5173/", [slot("v1")]);
+    pending("/slots")[0]!.respond(503);
+    await settle();
+    // The resend fires, and the element's debounced report of a newer snapshot lands in the same millisecond.
+    await vi.advanceTimersByTimeAsync(1000);
+    connection.reportSlots("http://localhost:5173/", [slot("v2")]);
+    const [, resend, newer] = pending("/slots") as [PendingRequest, PendingRequest, PendingRequest];
+    expect(versions()).toEqual(["v1", "v1", "v2"]);
+    const stamp = (request: PendingRequest) => Date.parse((request.body as SlotReport).reportedAt);
+    expect(stamp(newer)).toBeGreaterThan(stamp(resend));
+
+    // The daemon keeps the last-arriving report on a tie; the newer report arrives first and must still win.
+    const current = new Map<string, SlotReport>();
+    for (const report of [newer.body, resend.body] as SlotReport[]) {
+      const held = current.get(report.pageUrl);
+      if (!held || Date.parse(held.reportedAt) <= Date.parse(report.reportedAt)) current.set(report.pageUrl, report);
+    }
+    expect(current.get("http://localhost:5173/")?.slots[0]?.activeVersion).toBe("v2");
+
+    // A connection that replaces this one for the same daemon, still in the same millisecond, stays later too.
+    connection.stop();
+    const replacement = connect();
+    socket().open();
+    pending("/feedback")[1]!.respond(200, list([]));
+    replacement.reportSlots("http://localhost:5173/", [slot("v1")]);
+    expect(stamp(pending("/slots").at(-1)!)).toBeGreaterThan(stamp(newer));
+  });
+
   it("stops resending a slot report once the connection stops or the token is rejected", async () => {
     const connection = connect();
     socket().open();
