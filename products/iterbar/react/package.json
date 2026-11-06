@@ -1,0 +1,59 @@
+{
+  "name": "@iterbar/react",
+  "version": "0.0.0",
+  "private": true,
+  "description": "React bindings for Iterbar: the Variants component that switches a slot between versions in development.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/21nCo/devroll.git",
+    "directory": "products/iterbar/react"
+  },
+  "scripts": {
+    "build": "tsup src/index.tsx --format esm --dts --sourcemap --clean --external react",
+    "clean": "rm -rf dist coverage",
+    "lint": "eslint src vitest.config.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0 || ^19.0.0"
+  },
+  "dependencies": {
+    "@iterbar/variants": "workspace:*"
+  },
+  "devDependencies": {
+    "@iterbar/react-18-test-harness": "file:./test-support/react-18",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "esbuild": "^0.27.0",
+    "iterbar": "workspace:*",
+    "jsdom": "^27.4.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.11"
+  }
+}

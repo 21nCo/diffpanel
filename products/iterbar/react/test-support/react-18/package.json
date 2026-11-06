@@ -1,0 +1,13 @@
+{
+  "name": "@iterbar/react-18-test-harness",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test-only: installs React 18 with its own react-dom and Testing Library so the React 18 test project resolves a consistent copy.",
+  "license": "MIT",
+  "dependencies": {
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
