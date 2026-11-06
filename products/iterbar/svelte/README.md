@@ -32,12 +32,13 @@ Switching remounts the slot's content, so versions never share component
 state.
 
 The server renders `default` and never touches `window`, local storage or the
-registry. The client renders the selected version from its first render, as
-React's `useSyncExternalStore` does: a client mount never mounts the default
-first, and new `versions` without the active one render their default at
-once. When hydration finds the server's default but the page selects another
-version, the client replaces the default's markup with the selected version
-without hydration errors.
+registry. Hydration hydrates that `default`, and the client switches to the
+selected version right after hydrating, so server and client markup agree. A
+client mount without server markup renders the selected version from its
+first render, as React's `useSyncExternalStore` does, and new `versions`
+without the active one render their default at once. The start `<template>`
+carries `data-iterbar-instance`, the `$props.id()` that tells a hydrating
+instance from a new one.
 
 `Variants` adds no wrapper element. In development it renders an empty
 `<template>` before and after the version, and marks each of the version's

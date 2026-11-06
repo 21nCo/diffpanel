@@ -22,20 +22,24 @@
     const [name, names, initial] = JSON.parse(key) as [string, string[], string];
     return validateSlotDefinition({ slot: name, versions: names, defaultVersion: initial });
   });
-  // Set before the template first renders, and only in the browser: the server runs no effects, so it renders
-  // the default and never reaches the registry or `window`.
-  let browser = $state(false);
+  // The server's id while this instance hydrates the server's markup; a new one on a client mount.
+  const instance = $props.id();
+  // Whether to render the registry's selection rather than the default. The server runs no effects, so it
+  // renders the default and never reaches the registry or `window`. In the browser this is set before the
+  // template first renders: a client mount renders the selected version at once, as React's
+  // useSyncExternalStore does; an instance whose server markup is on the page hydrates the default, and the
+  // effect below switches right after hydration.
+  let live = $state(false);
   $effect.pre(() => {
-    browser = true;
+    live = !document.querySelector(`template[data-iterbar-instance="${instance}"]`);
   });
   // Counts registry changes, so `activeVersion` reads the registry's selection again after each one.
   let changes = $state(0);
-  // Read while rendering, as React's useSyncExternalStore does: a client mount renders the selected version at
-  // once, and new versions without the active one render their default at once.
+  // Read while rendering: new versions without the active one render their default in the same update.
   const activeVersion = $derived.by(() => {
     void changes;
     const current = definition;
-    return browser ? (provided ?? getVariantsRegistry()).activeVersion(current) : current.defaultVersion;
+    return live ? (provided ?? getVariantsRegistry()).activeVersion(current) : current.defaultVersion;
   });
   let start = $state<HTMLTemplateElement>();
   let end = $state<HTMLTemplateElement>();
@@ -46,7 +50,14 @@
     const registry = provided ?? getVariantsRegistry();
     // Untracked: registering notifies at once, and this effect must not depend on the count it bumps.
     const unsubscribe = registry.subscribe(() => untrack(() => (changes += 1)));
-    const unregister = registry.register(current);
+    let unregister: () => void;
+    try {
+      unregister = registry.register(current);
+    } catch (error) {
+      unsubscribe();
+      throw error;
+    }
+    live = true;
     return () => {
       unsubscribe();
       unregister();
@@ -62,14 +73,8 @@
   });
 </script>
 
-<template bind:this={start} data-iterbar-slot-boundary="start"></template>
-<!-- The server renders the default branch. A client that selects another version takes the other branch, so
-     hydration replaces the server's default instead of mounting it first. -->
-{#if activeVersion === definition.defaultVersion}
+<template bind:this={start} data-iterbar-slot-boundary="start" data-iterbar-instance={instance}></template>
+{#key activeVersion}
   <Version content={versionContent(versions, activeVersion)} />
-{:else}
-  {#key activeVersion}
-    <Version content={versionContent(versions, activeVersion)} />
-  {/key}
-{/if}
+{/key}
 <template bind:this={end} data-iterbar-slot-boundary="end"></template>

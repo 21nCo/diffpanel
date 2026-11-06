@@ -1,4 +1,4 @@
-import { createVariantsRegistry, type VariantsRegistry } from "@iterbar/variants";
+import { createVariantsRegistry, MAX_SLOTS, type VariantsRegistry } from "@iterbar/variants";
 import { render, screen } from "@testing-library/svelte";
 import { PAGE_API_GLOBAL, readPageApi, registrySnapshotSchema, VARIANT_STORAGE_KEY } from "iterbar";
 import { flushSync, hydrate, unmount, type Component } from "svelte";
@@ -77,6 +77,7 @@ const SERVER_RENDERS: ServerRenderJob[] = [
   { entry: "test/fixtures/Pricing.svelte", nodeEnv: "development" },
   ...NON_DEVELOPMENT.map((nodeEnv) => ({ entry: "test/fixtures/Pricing.svelte", nodeEnv })),
   ...PLACES.map((where) => ({ entry: "test/fixtures/Contexts.svelte", nodeEnv: "development", props: { where } })),
+  { entry: "test/fixtures/Observed.svelte", nodeEnv: "development", props: { names: ["a", "b"], log: [] } },
 ];
 
 let serverRender: (job: ServerRenderJob) => string;
@@ -156,6 +157,53 @@ describe("in development", () => {
     expect(log.filter((entry) => entry.startsWith("shows"))).toEqual(["shows a"]);
     expect(log.filter((entry) => !entry.startsWith("shows")).sort()).toEqual(["mount a", "unmount b"]);
     expect(slots()).toMatchObject([{ slot: "probe", versions: ["a", "c"], activeVersion: "a" }]);
+  });
+
+  it("hydrates the server's default, then switches to the selected version", () => {
+    visit("/plans?iterbar=probe:b");
+    const errors = collectErrors();
+    const log: string[] = [];
+    const { container } = hydrateServerHtml("Observed.svelte", Observed, "development", { names: ["a", "b"], log });
+    expect(log.filter((entry) => !entry.startsWith("shows"))).toEqual(["mount a", "mount b", "unmount a"]);
+    expect(roots(container, "probe")).toEqual(["b"]);
+    expect(errors).toEqual([]);
+  });
+
+  it("remounts when new versions change the active version, even from one default to another", () => {
+    const { rerender } = render(Slot, { slot: "faq", versions: { a: Disclosure, b: Disclosure }, default: "a" });
+    screen.getByRole("button").click();
+    flushSync();
+    rerender({ slot: "faq", versions: { b: Disclosure }, default: "b" });
+    expect(screen.getByRole("button").textContent).toBe("More");
+  });
+
+  it("keeps the active version's state when only the default changes", () => {
+    const { container, rerender } = render(Slot, { slot: "faq", versions: { a: Disclosure, b: Disclosure }, default: "a" });
+    select("faq", "b");
+    screen.getByRole("button").click();
+    flushSync();
+    rerender({ slot: "faq", versions: { a: Disclosure, b: Disclosure }, default: "b" });
+    expect(container.textContent?.trim()).toBe("Details");
+  });
+
+  it("leaves no registry listener behind when registering fails", () => {
+    const registry = createVariantsRegistry();
+    for (let index = 0; index < MAX_SLOTS; index += 1) {
+      registry.register({ slot: `slot${index}`, versions: ["a"], defaultVersion: "a" });
+    }
+    let listeners = 0;
+    const subscribe = registry.subscribe.bind(registry);
+    vi.spyOn(registry, "subscribe").mockImplementation((listener) => {
+      listeners += 1;
+      const unsubscribe = subscribe(listener);
+      return () => {
+        listeners -= 1;
+        unsubscribe();
+      };
+    });
+    expect(() => render(Slot, { slot: "extra", versions: { a: PlanOne }, default: "a", registry }))
+      .toThrow(expect.objectContaining({ code: "invalid_message" }));
+    expect(listeners).toBe(0);
   });
 
   it("switches in place through window.__ITERBAR__ without remounting the rest of the page", () => {
