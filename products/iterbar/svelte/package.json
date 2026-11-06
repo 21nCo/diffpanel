@@ -1,0 +1,59 @@
+{
+  "name": "@iterbar/svelte",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Svelte 5 bindings for Iterbar: the Variants component that switches a slot between versions in development.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "svelte": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "svelte": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/21nCo/devroll.git",
+    "directory": "products/iterbar/svelte"
+  },
+  "scripts": {
+    "build": "svelte-package --input src --output dist && rm -rf .svelte-kit",
+    "clean": "rm -rf dist coverage .svelte-kit",
+    "lint": "eslint src test vitest.config.ts",
+    "test": "vitest run",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings"
+  },
+  "peerDependencies": {
+    "svelte": "^5.57.3"
+  },
+  "dependencies": {
+    "@iterbar/variants": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/package": "^2.5.8",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/svelte": "^5.4.2",
+    "@types/node": "^22.20.1",
+    "esbuild": "^0.27.7",
+    "iterbar": "workspace:*",
+    "jsdom": "^27.4.0",
+    "svelte": "^5.57.3",
+    "svelte-check": "^4.7.8",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^4.1.12"
+  }
+}
