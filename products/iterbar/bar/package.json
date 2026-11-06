@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@iterbar/cli": "workspace:*",
-    "@playwright/test": "1.58.2",
+    "@playwright/test": "1.65.0",
     "@types/node": "^22.15.30",
     "esbuild": "^0.27.0",
     "tsup": "^8.5.0",

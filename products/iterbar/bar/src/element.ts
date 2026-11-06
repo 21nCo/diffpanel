@@ -29,6 +29,15 @@ const DRAG_THRESHOLD_PX = 4;
 /** Delay that coalesces bursts of registry changes into one slot report. */
 const REPORT_DELAY_MS = 150;
 
+/** How often the bar checks for a changed page URL where the Navigation API is unavailable. */
+const URL_POLL_MS = 1000;
+
+/** The Navigation API, where the browser has it; it reports `pushState`, `replaceState` and traversals. */
+interface NavigationTarget {
+  addEventListener(type: "currententrychange", listener: () => void): void;
+  removeEventListener(type: "currententrychange", listener: () => void): void;
+}
+
 const STATUS_TEXT: Readonly<Record<ConnectionStatus["kind"], string>> = {
   unconfigured: "Offline",
   invalid: "Offline",
@@ -103,6 +112,9 @@ export class IterbarBarElement extends ElementBase {
   #commentMode = false;
   #slotsForReport: readonly SlotState[] | null = null;
   #reportTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The page URL of the last slot report, so a single-page navigation that keeps the slots is reported too. */
+  #reportedUrl: string | null = null;
+  #urlPoll: ReturnType<typeof setInterval> | null = null;
   #drag: DragState | null = null;
 
   constructor() {
@@ -182,24 +194,27 @@ export class IterbarBarElement extends ElementBase {
   }
 
   connectedCallback(): void {
-    // Properties set on the element before it was upgraded are own properties that hide the accessors.
-    for (const property of ["daemonUrl", "token", "commentMode"] as const) {
-      if (!Object.prototype.hasOwnProperty.call(this, property)) continue;
+    this.#state = readStoredState();
+    this.#applyState();
+    // Properties set on the element before it was upgraded are own properties that hide the accessors. They are
+    // applied after the stored state, so an assigned `collapsed` wins over the saved one.
+    for (const property of ["daemonUrl", "token", "commentMode", "collapsed"] as const) {
+      if (!Object.hasOwn(this, property)) continue;
       const value = (this as Record<string, unknown>)[property];
       delete (this as Record<string, unknown>)[property];
       (this as Record<string, unknown>)[property] = value;
     }
-    this.#state = readStoredState();
-    this.#applyState();
     this.#raise();
     this.#watchZoom();
     window.addEventListener("keydown", this.#onKeydown, true);
+    this.#watchUrl(true);
     this.#slots.attach();
     this.#reconnect();
   }
 
   disconnectedCallback(): void {
     window.removeEventListener("keydown", this.#onKeydown, true);
+    this.#watchUrl(false);
     this.#zoomObserver?.disconnect();
     this.#zoomObserver = null;
     this.#slots.detach();
@@ -218,6 +233,22 @@ export class IterbarBarElement extends ElementBase {
     // Expanding moves focus into the bar so keyboard users can carry on; collapsing keeps focus off hidden controls.
     if (!this.#state.collapsed || focusInside) this.#toggle.focus();
   };
+
+  readonly #onUrlChange = (): void => {
+    if (this.#slotsForReport && reportPageUrl(location.href) !== this.#reportedUrl) this.#queueReport(this.#slotsForReport);
+  };
+
+  /** Follows single-page navigation through the Navigation API, or by polling `location` without it. */
+  #watchUrl(on: boolean): void {
+    const navigation = (globalThis as { navigation?: NavigationTarget }).navigation;
+    if (navigation && typeof navigation.addEventListener === "function") {
+      if (on) navigation.addEventListener("currententrychange", this.#onUrlChange);
+      else navigation.removeEventListener("currententrychange", this.#onUrlChange);
+      return;
+    }
+    if (this.#urlPoll) clearInterval(this.#urlPoll);
+    this.#urlPoll = on ? setInterval(this.#onUrlChange, URL_POLL_MS) : null;
+  }
 
   /**
    * Shows the bar in the top layer, outside every page stacking context and containing block, so a `transform`,
@@ -283,9 +314,7 @@ export class IterbarBarElement extends ElementBase {
       onStatus: (status) => {
         if (this.#connection === connection) this.#renderStatus(status);
       },
-      onFeedback: (items) => {
-        if (this.#connection === connection) this.#threads.merge(items);
-      },
+      onFeedback: (item): boolean => this.#connection === connection && this.#threads.merge(item),
       onListing: (items, touched) => {
         if (this.#connection === connection) this.#threads.replace(items, touched);
       },
@@ -310,7 +339,9 @@ export class IterbarBarElement extends ElementBase {
     this.#reportTimer = setTimeout(() => {
       this.#reportTimer = null;
       const pageUrl = reportPageUrl(location.href);
-      if (pageUrl && this.#slotsForReport) this.#connection?.reportSlots(pageUrl, this.#slotsForReport);
+      if (!pageUrl || !this.#slotsForReport || !this.#connection) return;
+      this.#reportedUrl = pageUrl;
+      this.#connection.reportSlots(pageUrl, this.#slotsForReport);
     }, REPORT_DELAY_MS);
   }
 

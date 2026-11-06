@@ -146,6 +146,74 @@ test.describe("threads from the daemon", () => {
     expect(daemon.slotReports.at(-1)?.pageUrl).toBe(`${fixtureServer.origin}/shop`);
   });
 
+  test("reports the retained slots again after single-page navigation changes the page URL", async ({ page, openFixture, fixtureServer }) => {
+    const daemon = await fakeDaemon(page, fixtureServer.origin);
+    await openFixture("/shop?q=a%20b&flag");
+    await registerSlots(page, [PRICING]);
+    await mountBar(page, { daemonUrl: daemon.url, token: daemon.token });
+    const urls = () => daemon.slotReports.map((report) => report.pageUrl.slice(fixtureServer.origin.length));
+    await expect.poll(urls).toEqual(["/shop?q=a%20b&flag"]);
+    await page.evaluate(() => history.pushState(null, "", "/other"));
+    await expect.poll(urls).toEqual(["/shop?q=a%20b&flag", "/other"]);
+    await page.evaluate(() => history.replaceState(null, "", "/other?tab=2#x"));
+    await expect.poll(urls).toEqual(["/shop?q=a%20b&flag", "/other", "/other?tab=2"]);
+    await page.goBack();
+    await expect.poll(urls).toEqual(["/shop?q=a%20b&flag", "/other", "/other?tab=2", "/shop?q=a%20b&flag"]);
+    // Changing only the iterbar parameter or the fragment is not a new page.
+    await page.evaluate(() => history.replaceState(null, "", `${location.pathname}${location.search}&iterbar=pricing:v2#top`));
+    await page.waitForTimeout(400);
+    expect(daemon.slotReports).toHaveLength(4);
+    expect(daemon.slotReports.every((report) => report.slots[0]?.slot === "pricing")).toBe(true);
+  });
+
+  test("reports no slots and clears warnings after an invalid snapshot, then recovers", async ({ page, openFixture, fixtureServer }) => {
+    const daemon = await fakeDaemon(page, fixtureServer.origin);
+    await openFixture();
+    await page.evaluate(() => {
+      // A page API the test drives by hand.
+      const valid = {
+        schemaVersion: 1,
+        slots: [{ slot: "pricing", versions: ["v1", "v2"], defaultVersion: "v1", activeVersion: "v1", mounts: 1 }],
+        warnings: [{ code: "unknown_slot", source: "url", value: "hero:b", message: "Unknown slot hero in the URL." }],
+      };
+      let current: unknown = valid;
+      const listeners = new Set<(snapshot: unknown) => void>();
+      const emit = (snapshot: unknown) => {
+        current = snapshot;
+        for (const listener of listeners) listener(snapshot);
+      };
+      Object.assign(window, { emitSnapshot: emit, validSnapshot: valid });
+      Object.defineProperty(window, "__ITERBAR__", {
+        configurable: true,
+        value: {
+          schemaVersion: 1, getSnapshot: () => current, select: () => undefined,
+          subscribe: (listener: (snapshot: unknown) => void) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+        },
+      });
+    });
+    await mountBar(page, { daemonUrl: daemon.url, token: daemon.token });
+    const warnings = inBar(page, "[data-role=warnings]");
+    await expect(warnings).toHaveText("Unknown slot hero in the URL.");
+    await expect.poll(() => daemon.slotReports.at(-1)?.slots.length).toBe(1);
+
+    await page.evaluate(() => (window as unknown as { emitSnapshot(value: unknown): void }).emitSnapshot({ schemaVersion: 1, slots: "bad" }));
+    await expect(inBar(page, "[data-role=slots-message]")).toContainText("invalid snapshot");
+    await expect(warnings).toBeHidden();
+    await expect(warnings.locator("li")).toHaveCount(0);
+    await expect.poll(() => daemon.slotReports.at(-1)?.slots).toEqual([]);
+
+    await page.evaluate(() => {
+      const target = window as unknown as { emitSnapshot(value: unknown): void; validSnapshot: { slots: unknown[] } };
+      target.emitSnapshot({ ...target.validSnapshot, warnings: [] });
+    });
+    await expect(inBar(page, "[data-role=slot-name]")).toHaveText("Slot pricing");
+    await expect(warnings).toBeHidden();
+    await expect.poll(() => daemon.slotReports.at(-1)?.slots.length).toBe(1);
+  });
+
   test("closes the stream and stops retrying when it is removed from the page", async ({ page, openFixture, fixtureServer }) => {
     const daemon = await fakeDaemon(page, fixtureServer.origin);
     await openFixture();

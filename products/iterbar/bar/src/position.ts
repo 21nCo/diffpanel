@@ -15,6 +15,9 @@ export interface BarState extends BarPlacement {
   readonly collapsed: boolean;
 }
 
+/** Gap, in CSS pixels, the bar keeps from the screen edges; the stylesheet's `--ib-margin`. */
+export const BAR_MARGIN_PX = 12;
+
 /** Bottom right, expanded. */
 export const DEFAULT_BAR_STATE: BarState = Object.freeze({ edge: "bottom", offset: 1, collapsed: false });
 
@@ -52,7 +55,8 @@ export interface Rect {
 
 /**
  * Where a bar dropped with its box at `box` docks in a `viewport` of the given size: the edge nearest to the box's
- * centre, and the box's position along that edge as a fraction of the room it can move in.
+ * centre, and the box's position along that edge as a fraction of the room it can move in between the
+ * {@link BAR_MARGIN_PX} margins, which is how the stylesheet turns the offset back into a position.
  */
 export function placementForDrop(box: Rect, viewport: { readonly width: number; readonly height: number }): BarPlacement {
   const centerX = box.left + box.width / 2;
@@ -65,8 +69,8 @@ export function placementForDrop(box: Rect, viewport: { readonly width: number; 
   };
   const edge = EDGES.reduce((best, candidate) => (distances[candidate] < distances[best] ? candidate : best));
   const horizontal = edge === "top" || edge === "bottom";
-  const room = horizontal ? viewport.width - box.width : viewport.height - box.height;
-  const position = horizontal ? box.left : box.top;
+  const room = (horizontal ? viewport.width - box.width : viewport.height - box.height) - 2 * BAR_MARGIN_PX;
+  const position = (horizontal ? box.left : box.top) - BAR_MARGIN_PX;
   return { edge, offset: room > 0 ? clampOffset(position / room) : 0 };
 }
 

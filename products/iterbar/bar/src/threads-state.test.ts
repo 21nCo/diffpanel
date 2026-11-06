@@ -51,6 +51,12 @@ describe("applyListing", () => {
     expect(map.has("new")).toBe(true);
   });
 
+  it("lets a strictly newer listed copy beat a touched held copy", () => {
+    const map = new Map([["a", feedback("a", at, at, "working")]]);
+    applyListing(map, [feedback("a", at, "2026-01-01T00:05:00Z", "done")], new Set(["a"]));
+    expect(map.get("a")?.status).toBe("done");
+  });
+
   it("never replaces a newer held copy with an older listed one", () => {
     const map = new Map([["a", feedback("a", at, "2026-01-01T00:05:00Z", "done")]]);
     applyListing(map, [feedback("a", at, at, "open")], new Set());

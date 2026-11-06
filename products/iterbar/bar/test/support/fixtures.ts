@@ -48,7 +48,7 @@ export const test = base.extend<{ openFixture: (path?: string) => Promise<void> 
   fixtureServer: [async ({}, use) => {
     const script = await bundleFixture();
     const server: Server = createServer((request, response) => {
-      const path = new URL(request.url ?? "/", "http://fixture").pathname;
+      const path = (request.url ?? "/").split("?")[0];
       if (path === "/fixture.js") {
         response.writeHead(200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" });
         response.end(script);

@@ -36,12 +36,25 @@ export function searchWithSelection(search: string, slot: string, version: strin
   }
 }
 
-/** The URL a page's slot report is filed under: without the fragment or the `iterbar` parameter, which switching changes. */
+function isVariantPair(pair: string): boolean {
+  const separator = pair.indexOf("=");
+  try {
+    return decodeURIComponent((separator === -1 ? pair : pair.slice(0, separator)).replaceAll("+", " ")) === VARIANT_URL_PARAM;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The URL a page's slot report is filed under: without the fragment or the `iterbar` parameter, which switching
+ * changes. Every other query pair keeps its exact text, since the daemon files reports by the exact URL.
+ */
 export function reportPageUrl(href: string): string | null {
   try {
     const url = new URL(href);
     url.hash = "";
-    url.searchParams.delete(VARIANT_URL_PARAM);
+    const pairs = url.search.slice(1).split("&").filter((pair) => pair !== "" && !isVariantPair(pair));
+    url.search = pairs.join("&");
     return url.href;
   } catch {
     return null;
@@ -139,11 +152,17 @@ export class SlotsPanel {
     return true;
   }
 
-  /** Applies a snapshot from the page; one that does not match the v1 contract is reported, not rendered. */
+  /**
+   * Applies a snapshot from the page. One that does not match the v1 contract is shown as an error, and the page is
+   * then reported to have no slots, since nothing it showed before can be trusted.
+   */
   #update(input: unknown): void {
     const parsed = safeParseMessage(registrySnapshotSchema, input, "registry snapshot");
     if (!parsed.success) {
       this.#snapshot = null;
+      this.#warnings.hidden = true;
+      this.#warnings.replaceChildren();
+      this.#options.onSlots([]);
       this.#showMessage(`The page's Iterbar registry sent an invalid snapshot: ${parsed.error.message}`);
       return;
     }

@@ -1,6 +1,6 @@
 import { SCHEMA_VERSION, type Feedback, type SlotReport, type SlotState } from "iterbar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DaemonConnection, parseDaemonConfig } from "./connection.js";
+import { DaemonConnection, parseDaemonConfig, REQUEST_TIMEOUT_MS } from "./connection.js";
 import { applyListing, mergeFeedback } from "./threads-state.js";
 
 const token = "a".repeat(64);
@@ -10,6 +10,12 @@ describe("parseDaemonConfig", () => {
     expect(parseDaemonConfig("http://127.0.0.1:4555/", token)).toEqual({ ok: true, config: { url: "http://127.0.0.1:4555", token } });
   });
 
+  it("accepts the default HTTP port, which URL normalizes away", () => {
+    for (const url of ["http://127.0.0.1:80", "http://127.0.0.1"]) {
+      expect(parseDaemonConfig(url, token)).toEqual({ ok: true, config: { url: "http://127.0.0.1", token } });
+    }
+  });
+
   it("reports nothing configured separately from a bad configuration", () => {
     expect(parseDaemonConfig(null, null)).toEqual({ ok: false, status: { kind: "unconfigured" } });
     expect(parseDaemonConfig("", "")).toEqual({ ok: false, status: { kind: "unconfigured" } });
@@ -17,7 +23,7 @@ describe("parseDaemonConfig", () => {
 
   it("never sends the token anywhere but 127.0.0.1", () => {
     for (const url of [
-      "http://localhost:4555", "https://127.0.0.1:4555", "http://127.0.0.1", "http://127.0.0.1:4555/events",
+      "http://localhost:4555", "https://127.0.0.1:4555", "https://127.0.0.1:80", "http://127.0.0.1:4555/events",
       "http://127.0.0.1:4555/?x=1", "http://user:pw@127.0.0.1:4555", "http://evil.example:4555", "nonsense",
     ]) {
       expect(parseDaemonConfig(url, token)).toMatchObject({ ok: false, status: { kind: "invalid" } });
@@ -100,7 +106,7 @@ describe("DaemonConnection", () => {
   function connect(): DaemonConnection {
     const connection = new DaemonConnection({ url: "http://127.0.0.1:4555", token }, {
       onStatus: (status) => statuses.push(status.kind),
-      onFeedback: (items) => mergeFeedback(threads, items),
+      onFeedback: (item) => mergeFeedback(threads, [item]),
       onListing: (items, touched) => applyListing(threads, items, touched),
     });
     connection.start();
@@ -111,6 +117,7 @@ describe("DaemonConnection", () => {
   const pending = (path: string) => requests.filter((request) => request.path === path);
   const list = (items: Feedback[]) => ({ schemaVersion: SCHEMA_VERSION, items });
   const settle = () => vi.advanceTimersByTimeAsync(0);
+  const versions = () => pending("/slots").map((request) => (request.body as SlotReport).slots[0]?.activeVersion);
 
   it("never lets a listing in flight undo an event with the same updatedAt, and still applies later events", async () => {
     connect();
@@ -126,6 +133,49 @@ describe("DaemonConnection", () => {
 
     socket().receive({ schemaVersion: SCHEMA_VERSION, type: "feedback.updated", feedback: feedback("a", "done") });
     expect(threads.get("a")?.status).toBe("done");
+  });
+
+  it("gives no precedence to a rejected stale or unchanged event over a newer or omitting listing", async () => {
+    connect();
+    socket().open();
+    pending("/feedback")[0]!.respond(200, list([feedback("a", "done", "2026-01-01T00:02:00.000Z"), feedback("b", "open")]));
+    await settle();
+    socket().close();
+    await vi.advanceTimersByTimeAsync(1000);
+    socket().open();
+    socket().receive({ schemaVersion: SCHEMA_VERSION, type: "feedback.updated", feedback: feedback("a", "open") });
+    socket().receive({ schemaVersion: SCHEMA_VERSION, type: "feedback.updated", feedback: feedback("b", "open") });
+    pending("/feedback")[1]!.respond(200, list([feedback("a", "working", "2026-01-01T00:03:00.000Z")]));
+    await settle();
+    expect([...threads.values()].map((item) => [item.id, item.status])).toEqual([["a", "working"]]);
+  });
+
+  it("fails a stalled listing, diagnosis or slot report after the deadline, with the socket open", async () => {
+    const connection = connect();
+    socket().open();
+    connection.reportSlots("http://localhost:5173/", [slot("v1")]);
+    // Neither the listing nor the report is ever answered.
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    expect(socket().closed).toBe(true);
+    expect(statuses.at(-1)).toBe("retrying");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeSocket.instances).toHaveLength(2);
+    socket().open();
+    pending("/feedback")[1]!.respond(200, list([]));
+    await settle();
+    // The pending report goes out again, and this time it is accepted.
+    expect(versions()).toEqual(["v1", "v1"]);
+    pending("/slots")[1]!.respond(204);
+    await settle();
+
+    // A refused upgrade is diagnosed over HTTP; a diagnosis that hangs ends in a retry too.
+    socket().close();
+    await vi.advanceTimersByTimeAsync(1000);
+    socket().close();
+    const before = FakeSocket.instances.length;
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 2000);
+    expect(FakeSocket.instances.length).toBeGreaterThan(before);
+    expect(versions()).toEqual(["v1", "v1"]);
   });
 
   it("drops threads that a new listing no longer includes", async () => {
@@ -173,8 +223,6 @@ describe("DaemonConnection", () => {
     await settle();
     expect(pending("/slots").map((request) => (request.body as SlotReport).slots[0]?.activeVersion)).toEqual(["v2", "v2"]);
   });
-
-  const versions = () => pending("/slots").map((request) => (request.body as SlotReport).slots[0]?.activeVersion);
 
   it("resends the latest slot report with backoff while the socket stays open", async () => {
     const connection = connect();

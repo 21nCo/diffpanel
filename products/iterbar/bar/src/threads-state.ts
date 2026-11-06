@@ -19,16 +19,17 @@ export function mergeFeedback(current: Map<string, Feedback>, incoming: readonly
 
 /**
  * Applies a complete listing from the daemon. The listing is the daemon's whole state, so an item it does not include
- * is dropped, unless an event delivered it while the listing was in flight (`touched`): that item, and any listed copy
- * of it, may be older than what the event showed, even with an equal `updatedAt`, so the held copy wins. Returns
- * whether anything changed.
+ * is dropped, unless an accepted event delivered it while the listing was in flight (`touched`). The listing may
+ * predate such an event even with an equal `updatedAt`, so for a touched item the held copy also wins a tie; a
+ * strictly newer listed copy still wins. Returns whether anything changed.
  */
 export function applyListing(current: Map<string, Feedback>, listed: readonly Feedback[], touched: ReadonlySet<string>): boolean {
   const next = new Map<string, Feedback>();
   for (const item of listed) {
     const held = current.get(item.id);
-    const keepHeld = held !== undefined
-      && (touched.has(item.id) || Date.parse(held.updatedAt) > Date.parse(item.updatedAt));
+    const heldAt = held ? Date.parse(held.updatedAt) : Number.NaN;
+    const listedAt = Date.parse(item.updatedAt);
+    const keepHeld = held !== undefined && (heldAt > listedAt || (touched.has(item.id) && heldAt === listedAt));
     next.set(item.id, keepHeld ? held : item);
   }
   for (const id of touched) {

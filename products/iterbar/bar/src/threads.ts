@@ -86,9 +86,11 @@ export class ThreadsPanel {
     this.element = h("section", { class: "section", "data-section": "threads" }, this.#heading, this.#empty, this.#list, this.#more);
   }
 
-  /** Merges items from an event; see {@link mergeFeedback}. */
-  merge(items: readonly Feedback[]): void {
-    if (mergeFeedback(this.#items, items)) this.#render();
+  /** Merges an item from an event and returns whether it was accepted; see {@link mergeFeedback}. */
+  merge(item: Feedback): boolean {
+    const accepted = mergeFeedback(this.#items, [item]);
+    if (accepted) this.#render();
+    return accepted;
   }
 
   /** Replaces the threads with a complete listing; see {@link applyListing}. */

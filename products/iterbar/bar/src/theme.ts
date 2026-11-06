@@ -52,6 +52,7 @@ export const BAR_CSS = String.raw`
   display: flex;
   flex-direction: column;
   width: min(320px, calc(100% - 2 * var(--ib-margin)));
+  max-width: calc(100% - 2 * var(--ib-margin));
   height: auto;
   max-height: calc(100% - 2 * var(--ib-margin));
   margin: 0;
@@ -89,7 +90,8 @@ export const BAR_CSS = String.raw`
   }
 }
 
-.bar[data-collapsed] { width: auto; }
+/* Its header's one-line width, capped by max-width; "auto" would shrink to the narrowest wrap at the far edge. */
+.bar[data-collapsed] { width: max-content; }
 
 .bar[data-edge="top"], .bar[data-edge="bottom"] {
   left: calc(var(--ib-margin) + var(--ib-offset) * (100% - 2 * var(--ib-margin)));
@@ -114,8 +116,10 @@ export const BAR_CSS = String.raw`
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* Wraps rather than overflowing a narrow screen, expanded or collapsed. */
 .header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 6px;

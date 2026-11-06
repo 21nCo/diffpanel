@@ -20,4 +20,9 @@ describe("searchWithSelection", () => {
 it("files slot reports without the fragment or the iterbar parameter", () => {
   expect(reportPageUrl("http://localhost:5173/a?q=1&iterbar=pricing:v2#top")).toBe("http://localhost:5173/a?q=1");
   expect(reportPageUrl("not a url")).toBeNull();
+  // Every other pair keeps its exact text: the daemon files reports by the exact URL.
+  expect(reportPageUrl("http://localhost:5173/a?q=a%20b&flag&iterbar=pricing:v2&x=1&x=2&q=c+d"))
+    .toBe("http://localhost:5173/a?q=a%20b&flag&x=1&x=2&q=c+d");
+  expect(reportPageUrl("http://localhost:5173/a?%69terbar=hero:b&iterbar&flag=")).toBe("http://localhost:5173/a?flag=");
+  expect(reportPageUrl("http://localhost:5173/a?iterbar=pricing:v2#top")).toBe("http://localhost:5173/a");
 });

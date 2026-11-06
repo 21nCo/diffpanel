@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_BAR_STATE, edgeForKey, formatBarState, parseBarState, placementForDrop } from "./position.js";
+import { BAR_MARGIN_PX, DEFAULT_BAR_STATE, edgeForKey, formatBarState, parseBarState, placementForDrop } from "./position.js";
 
 describe("stored bar state", () => {
   it("round-trips a valid state", () => {
@@ -26,6 +26,17 @@ describe("placementForDrop", () => {
     expect(placementForDrop(box(800, 690), viewport)).toEqual({ edge: "bottom", offset: 1 });
     expect(placementForDrop(box(0, 350), viewport)).toEqual({ edge: "left", offset: 0.5 });
     expect(placementForDrop(box(800, 350), viewport)).toEqual({ edge: "right", offset: 0.5 });
+  });
+
+  it("measures the offset between the margins, as the stylesheet places the bar, so a drop stays where it lands", () => {
+    // The stylesheet puts the bar at margin + offset * (viewport - 2 * margin - size) along its edge.
+    for (const offset of [0, 0.25, 0.8, 1]) {
+      const left = BAR_MARGIN_PX + offset * (viewport.width - 2 * BAR_MARGIN_PX - 200);
+      const top = BAR_MARGIN_PX + offset * (viewport.height - 2 * BAR_MARGIN_PX - 200);
+      expect(placementForDrop(box(left, 690), viewport)).toEqual({ edge: "bottom", offset: expect.closeTo(offset) });
+      expect(placementForDrop({ left: 0, top, width: 100, height: 200 }, viewport))
+        .toEqual({ edge: "left", offset: expect.closeTo(offset) });
+    }
   });
 
   it("clamps a box dragged past the viewport and handles a box wider than it", () => {

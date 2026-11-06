@@ -15,7 +15,7 @@ import {
 
 /** Where the daemon listens and the token that authorizes this page; see {@link parseDaemonConfig}. */
 export interface DaemonConfig {
-  /** `http://127.0.0.1:<port>`, with no path, query or fragment. */
+  /** `http://127.0.0.1:<port>` (with no port for 80), with no path, query or fragment. */
   readonly url: string;
   readonly token: string;
 }
@@ -43,7 +43,8 @@ export function parseDaemonConfig(
   } catch {
     parsed = null;
   }
-  const valid = parsed !== null && parsed.protocol === "http:" && parsed.hostname === DAEMON_HOST && parsed.port !== ""
+  // An empty port is the default one (80): `URL` drops an explicit `:80`.
+  const valid = parsed !== null && parsed.protocol === "http:" && parsed.hostname === DAEMON_HOST
     && !parsed.username && !parsed.password && parsed.pathname === "/" && !parsed.search && !parsed.hash;
   if (!valid || parsed === null) {
     return { ok: false, status: { kind: "invalid", message: `The daemon URL must be http://${DAEMON_HOST}:<port>.` } };
@@ -67,16 +68,19 @@ function nextReportedAt(): string {
   return new Date(lastReportedAt).toISOString();
 }
 
+/** Longest a daemon request may take, body included, before it fails like any other transient error. */
+export const REQUEST_TIMEOUT_MS = 10_000;
+
 /** Reconnect delays in milliseconds; the last one repeats. */
 const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15_000, 30_000];
 
 export interface ConnectionCallbacks {
   onStatus(status: ConnectionStatus): void;
-  /** A feedback item from an event, to be merged into what the bar shows. */
-  onFeedback(items: readonly Feedback[]): void;
+  /** A feedback item from an event, to be merged into what the bar shows. Returns whether the bar accepted it. */
+  onFeedback(item: Feedback): boolean;
   /**
    * The daemon's complete feedback listing, which replaces what the bar shows. `touched` holds the ids of items that
-   * events delivered while the listing was in flight; those events may be newer than the listing.
+   * accepted events delivered while the listing was in flight; those events may be newer than the listing.
    */
   onListing(items: readonly Feedback[], touched: ReadonlySet<string>): void;
 }
@@ -104,7 +108,7 @@ export class DaemonConnection {
   #pendingReport: { pageUrl: string; slots: readonly SlotState[]; generation: number } | null = null;
   /** Counts {@link reportSlots} calls, so a failed report that something newer superseded is never retried. */
   #reportGeneration = 0;
-  /** Ids delivered by events since the in-flight listing was requested; `null` when no listing is in flight. */
+  /** Ids of accepted events since the in-flight listing was requested; `null` when no listing is in flight. */
   #touched: Set<string> | null = null;
 
   constructor(config: DaemonConfig, callbacks: ConnectionCallbacks) {
@@ -176,8 +180,7 @@ export class DaemonConnection {
       // Events from another protocol version, or that do not match v1, are ignored rather than half-read.
       if (!parsed.success) return;
       if (parsed.data.type === "feedback.created" || parsed.data.type === "feedback.updated") {
-        this.#touched?.add(parsed.data.feedback.id);
-        this.#callbacks.onFeedback([parsed.data.feedback]);
+        if (this.#callbacks.onFeedback(parsed.data.feedback)) this.#touched?.add(parsed.data.feedback.id);
       }
     });
     socket.addEventListener("close", () => {
@@ -195,8 +198,7 @@ export class DaemonConnection {
     const touched = new Set<string>();
     this.#touched = touched;
     try {
-      const response = await this.#request("listFeedback");
-      const body = safeParseMessage(feedbackListResponseSchema, await response.json(), "feedback list");
+      const body = safeParseMessage(feedbackListResponseSchema, await this.#request("listFeedback"), "feedback list");
       if (!body.success) throw body.error;
       if (this.#socket !== socket) return;
       this.#attempt = 0;
@@ -264,20 +266,43 @@ export class DaemonConnection {
     this.#reportRetryTimer = null;
   }
 
-  async #request(endpoint: "listFeedback" | "reportSlots", body?: string): Promise<Response> {
-    const headers: Record<string, string> = { authorization: bearerAuthorization(this.#config.token) };
-    if (body !== undefined) headers["content-type"] = "application/json";
-    const response = await fetch(`${this.#config.url}${daemonPath(endpoint)}`, {
-      method: body === undefined ? "GET" : "POST",
-      headers,
-      body,
-      cache: "no-store",
-      credentials: "omit",
-      signal: this.#abort.signal,
+  /**
+   * Sends a request and resolves with the parsed JSON body of a `GET`. The whole exchange, body included, must finish
+   * within {@link REQUEST_TIMEOUT_MS}, so a daemon that stops answering leads to the usual retry instead of a hang.
+   */
+  async #request(endpoint: "listFeedback" | "reportSlots", body?: string): Promise<unknown> {
+    const deadline = new AbortController();
+    const cancel = (): void => deadline.abort();
+    if (this.#abort.signal.aborted) cancel();
+    this.#abort.signal.addEventListener("abort", cancel, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        deadline.abort();
+        reject(new Error("The daemon did not answer in time."));
+      }, REQUEST_TIMEOUT_MS);
     });
-    if (response.status === 401) throw new UnauthorizedError("unauthorized");
-    if (!response.ok) throw new Error(`The daemon answered ${response.status}`);
-    return response;
+    const exchange = async (): Promise<unknown> => {
+      const headers: Record<string, string> = { authorization: bearerAuthorization(this.#config.token) };
+      if (body !== undefined) headers["content-type"] = "application/json";
+      const response = await fetch(`${this.#config.url}${daemonPath(endpoint)}`, {
+        method: body === undefined ? "GET" : "POST",
+        headers,
+        body,
+        cache: "no-store",
+        credentials: "omit",
+        signal: deadline.signal,
+      });
+      if (response.status === 401) throw new UnauthorizedError("unauthorized");
+      if (!response.ok) throw new Error(`The daemon answered ${response.status}`);
+      return body === undefined ? await response.json() : undefined;
+    };
+    try {
+      return await Promise.race([exchange(), timeout]);
+    } finally {
+      clearTimeout(timer);
+      this.#abort.signal.removeEventListener("abort", cancel);
+    }
   }
 
   #retry(message: string): void {
