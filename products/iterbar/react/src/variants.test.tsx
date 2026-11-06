@@ -592,6 +592,28 @@ describe("slot ranges", () => {
     expect(marks(document.body)).toEqual({ inner: [], outer: [] });
   });
 
+  it("finds a range reassembled in a fragment by moves out of the document, then follows it into a shadow root", async () => {
+    const host = attach(document.createElement("div"));
+    const [start, end] = [boundary("start"), boundary("end")];
+    host.append(start, paragraph("One"), end);
+    onTestFinished(markSlotRange(start, end, "moved"));
+
+    start.remove();
+    await settle();
+    const fragment = document.createDocumentFragment();
+    fragment.append(start);
+    fragment.append(...host.childNodes);
+    await settle();
+    expect(roots(fragment, "moved")).toEqual(["One"]);
+
+    const shadow = shadowRoot();
+    shadow.append(fragment);
+    await settle();
+    start.nextElementSibling?.replaceWith(paragraph("Two"));
+    await settle();
+    expect(roots(shadow, "moved")).toEqual(["Two"]);
+  });
+
   it("follows replacements inside an open shadow root and keeps the innermost slot's marks", async () => {
     const range = ranges();
     const { start, end, innerStart } = range;

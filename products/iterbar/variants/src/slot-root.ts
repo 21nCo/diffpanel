@@ -73,7 +73,7 @@ interface Tree {
   readonly root: Node;
   readonly ranges: Set<TrackedRange>;
   readonly byParent: Map<Node, Set<TrackedRange>>;
-  /** For a document: its detached trees with ranges, which can only enter it by an insertion it observes. */
+  /** For a document: its detached trees with ranges, re-checked on each of its batches. */
   readonly detached: Set<Tree>;
   /** For a detached tree: its document's tree, which observes the document on its behalf. */
   document: Tree | null;
@@ -114,25 +114,21 @@ function release(tree: Tree): void {
 /**
  * Updates only the ranges a batch can affect. A batch costs one step per record plus one per range under
  * each changed parent; a range leaves its tree only when it or an ancestor is removed, so only a batch that
- * removes a node with descendants checks the tree's ranges, and only one that adds nodes checks its
- * detached trees, each once per batch.
+ * removes a node with descendants checks the tree's ranges. Every batch of a document checks the ranges of
+ * its detached trees, which can be inserted or reassembled elsewhere by its insertions or removals.
  */
 function dispatch(tree: Tree, records: readonly MutationRecord[]): void {
   const targets = new Set<Node>();
   let removedSubtree = false;
-  let added = false;
   for (const record of records) {
     targets.add(record.target);
-    added ||= record.addedNodes.length > 0;
     removedSubtree ||= [...record.removedNodes].some((node) => node.hasChildNodes());
   }
   const affected = new Set<TrackedRange>();
   for (const target of targets) for (const range of tree.byParent.get(target) ?? []) affected.add(range);
   if (removedSubtree) for (const range of tree.ranges) if (range.start.getRootNode() !== tree.root) affected.add(range);
-  if (added) {
-    for (const detached of tree.detached) {
-      for (const range of detached.ranges) if (range.start.getRootNode() !== detached.root) affected.add(range);
-    }
+  for (const detached of tree.detached) {
+    for (const range of detached.ranges) if (range.start.getRootNode() !== detached.root) affected.add(range);
   }
   for (const range of affected) range.update();
 }
