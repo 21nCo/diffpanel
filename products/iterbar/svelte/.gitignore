@@ -1,0 +1,2 @@
+# svelte-package writes its working copy here; the build removes it.
+.svelte-kit/
