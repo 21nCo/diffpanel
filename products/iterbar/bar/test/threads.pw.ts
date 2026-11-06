@@ -78,6 +78,30 @@ test.describe("threads from the daemon", () => {
     expect(daemon.requests.filter((request) => request.path === "/feedback")).toHaveLength(2);
   });
 
+  test("shows only the current daemon's threads after switching daemons", async ({ page, openFixture, fixtureServer }) => {
+    const first = await fakeDaemon(page, fixtureServer.origin, [comment("From daemon A")]);
+    const second = await fakeDaemon(page, fixtureServer.origin, []);
+    await openFixture();
+    await mountBar(page, { daemonUrl: first.url, token: first.token });
+    await expect(inBar(page, ".thread-text")).toHaveText("From daemon A");
+
+    await mountBar(page, { daemonUrl: second.url, token: second.token });
+    await expect.poll(() => second.requests.filter((request) => request.path === "/feedback").length).toBe(1);
+    await expect(inBar(page, "[data-role=status]")).toHaveText("Connected");
+    await expect(inBar(page, ".thread")).toHaveCount(0);
+    await expect(inBar(page, "[data-role=threads-empty]")).toBeVisible();
+    await expect.poll(() => first.closedSockets.length).toBe(1);
+
+    // A late event on the old daemon's stream cannot reach the bar either.
+    first.send({ schemaVersion: SCHEMA_VERSION, type: "feedback.created", feedback: comment("Late from A") });
+    second.send({ schemaVersion: SCHEMA_VERSION, type: "feedback.created", feedback: comment("From daemon B") });
+    await expect(inBar(page, ".thread-text")).toHaveText(["From daemon B"]);
+
+    await mountBar(page);
+    await expect(inBar(page, "[data-role=status]")).toHaveText("Offline");
+    await expect(inBar(page, ".thread")).toHaveCount(0);
+  });
+
   test("stops for good when the daemon rejects the token", async ({ page, openFixture, fixtureServer }) => {
     const daemon = await fakeDaemon(page, fixtureServer.origin, [], { socket: false });
     daemon.rejectToken = true;

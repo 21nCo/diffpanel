@@ -105,6 +105,59 @@ test("hostile page CSS does not change how the bar looks", async ({ page, openFi
   expect(outline).toBe("solid");
 });
 
+/** Ancestor rules that would make the page's root the bar's containing block, or paint over or hide it. */
+const HOSTILE_ANCESTORS = [
+  "body { transform: translate(-500px, -500px); }",
+  "html { transform: scale(0.5); } body { will-change: transform; }",
+  "body { filter: opacity(0); } html { filter: blur(6px); }",
+  "html, body { opacity: 0; }",
+  "html { zoom: 2; } body { zoom: 0.75; }",
+  "html, body { contain: strict; } body { overflow: hidden; height: 50px; }",
+  "body { position: relative; z-index: 2147483647; isolation: isolate; } #app { position: fixed; inset: 0; z-index: 2147483647; background: rgb(255, 0, 0); }",
+];
+
+async function barSnapshot(page: Page) {
+  const bar = page.locator("iterbar-bar .bar");
+  const box = await bar.boundingBox();
+  if (!box) throw new Error("the bar has no box");
+  const clip = { x: box.x + 12, y: box.y + 12, width: box.width - 24, height: box.height - 24 };
+  const pixels = await page.screenshot({ clip, animations: "disabled", caret: "hide" });
+  const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.localName ?? null, { x: box.x + box.width / 2, y: box.y + 8 });
+  return { box, pixels, hit };
+}
+
+test("hostile ancestor CSS cannot move, scale, hide or cover the bar", async ({ page, openFixture, fixtureServer }) => {
+  const daemon = await fakeDaemon(page, fixtureServer.origin, [comment("Ancestor check")]);
+  await openFixture();
+  await mountWithContent(page, daemon.url, daemon.token);
+  const clean = await barSnapshot(page);
+  expect(clean.hit).toBe("iterbar-bar");
+
+  for (const css of HOSTILE_ANCESTORS) {
+    await openFixture();
+    await page.addStyleTag({ content: css });
+    await mountWithContent(page, daemon.url, daemon.token);
+    const hostile = await barSnapshot(page);
+    expect(hostile.box, css).toEqual(clean.box);
+    expect(hostile.hit, css).toBe("iterbar-bar");
+    expect(hostile.pixels.equals(clean.pixels), css).toBe(true);
+    // Still operable where it is drawn.
+    await inBar(page, "[data-version=v2]").click();
+    await expect(inBar(page, "[data-version=v2]"), css).toHaveAttribute("aria-pressed", "true");
+    // The choice outlives the page load; switch back so the next case starts from the same pixels.
+    await inBar(page, "[data-version=v1]").click();
+    await expect(inBar(page, "[data-version=v1]"), css).toHaveAttribute("aria-pressed", "true");
+  }
+
+  // Moving the bar in the page takes it out of the top layer; connecting it again puts it back.
+  await page.evaluate(() => {
+    const bar = document.querySelector("iterbar-bar")!;
+    document.documentElement.append(bar);
+  });
+  expect((await barSnapshot(page)).box).toEqual(clean.box);
+  expect(await inBar(page, ".bar").evaluate((element) => element.matches(":popover-open"))).toBe(true);
+});
+
 test("the bar's styles do not leak into the page", async ({ page, openFixture, fixtureServer }) => {
   const daemon = await fakeDaemon(page, fixtureServer.origin, [comment("Leak check")]);
   await openFixture();

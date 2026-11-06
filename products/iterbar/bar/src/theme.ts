@@ -4,7 +4,9 @@
  *
  * - `:host` resets every property with `!important`. Between a page rule and a `:host` rule that are both
  *   `!important`, the shadow tree's wins, so no page rule can hide, move or restyle the host.
- * - `display: contents` gives the host no box of its own; the bar is a fixed-position child.
+ * - `display: contents` gives the host no box of its own; the bar is a fixed-position child shown in the top layer
+ *   (`popover="manual"`), so ancestors that would become its containing block or paint over it have no effect. The
+ *   user-agent popover rules (inset, margin, size, border, padding, overflow, colours) are all overridden on `.bar`.
  * - Custom properties are declared on `.bar`, inside the shadow tree, so same-named page variables never apply.
  * - Fonts are system fonts and icons are text: the bar never loads a remote resource.
  */
@@ -18,6 +20,16 @@ export const BAR_CSS = String.raw`
 }
 
 [hidden] { display: none !important; }
+
+.zoom-probe {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100px;
+  height: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
 
 .bar {
   --ib-bg: #ffffff;
@@ -34,14 +46,17 @@ export const BAR_CSS = String.raw`
   --ib-offset: 1;
   color-scheme: light;
   position: fixed;
+  inset: auto;
   z-index: 2147483647;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   width: min(320px, calc(100% - 2 * var(--ib-margin)));
+  height: auto;
   max-height: calc(100% - 2 * var(--ib-margin));
   margin: 0;
   padding: 0;
+  overflow: visible;
   font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font-weight: 400;
   letter-spacing: normal;

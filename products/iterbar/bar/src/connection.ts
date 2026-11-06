@@ -59,8 +59,13 @@ const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15_000, 30_000];
 
 export interface ConnectionCallbacks {
   onStatus(status: ConnectionStatus): void;
-  /** Feedback items from a listing or an event, to be merged into what the bar shows. */
+  /** A feedback item from an event, to be merged into what the bar shows. */
   onFeedback(items: readonly Feedback[]): void;
+  /**
+   * The daemon's complete feedback listing, which replaces what the bar shows. `touched` holds the ids of items that
+   * events delivered while the listing was in flight; those events may be newer than the listing.
+   */
+  onListing(items: readonly Feedback[], touched: ReadonlySet<string>): void;
 }
 
 class UnauthorizedError extends Error {}
@@ -68,7 +73,8 @@ class UnauthorizedError extends Error {}
 /**
  * The bar's link to the daemon: the `/events` WebSocket, a `GET /feedback` listing every time the socket opens (so
  * nothing published while it was closed is missed), and `POST /slots` reports. A socket that closes is reopened
- * with backoff. A `401` stops everything: the token is wrong and retrying will not fix it.
+ * with backoff, which resets only once a listing succeeds. A `401` stops everything: the token is wrong and retrying
+ * will not fix it.
  */
 export class DaemonConnection {
   readonly #config: DaemonConfig;
@@ -79,7 +85,11 @@ export class DaemonConnection {
   #attempt = 0;
   #connected = false;
   #stopped = false;
-  #pendingReport: { pageUrl: string; slots: readonly SlotState[] } | null = null;
+  #pendingReport: { pageUrl: string; slots: readonly SlotState[]; generation: number } | null = null;
+  /** Counts {@link reportSlots} calls, so a failed report that something newer superseded is never retried. */
+  #reportGeneration = 0;
+  /** Ids delivered by events since the in-flight listing was requested; `null` when no listing is in flight. */
+  #touched: Set<string> | null = null;
 
   constructor(config: DaemonConfig, callbacks: ConnectionCallbacks) {
     this.#config = config;
@@ -110,7 +120,8 @@ export class DaemonConnection {
    * once the connection opens. A URL the contract does not accept (such as a `file:` page) is not reported.
    */
   reportSlots(pageUrl: string, slots: readonly SlotState[]): void {
-    this.#pendingReport = { pageUrl, slots };
+    this.#reportGeneration += 1;
+    this.#pendingReport = { pageUrl, slots, generation: this.#reportGeneration };
     if (this.#connected) this.#flushReport();
   }
 
@@ -128,7 +139,6 @@ export class DaemonConnection {
     socket.addEventListener("open", () => {
       if (this.#socket !== socket) return;
       opened = true;
-      this.#attempt = 0;
       this.#connected = true;
       this.#callbacks.onStatus({ kind: "connected" });
       void this.#list(socket);
@@ -146,6 +156,7 @@ export class DaemonConnection {
       // Events from another protocol version, or that do not match v1, are ignored rather than half-read.
       if (!parsed.success) return;
       if (parsed.data.type === "feedback.created" || parsed.data.type === "feedback.updated") {
+        this.#touched?.add(parsed.data.feedback.id);
         this.#callbacks.onFeedback([parsed.data.feedback]);
       }
     });
@@ -161,15 +172,21 @@ export class DaemonConnection {
 
   /** Lists every feedback item. A failure closes the socket, so the next open lists again. */
   async #list(socket: WebSocket): Promise<void> {
+    const touched = new Set<string>();
+    this.#touched = touched;
     try {
       const response = await this.#request("listFeedback");
       const body = safeParseMessage(feedbackListResponseSchema, await response.json(), "feedback list");
       if (!body.success) throw body.error;
-      if (this.#socket === socket) this.#callbacks.onFeedback(body.data.items);
+      if (this.#socket !== socket) return;
+      this.#attempt = 0;
+      this.#callbacks.onListing(body.data.items, touched);
     } catch (error) {
       if (this.#stopped || this.#socket !== socket) return;
       if (error instanceof UnauthorizedError) this.#reject();
       else socket.close();
+    } finally {
+      if (this.#touched === touched) this.#touched = null;
     }
   }
 
@@ -197,8 +214,10 @@ export class DaemonConnection {
     if (!report.success) return;
     this.#request("reportSlots", JSON.stringify(report.data)).catch((error: unknown) => {
       if (error instanceof UnauthorizedError) this.#reject();
-      // Any other failure is left for the next report or reconnect; slot reports are best effort.
-      else if (!this.#stopped && this.#pendingReport === null) this.#pendingReport = pending;
+      // Any other failure is retried on the next reconnect, unless a newer report has replaced this one since.
+      else if (!this.#stopped && this.#pendingReport === null && pending.generation === this.#reportGeneration) {
+        this.#pendingReport = pending;
+      }
     });
   }
 

@@ -88,6 +88,9 @@ export class IterbarBarElement extends ElementBase {
   readonly #comment = h("button", {
     type: "button", "data-role": "comment", "aria-pressed": "false", title: "Comment mode",
   }, "Comment");
+  /** Inherits the page's effective `zoom`, which the bar cancels; see {@link #fitZoom}. */
+  readonly #zoomProbe = h("span", { class: "zoom-probe", "aria-hidden": "true" });
+  #zoomObserver: ResizeObserver | null = null;
   readonly #slots: SlotsPanel;
   readonly #threads = new ThreadsPanel();
   #daemonUrl: string | null = null;
@@ -109,11 +112,11 @@ export class IterbarBarElement extends ElementBase {
     this.#slots = new SlotsPanel({ onSlots: (slots) => this.#queueReport(slots) });
     this.#body = h("div", { class: "body", id: "iterbar-body" },
       this.#detail, this.#slots.element, this.#threads.element);
-    this.#bar = h("div", { class: "bar", role: "region", "aria-label": "Iterbar" },
+    this.#bar = h("div", { class: "bar", role: "region", "aria-label": "Iterbar", popover: "manual" },
       h("div", { class: "header" },
         this.#handle, h("span", { class: "title" }, "Iterbar"), this.#status, this.#comment, this.#toggle),
       this.#body);
-    this.#root.append(this.#bar);
+    this.#root.append(this.#zoomProbe, this.#bar);
 
     this.#toggle.addEventListener("click", () => this.#setCollapsed(!this.#state.collapsed));
     this.#comment.addEventListener("click", () => {
@@ -188,6 +191,8 @@ export class IterbarBarElement extends ElementBase {
     }
     this.#state = readStoredState();
     this.#applyState();
+    this.#raise();
+    this.#watchZoom();
     window.addEventListener("keydown", this.#onKeydown, true);
     this.#slots.attach();
     this.#reconnect();
@@ -195,6 +200,8 @@ export class IterbarBarElement extends ElementBase {
 
   disconnectedCallback(): void {
     window.removeEventListener("keydown", this.#onKeydown, true);
+    this.#zoomObserver?.disconnect();
+    this.#zoomObserver = null;
     this.#slots.detach();
     this.#connection?.stop();
     this.#connection = null;
@@ -212,6 +219,43 @@ export class IterbarBarElement extends ElementBase {
     if (!this.#state.collapsed || focusInside) this.#toggle.focus();
   };
 
+  /**
+   * Shows the bar in the top layer, outside every page stacking context and containing block, so a `transform`,
+   * `filter`, `opacity`, `contain` or `will-change` on an ancestor cannot move, clip or hide it. Removing the element
+   * from the page takes it out of the top layer, so this runs on every connect. Without popover support the bar stays
+   * an ordinary fixed-position element.
+   */
+  #raise(): void {
+    const bar = this.#bar;
+    if (typeof bar.showPopover !== "function" || bar.matches(":popover-open")) return;
+    try {
+      bar.showPopover();
+    } catch {
+      // Left as a fixed-position element.
+    }
+  }
+
+  /** The top layer still inherits `zoom`, so the bar applies the inverse of what the page gives it. */
+  #fitZoom(): void {
+    const zoom = (this.#zoomProbe as { currentCSSZoom?: number }).currentCSSZoom;
+    if (typeof zoom !== "number" || !Number.isFinite(zoom) || zoom <= 0) return;
+    this.#bar.style.zoom = zoom === 1 ? "" : String(1 / zoom);
+  }
+
+  /** Refits on every change of the page's zoom, which changes the probe's size in device pixels. */
+  #watchZoom(): void {
+    this.#fitZoom();
+    if (this.#zoomObserver || typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(() => this.#fitZoom());
+    try {
+      observer.observe(this.#zoomProbe, { box: "device-pixel-content-box" });
+    } catch {
+      // Without device-pixel boxes the zoom is fitted once per connect.
+      return;
+    }
+    this.#zoomObserver = observer;
+  }
+
   #queueReconnect(): void {
     if (this.#reconnectQueued) return;
     this.#reconnectQueued = true;
@@ -227,6 +271,8 @@ export class IterbarBarElement extends ElementBase {
     if (this.#connection && key === this.#connectionKey) return;
     this.#connection?.stop();
     this.#connection = null;
+    // Threads belong to the daemon that listed them; another daemon (or none) must not show them.
+    if (key !== this.#connectionKey) this.#threads.clear();
     this.#connectionKey = key;
     const parsed = parseDaemonConfig(this.#daemonUrl, this.#token);
     if (!parsed.ok) {
@@ -239,6 +285,9 @@ export class IterbarBarElement extends ElementBase {
       },
       onFeedback: (items) => {
         if (this.#connection === connection) this.#threads.merge(items);
+      },
+      onListing: (items, touched) => {
+        if (this.#connection === connection) this.#threads.replace(items, touched);
       },
     });
     this.#connection = connection;

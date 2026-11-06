@@ -1,6 +1,6 @@
 import type { Feedback, FeedbackStatus } from "iterbar";
 import { h } from "./dom.js";
-import { mergeFeedback, threadOrder } from "./threads-state.js";
+import { applyListing, mergeFeedback, threadOrder } from "./threads-state.js";
 
 /** Most threads listed at once; older ones are counted but not shown. */
 export const MAX_SHOWN_THREADS = 100;
@@ -86,9 +86,21 @@ export class ThreadsPanel {
     this.element = h("section", { class: "section", "data-section": "threads" }, this.#heading, this.#empty, this.#list, this.#more);
   }
 
-  /** Merges items from the daemon; see {@link mergeFeedback}. */
+  /** Merges items from an event; see {@link mergeFeedback}. */
   merge(items: readonly Feedback[]): void {
     if (mergeFeedback(this.#items, items)) this.#render();
+  }
+
+  /** Replaces the threads with a complete listing; see {@link applyListing}. */
+  replace(items: readonly Feedback[], touched: ReadonlySet<string>): void {
+    if (applyListing(this.#items, items, touched)) this.#render();
+  }
+
+  /** Forgets every thread, as when the bar switches to another daemon. */
+  clear(): void {
+    if (this.#items.size === 0) return;
+    this.#items.clear();
+    this.#render();
   }
 
   #render(): void {

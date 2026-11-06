@@ -32,9 +32,12 @@ attributes. The bar never writes the token to an attribute.
   elements or send comments.
 - **Feedback threads**, newest first, with status and replies. The bar lists
   them with `GET /feedback` each time the `/events` WebSocket opens, then
-  applies `feedback.created` and `feedback.updated` events as they arrive. It
-  keeps whichever copy of an item has the later `updatedAt`, and ignores
-  events that are malformed or from another schema version.
+  applies `feedback.created` and `feedback.updated` events as they arrive.
+  Each listing replaces the threads shown, except for items that an event
+  delivered while the listing was in flight, which keep the event's copy. An
+  event replaces an item unless it is older (`updatedAt`) than the one shown.
+  Events that are malformed or from another schema version are ignored.
+  Switching to another daemon URL or token clears the threads.
 
 ## Connection
 
@@ -43,8 +46,9 @@ the token must be 64 lowercase hex characters; otherwise the bar never sends
 a request. Without either value, it still switches slots and shows that
 feedback is unavailable.
 
-If the event stream drops, the bar reconnects with backoff (1 s up to 30 s)
-and lists the threads again. A page whose origin is not registered with
+If the event stream drops, the bar reconnects with backoff (1 s up to 30 s,
+reset only after a listing succeeds) and lists the threads again. Only the
+latest slot report is ever retried. A page whose origin is not registered with
 `POST /origins` cannot read any daemon response, so it keeps retrying and
 says so. A rejected token (`401`) stops the bar until it gets a new token.
 Removing the element closes the stream and cancels every timer.
@@ -61,7 +65,10 @@ Removing the element closes the stream and cancels every timer.
   remembers its own.
 - Styles stay inside the shadow root. The host resets every inherited
   property with `!important`, which a page rule cannot override, so page CSS
-  cannot hide, move or restyle the bar.
+  cannot hide, move or restyle the bar. The bar is shown in the top layer
+  (a manual popover), so a `transform`, `filter`, `opacity` or `contain` on
+  `html`, `body` or any other ancestor cannot move, cover or hide it, and it
+  cancels any `zoom` it inherits.
 - Light and dark themes follow `prefers-color-scheme`.
 - The bar never loads a remote resource. It uses system fonts and text
   icons, and its only network traffic goes to the daemon.
