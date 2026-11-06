@@ -10,6 +10,10 @@
 // node bundle.mjs render <jobs JSON>
 //   Server-renders each job's `entry` with `props`, as a server whose NODE_ENV is the job's `nodeEnv` does,
 //   and prints the bodies as a JSON array in job order.
+//
+// node bundle.mjs vite <entries JSON>
+//   Builds a production page that mounts each entry with Vite's default settings and prints its JavaScript
+//   as a JSON array in entry order.
 import { build } from "esbuild";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -80,23 +84,61 @@ async function serverModule(directory, entry, nodeEnv, index) {
 async function serverRender(jobs) {
   const directory = await mkdtemp(join(tmpdir(), "iterbar-svelte-ssr-"));
   try {
-    const modules = new Map();
-    const bodies = [];
-    for (const { entry, nodeEnv, props } of jobs) {
-      const key = JSON.stringify([entry, nodeEnv]);
-      if (!modules.has(key)) modules.set(key, await serverModule(directory, entry, nodeEnv, modules.size));
-      const server = modules.get(key);
-      // An unreplaced bundle reads NODE_ENV while rendering.
-      process.env.NODE_ENV = nodeEnv;
-      bodies.push(server.render(server.default, { props }).body);
-    }
-    return bodies;
+    const moduleKey = ({ entry, nodeEnv }) => JSON.stringify([entry, nodeEnv]);
+    const keys = [...new Set(jobs.map(moduleKey))];
+    // Bundling and importing read no NODE_ENV, so every module loads at once; rendering below does not.
+    const loaded = await Promise.all(keys.map((key, index) => {
+      const [entry, nodeEnv] = JSON.parse(key);
+      return serverModule(directory, entry, nodeEnv, index);
+    }));
+    const modules = new Map(keys.map((key, index) => [key, loaded[index]]));
+    return jobs.map((job) => {
+      const server = modules.get(moduleKey(job));
+      // An unreplaced bundle reads NODE_ENV while rendering, so each job renders alone with its own.
+      process.env.NODE_ENV = job.nodeEnv;
+      return server.render(server.default, { props: job.props }).body;
+    });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 }
 
+/**
+ * Builds a page that mounts each entry with Vite's own defaults (Rollup tree-shaking, esbuild minification,
+ * `process.env.NODE_ENV` replaced) in production mode, bundling Svelte's runtime as an app does.
+ */
+async function viteBuild(entries) {
+  // As `vite build` runs from a shell: Vite then sets NODE_ENV to production itself; the test runner's would win.
+  delete process.env.NODE_ENV;
+  const [{ build }, { svelte }] = await Promise.all([import("vite"), import("@sveltejs/vite-plugin-svelte")]);
+  return Promise.all(entries.map(async (entry) => {
+    const page = "\0iterbar-page.js";
+    const output = await build({
+      configFile: false,
+      root: process.cwd(),
+      mode: "production",
+      logLevel: "silent",
+      plugins: [
+        svelte({ configFile: false }),
+        {
+          name: "iterbar-page",
+          resolveId: (id) => (id === "iterbar:page" ? page : null),
+          load: (id) => (id === page
+            ? `import { mount } from "svelte"; import Entry from ${JSON.stringify(resolve(entry))}; mount(Entry, { target: document.body });`
+            : null),
+        },
+      ],
+      build: { write: false, rollupOptions: { input: "iterbar:page" } },
+    });
+    return output.output.filter((file) => file.type === "chunk").map((chunk) => chunk.code).join("\n");
+  }));
+}
+
 const [mode, input] = process.argv.slice(2);
 const options = JSON.parse(input);
-const output = mode === "render" ? JSON.stringify(await serverRender(options)) : await browserBundle(options);
-process.stdout.write(output);
+const commands = {
+  bundle: async () => browserBundle(options),
+  render: async () => JSON.stringify(await serverRender(options)),
+  vite: async () => JSON.stringify(await viteBuild(options)),
+};
+process.stdout.write(await commands[mode]());

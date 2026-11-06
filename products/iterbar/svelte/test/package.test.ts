@@ -1,12 +1,12 @@
 import { PAGE_API_GLOBAL, readPageApi, VARIANT_STORAGE_KEY } from "iterbar";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runInThisContext } from "node:vm";
 import * as Svelte from "svelte";
 import * as SvelteInternal from "svelte/internal/client";
 import { flushSync, hydrate, mount, unmount, type Component } from "svelte";
 import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { bundle, packageDirectory, serverRenderAll } from "./support/bundle.js";
+import { bundle, packageDirectory, serverRenderAll, viteBuild } from "./support/bundle.js";
 
 const SHARED_REGISTRY = Symbol.for("iterbar.variants.registry.v1");
 const FIXTURE = "test/fixtures/BuiltPricing.svelte";
@@ -75,6 +75,8 @@ describe("built package", () => {
     for (const file of ["index.js", "index.d.ts", "Variants.svelte", "Variants.svelte.d.ts", "VariantsProvider.svelte"]) {
       expect(readFileSync(join(packageDirectory, "dist", file), "utf8").length, file).toBeGreaterThan(0);
     }
+    const shipped = readdirSync(join(packageDirectory, "dist"), { recursive: true, encoding: "utf8" });
+    expect(shipped.filter((file) => /(^|[/\\])(test|fixtures)([/\\]|$)|\.test\./.test(file))).toEqual([]);
     expect(unreplaced).toContain("process.env.NODE_ENV");
   });
 
@@ -90,6 +92,15 @@ describe("built package", () => {
     expect(container.querySelector("template, [data-iterbar-slot]")).toBeNull();
     expect(readPageApi(window)).toBeNull();
   });
+
+  it("leaves the development code out of a production page built with Vite's default settings", () => {
+    // Rollup keeps everything inside `try` by default, so the selection must not depend on dead code there.
+    const [page, defaultOnly] = viteBuild([FIXTURE, "test/fixtures/PlanOne.svelte"]);
+    for (const marker of devOnly) expect(page).not.toContain(marker);
+    // Against a page that renders the default directly, Variants in production adds only its own small
+    // components and the other versions; the development code would add about 100 KB.
+    expect(page!.length - defaultOnly!.length).toBeLessThan(8192);
+  }, 60_000);
 
   it.each([["no process global", undefined], ["a process without env", {}]])(
     "renders only the default from an unreplaced bundle in a browser with %s",

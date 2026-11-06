@@ -4,12 +4,14 @@ import { PAGE_API_GLOBAL, readPageApi, registrySnapshotSchema, VARIANT_STORAGE_K
 import { flushSync, hydrate, unmount, type Component } from "svelte";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { serverRenderAll, type ServerRenderJob } from "./support/bundle.js";
+import { withoutComments } from "./support/markup.js";
 import { Variants, type VersionContent } from "../src/index.js";
 import Contexts from "./fixtures/Contexts.svelte";
 import Disclosure from "./fixtures/Disclosure.svelte";
 import InCard from "./fixtures/InCard.svelte";
 import Invalid from "./fixtures/Invalid.svelte";
 import Nested from "./fixtures/Nested.svelte";
+import Observed from "./fixtures/Observed.svelte";
 import Page from "./fixtures/Page.svelte";
 import PlanOne from "./fixtures/PlanOne.svelte";
 import PlanTwo from "./fixtures/PlanTwo.svelte";
@@ -24,11 +26,8 @@ const SHARED_REGISTRY = Symbol.for("iterbar.variants.registry.v1");
 /** Records console errors and warnings and uncaught window errors, such as Svelte's hydration reports. */
 function collectErrors() {
   const errors: string[] = [];
-  const record = (...args: unknown[]) => {
-    errors.push(args.map(String).join(" "));
-  };
-  vi.spyOn(console, "error").mockImplementation(record);
-  vi.spyOn(console, "warn").mockImplementation(record);
+  const record = (...args: unknown[]) => void errors.push(args.map(String).join(" "));
+  for (const level of ["error", "warn"] as const) vi.spyOn(console, level).mockImplementation(record);
   const onError = (event: ErrorEvent) => record(event.error ?? event.message);
   window.addEventListener("error", onError);
   onTestFinished(() => window.removeEventListener("error", onError));
@@ -37,7 +36,7 @@ function collectErrors() {
 
 /** The container's markup without Svelte's comment anchors. */
 function markup(container: Element) {
-  return container.innerHTML.replaceAll("<!---->", "").replace(/<!--[[\]!]*-->/g, "");
+  return withoutComments(container.innerHTML);
 }
 
 /** Text of each element marked as a root of `slot`. */
@@ -137,6 +136,26 @@ describe("in development", () => {
     window.localStorage.clear();
     render(Pricing);
     expect(screen.getByText("Plan one")).toBeDefined();
+  });
+
+  it("mounts only the selected version on a client mount, never the default first", () => {
+    visit("/plans?iterbar=probe:b");
+    const log: string[] = [];
+    render(Observed, { names: ["a", "b"], log });
+    expect(log.filter((entry) => !entry.startsWith("shows"))).toEqual(["mount b"]);
+    expect(slots()).toMatchObject([{ slot: "probe", activeVersion: "b" }]);
+  });
+
+  it("shows the default at once when new versions drop the active one", () => {
+    const log: string[] = [];
+    const { rerender } = render(Observed, { names: ["a", "b"], log });
+    select("probe", "b");
+    log.length = 0;
+    rerender({ names: ["a", "c"], log });
+    // Rendered in the same update as the new versions: the default, never an empty slot.
+    expect(log.filter((entry) => entry.startsWith("shows"))).toEqual(["shows a"]);
+    expect(log.filter((entry) => !entry.startsWith("shows")).sort()).toEqual(["mount a", "unmount b"]);
+    expect(slots()).toMatchObject([{ slot: "probe", versions: ["a", "c"], activeVersion: "a" }]);
   });
 
   it("switches in place through window.__ITERBAR__ without remounting the rest of the page", () => {
@@ -354,9 +373,12 @@ describe("markup in development", () => {
 });
 
 describe("nested slots", () => {
-  function marks(container: ParentNode) {
-    return { inner: roots(container, "inner"), outer: roots(container, "outer") };
+  /** Once the range observers settle, the elements marked as roots of the inner and the outer slot. */
+  async function expectMarks(container: ParentNode, inner: readonly string[], outer: readonly string[]) {
+    await settle();
+    expect([roots(container, "inner"), roots(container, "outer")]).toEqual([inner, outer]);
   }
+  const toggle = () => screen.getByRole("button").click();
 
   it.each([
     { form: "component", own: [] },
@@ -364,45 +386,32 @@ describe("nested slots", () => {
   ] as const)("keeps each slot's marks when an inner slot is the top level of a $form version", async ({ form, own }) => {
     const errors = collectErrors();
     const { container, unmount: unmountNested } = render(Nested, { form });
-    await settle();
-    expect(marks(container)).toEqual({ inner: ["Inner A"], outer: own });
-
+    await expectMarks(container, ["Inner A"], own);
     select("inner", "b");
-    await settle();
-    expect(marks(container)).toEqual({ inner: ["Inner B"], outer: own });
-
+    await expectMarks(container, ["Inner B"], own);
     select("outer", "v2");
-    await settle();
-    expect(marks(container)).toEqual({ inner: [], outer: ["Outer two"] });
+    await expectMarks(container, [], ["Outer two"]);
+    // The inner slot unmounted with the outer slot's first version.
     expect(slots().map((state) => state.slot)).toEqual(["outer"]);
-
     select("outer", "v1");
-    await settle();
-    expect(marks(container)).toEqual({ inner: ["Inner B"], outer: own });
+    await expectMarks(container, ["Inner B"], own);
 
-    const elements = [...container.querySelectorAll("p")];
+    const paragraphs = [...container.querySelectorAll("p")];
     unmountNested();
-    expect(elements.filter((element) => element.hasAttribute("data-iterbar-slot"))).toEqual([]);
+    expect(paragraphs.filter((paragraph) => paragraph.hasAttribute("data-iterbar-slot"))).toEqual([]);
     expect(slots()).toEqual([]);
     expect(errors).toEqual([]);
   });
 
   it("keeps the outer slot's marks while an inner slot mounts and unmounts inside the same version", async () => {
     const { container } = render(Slot, { slot: "outer", versions: { v1: Toggle }, default: "v1" });
-    await settle();
-    expect(marks(container)).toEqual({ inner: [], outer: ["toggle"] });
-
-    screen.getByRole("button").click();
-    await settle();
-    expect(marks(container)).toEqual({ inner: ["Inner A"], outer: ["toggle"] });
-
+    await expectMarks(container, [], ["toggle"]);
+    toggle();
+    await expectMarks(container, ["Inner A"], ["toggle"]);
     select("inner", "b");
-    await settle();
-    expect(marks(container)).toEqual({ inner: ["Inner B"], outer: ["toggle"] });
-
-    screen.getByRole("button").click();
-    await settle();
-    expect(marks(container)).toEqual({ inner: [], outer: ["toggle"] });
+    await expectMarks(container, ["Inner B"], ["toggle"]);
+    toggle();
+    await expectMarks(container, [], ["toggle"]);
     expect(slots().map((state) => state.slot)).toEqual(["outer"]);
   });
 });

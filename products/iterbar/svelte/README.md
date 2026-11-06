@@ -31,11 +31,13 @@ then local storage, then `default`. The Iterbar bar switches it through
 Switching remounts the slot's content, so versions never share component
 state.
 
-The server, and the client while it mounts or hydrates, render `default`;
-right after mounting, the client switches to the selected version. So server
-and client markup always agree, the server never touches `window`, local
-storage or the registry, and a non-default selection briefly mounts the
-default version before switching (in development only).
+The server renders `default` and never touches `window`, local storage or the
+registry. The client renders the selected version from its first render, as
+React's `useSyncExternalStore` does: a client mount never mounts the default
+first, and new `versions` without the active one render their default at
+once. When hydration finds the server's default but the page selects another
+version, the client replaces the default's markup with the selected version
+without hydration errors.
 
 `Variants` adds no wrapper element. In development it renders an empty
 `<template>` before and after the version, and marks each of the version's

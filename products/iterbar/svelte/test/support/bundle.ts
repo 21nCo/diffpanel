@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 // jsdom replaces the URL global, so resolve paths from the module's file URL string.
 export const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-function run(mode: "bundle" | "render", input: unknown): string {
+function run(mode: "bundle" | "render" | "vite", input: unknown): string {
   return execFileSync(process.execPath, [join(packageDirectory, "test", "support", "bundle.mjs"), mode, JSON.stringify(input)], {
     cwd: packageDirectory,
     encoding: "utf8",
@@ -15,6 +15,11 @@ function run(mode: "bundle" | "render", input: unknown): string {
 /** A minified CommonJS browser bundle of `entry` (relative to the package), with Svelte left external. */
 export function bundle(entry: string, options: { dev: boolean; nodeEnv: string }): string {
   return run("bundle", { entry, ...options });
+}
+
+/** The JavaScript of a production page that mounts each entry, built with Vite's default settings. */
+export function viteBuild(entries: readonly string[]): string[] {
+  return JSON.parse(run("vite", entries)) as string[];
 }
 
 /** One server render: the component in `entry`, on a server whose NODE_ENV is `nodeEnv`. */

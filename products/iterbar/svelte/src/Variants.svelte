@@ -11,17 +11,20 @@
 
   let props: VariantsProps<Versions> = $props();
 
-  // The bare check folds to a literal once a bundler replaces `process.env.NODE_ENV`, even inside `try`, so
-  // other builds drop DevelopmentVariants and a development build needs no `process` global. Without that
-  // replacement, a page with no `process` (or no `process.env`) is not development.
-  const Implementation = (() => {
+  // Without a bundler's replacement, reading `process.env.NODE_ENV` throws in a page with no `process` (or no
+  // `process.env`), which is not development; so it is read inside `try` first.
+  const readable = (() => {
     try {
-      if (process.env.NODE_ENV === "development") return DevelopmentVariants;
+      return process.env.NODE_ENV === "development";
     } catch {
-      // Not development.
+      return false;
     }
-    return ProductionVariants;
   })();
+  // The bare check, repeated outside `try`, folds to a literal once a bundler replaces `process.env.NODE_ENV`,
+  // so Rollup (which keeps everything inside `try` by default) and esbuild both drop DevelopmentVariants from
+  // other builds, and a development build needs no `process` global.
+  const Implementation =
+    readable && process.env.NODE_ENV === "development" ? DevelopmentVariants : ProductionVariants;
 </script>
 
 <Implementation {...props} />

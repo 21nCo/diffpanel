@@ -8,12 +8,13 @@ import PlanOne from "./fixtures/PlanOne.svelte";
 import PlanTwo from "./fixtures/PlanTwo.svelte";
 import Pricing from "./fixtures/Pricing.svelte";
 import Snippets from "./fixtures/Snippets.svelte";
+import { withoutComments } from "./support/markup.js";
 
 const SHARED_REGISTRY = Symbol.for("iterbar.variants.registry.v1");
 
 /** Markup without Svelte's hydration comments or the whitespace between tags. */
 function html(body: string) {
-  return body.replace(/<!--[^>]*-->/g, "").replace(/>\s+</g, "><").trim();
+  return withoutComments(body).replace(/>\s+</g, "><").trim();
 }
 
 /** Fails the test if rendering reads any browser global; Node.js has none of them. */

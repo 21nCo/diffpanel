@@ -22,21 +22,31 @@
     const [name, names, initial] = JSON.parse(key) as [string, string[], string];
     return validateSlotDefinition({ slot: name, versions: names, defaultVersion: initial });
   });
-  // The server and the hydrating client both render the default; the effect below switches after mount.
-  let activeVersion = $state(untrack(() => definition.defaultVersion));
+  // Set before the template first renders, and only in the browser: the server runs no effects, so it renders
+  // the default and never reaches the registry or `window`.
+  let browser = $state(false);
+  $effect.pre(() => {
+    browser = true;
+  });
+  // Counts registry changes, so `activeVersion` reads the registry's selection again after each one.
+  let changes = $state(0);
+  // Read while rendering, as React's useSyncExternalStore does: a client mount renders the selected version at
+  // once, and new versions without the active one render their default at once.
+  const activeVersion = $derived.by(() => {
+    void changes;
+    const current = definition;
+    return browser ? (provided ?? getVariantsRegistry()).activeVersion(current) : current.defaultVersion;
+  });
   let start = $state<HTMLTemplateElement>();
   let end = $state<HTMLTemplateElement>();
 
-  // Runs only in the browser, after mount: the server never reaches the registry or `window`.
+  // Runs only in the browser, after mount: registers the slot and follows the registry's selections.
   $effect(() => {
     const current = definition;
     const registry = provided ?? getVariantsRegistry();
+    // Untracked: registering notifies at once, and this effect must not depend on the count it bumps.
+    const unsubscribe = registry.subscribe(() => untrack(() => (changes += 1)));
     const unregister = registry.register(current);
-    const update = () => {
-      activeVersion = registry.activeVersion(current);
-    };
-    const unsubscribe = registry.subscribe(update);
-    update();
     return () => {
       unsubscribe();
       unregister();
@@ -53,7 +63,13 @@
 </script>
 
 <template bind:this={start} data-iterbar-slot-boundary="start"></template>
-{#key activeVersion}
+<!-- The server renders the default branch. A client that selects another version takes the other branch, so
+     hydration replaces the server's default instead of mounting it first. -->
+{#if activeVersion === definition.defaultVersion}
   <Version content={versionContent(versions, activeVersion)} />
-{/key}
+{:else}
+  {#key activeVersion}
+    <Version content={versionContent(versions, activeVersion)} />
+  {/key}
+{/if}
 <template bind:this={end} data-iterbar-slot-boundary="end"></template>
