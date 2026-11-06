@@ -54,6 +54,114 @@ function isTreeRoot(node: Node): boolean {
   return node.nodeType === DOCUMENT_NODE || (node.nodeType === DOCUMENT_FRAGMENT_NODE && "host" in node);
 }
 
+/** A live range as its tree's shared observer sees it. */
+interface TrackedRange {
+  readonly start: Node;
+  /** The parent the range is indexed under in its tree. */
+  parent: Node | null;
+  /** The tree the range is in; `null` once disposed. */
+  tree: Tree | null;
+  /** Moves the range to the tree it is in now and marks it again. */
+  update(): void;
+}
+
+/**
+ * One document, shadow root or detached root node, observed once for every range in it. A batch reaches a
+ * range only when it changes the range's parent's children or moves the range to another tree.
+ */
+interface Tree {
+  readonly root: Node;
+  readonly ranges: Set<TrackedRange>;
+  readonly byParent: Map<Node, Set<TrackedRange>>;
+  /** For a document: its detached trees with ranges, which can only enter it by an insertion it observes. */
+  readonly detached: Set<Tree>;
+  /** For a detached tree: its document's tree, which observes the document on its behalf. */
+  document: Tree | null;
+  observer: MutationObserver | null;
+}
+
+const trees = new Map<Node, Tree>();
+
+function treeFor(root: Node): Tree {
+  const existing = trees.get(root);
+  if (existing) return existing;
+  const tree: Tree = { root, ranges: new Set(), byParent: new Map(), detached: new Set(), document: null, observer: null };
+  trees.set(root, tree);
+  const Observer = (globalThis as { MutationObserver?: typeof MutationObserver }).MutationObserver;
+  if (typeof Observer === "function") {
+    tree.observer = new Observer((records) => dispatch(tree, records));
+    tree.observer.observe(root, { childList: true, subtree: true });
+  }
+  const document = root.ownerDocument;
+  if (!isTreeRoot(root) && document) {
+    tree.document = treeFor(document);
+    tree.document.detached.add(tree);
+  }
+  return tree;
+}
+
+/** Stops observing a tree that no range and no detached tree depends on. */
+function release(tree: Tree): void {
+  if (tree.ranges.size > 0 || tree.detached.size > 0) return;
+  tree.observer?.disconnect();
+  trees.delete(tree.root);
+  if (tree.document) {
+    tree.document.detached.delete(tree);
+    release(tree.document);
+  }
+}
+
+/**
+ * Updates only the ranges a batch can affect. A batch costs one lookup per record; a range leaves its tree
+ * only when it or an ancestor is removed, so only a batch that removes a node with descendants checks the
+ * tree's ranges, and only one that adds nodes checks its detached trees, each once per batch.
+ */
+function dispatch(tree: Tree, records: readonly MutationRecord[]): void {
+  const affected = new Set<TrackedRange>();
+  let removedSubtree = false;
+  let added = false;
+  for (const record of records) {
+    for (const range of tree.byParent.get(record.target) ?? []) affected.add(range);
+    added ||= record.addedNodes.length > 0;
+    removedSubtree ||= [...record.removedNodes].some((node) => node.hasChildNodes());
+  }
+  if (removedSubtree) for (const range of tree.ranges) if (range.start.getRootNode() !== tree.root) affected.add(range);
+  if (added) {
+    for (const detached of tree.detached) {
+      for (const range of detached.ranges) if (range.start.getRootNode() !== detached.root) affected.add(range);
+    }
+  }
+  for (const range of affected) range.update();
+}
+
+function join(range: TrackedRange, root: Node): void {
+  range.tree = treeFor(root);
+  range.tree.ranges.add(range);
+}
+
+/** Indexes the range under `parent` in its tree, replacing the previous parent. */
+function reindex(range: TrackedRange, parent: Node | null): void {
+  const { tree } = range;
+  if (!tree) return;
+  const previous = range.parent ? tree.byParent.get(range.parent) : undefined;
+  previous?.delete(range);
+  if (previous?.size === 0 && range.parent) tree.byParent.delete(range.parent);
+  range.parent = parent;
+  if (!parent) return;
+  const ranges = tree.byParent.get(parent) ?? new Set<TrackedRange>();
+  ranges.add(range);
+  tree.byParent.set(parent, ranges);
+}
+
+function leave(range: TrackedRange): void {
+  const { tree } = range;
+  if (!tree) return;
+  reindex(range, null);
+  tree.ranges.delete(range);
+  range.tree = null;
+  release(tree);
+}
+
 /** Stops marking a slot range and removes the marks it set. */
 export interface SlotRange {
   (): void;
@@ -66,13 +174,14 @@ export interface SlotRange {
 
 /**
  * Marks every element between the sibling nodes `start` and `end` (exclusive) as a root of `slot`, and keeps
- * the marks current while elements in that range are added, removed or replaced. It observes the range's
- * root node (its document, a shadow root or a detached fragment) and follows the range into each tree it
- * moves to. While detached it also observes its document, so inserting it there is noticed; inserting a
- * range whose boundaries were removed on their own into a shadow root is not visible to any observer, so call
- * the returned function's `refresh()` afterwards. `<template>` elements are skipped, so the boundaries
- * themselves can be templates, which HTML and React allow inside `<p>`, `<ul>`, `<table>`, `<tbody>` and
- * `<tr>`. Text nodes cannot carry the attribute and are left unmarked.
+ * the marks current while elements in that range are added, removed or replaced. Every range in one tree
+ * (a document, a shadow root or a detached fragment) shares one observer of that tree, which updates only
+ * the ranges a change reaches, and a range follows each tree it moves to. While detached, a range is also
+ * noticed when it is inserted into its document; inserting a range whose boundaries were removed on their
+ * own into a shadow root is not visible to any observer, so call the returned function's `refresh()`
+ * afterwards. `<template>` elements are skipped, so the boundaries themselves can be templates, which HTML
+ * and React allow inside `<p>`, `<ul>`, `<table>`, `<tbody>` and `<tr>`. Text nodes cannot carry the
+ * attribute and are left unmarked.
  *
  * Ranges may nest: when `start` and `end` carry {@link slotBoundaryAttributes}, an enclosing range skips the
  * nodes between them, so the inner slot keeps its marks whichever range marks or updates first. Calling the
@@ -84,52 +193,34 @@ export function markSlotRange(start: Node, end: Node, slot: string): SlotRange {
     if (element.getAttribute(SLOT_ATTRIBUTE) === slot) element.removeAttribute(SLOT_ATTRIBUTE);
     marked.delete(element);
   };
-  let root: Node | null = null;
-  let parent: ParentNode | null = null;
-  let live = true;
-  const Observer = (globalThis as { MutationObserver?: typeof MutationObserver }).MutationObserver;
-  const observer =
-    typeof Observer === "function"
-      ? new Observer((records) => {
-          // Each callback costs one root lookup and a scan of its records; the range is re-marked only when
-          // it moved to another tree or parent, or its parent's children changed.
-          if (bind() || start.parentNode !== parent || records.some((record) => record.target === parent)) mark();
-        })
-      : null;
-  /** Observes the tree the range is in now; returns whether that tree changed. */
-  const bind = () => {
-    const current = start.getRootNode();
-    if (current === root) return false;
-    root = current;
-    if (observer) {
-      observer.disconnect();
-      observer.observe(current, { childList: true, subtree: true });
-      const document = start.ownerDocument;
-      if (!isTreeRoot(current) && document) observer.observe(document, { childList: true, subtree: true });
-    }
-    return true;
+  const range: TrackedRange = {
+    start,
+    parent: null,
+    tree: null,
+    update() {
+      const previous = range.tree;
+      if (!previous) return;
+      const root = start.getRootNode();
+      if (root !== previous.root) {
+        reindex(range, null);
+        previous.ranges.delete(range);
+        join(range, root);
+        release(previous);
+      }
+      if (start.parentNode !== range.parent) reindex(range, start.parentNode);
+      const current = rangeElements(start, end);
+      for (const element of marked) if (!current.has(element)) unmark(element);
+      for (const element of current) {
+        element.setAttribute(SLOT_ATTRIBUTE, slot);
+        marked.add(element);
+      }
+    },
   };
-  const mark = () => {
-    parent = start.parentNode;
-    const current = rangeElements(start, end);
-    for (const element of marked) if (!current.has(element)) unmark(element);
-    for (const element of current) {
-      element.setAttribute(SLOT_ATTRIBUTE, slot);
-      marked.add(element);
-    }
-  };
-  bind();
-  mark();
+  join(range, start.getRootNode());
+  range.update();
   const dispose = () => {
-    live = false;
-    observer?.disconnect();
+    leave(range);
     for (const element of marked) unmark(element);
   };
-  return Object.assign(dispose, {
-    refresh() {
-      if (!live) return;
-      bind();
-      mark();
-    },
-  });
+  return Object.assign(dispose, { refresh: () => range.update() });
 }

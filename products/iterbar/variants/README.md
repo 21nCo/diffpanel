@@ -21,10 +21,12 @@ const unmarkRange = markSlotRange(startTemplate, endTemplate, "pricing");
 const stop = registry.subscribe(() => render(registry.activeVersion(definition)));
 ```
 
-`markSlotRange` observes the tree its boundaries are in (the document, a
-shadow root or a detached fragment) and follows the range when it moves to
-another parent or tree, including into a shadow root. While the boundaries
-are detached it also watches their document. The one move no observer can
+`markSlotRange` follows the range when it moves to another parent or tree,
+including into a shadow root. All ranges in one tree (the document, a shadow
+root or a detached fragment) share one observer of that tree, so an unrelated
+change is delivered once per tree and only updates the ranges it reaches; the
+observer stops when the tree's last range is disposed. While the boundaries
+are detached their document is watched too. The one move no observer can
 see is inserting boundaries that were removed on their own into a shadow
 root: call `unmarkRange.refresh()` afterwards. `@iterbar/react` refreshes
 its ranges after every commit.

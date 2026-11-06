@@ -662,6 +662,100 @@ describe("slot ranges", () => {
     expect(marks(first, second, host)).toEqual({ inner: ["Inner"], outer: [] });
   });
 
+  /** Counts the MutationObservers trees create from now on, their batches and their disconnects. */
+  function countObservers() {
+    const counts = { created: 0, disconnected: 0, callbacks: 0, records: 0 };
+    class Counting extends window.MutationObserver {
+      constructor(callback: MutationCallback) {
+        super((records, observer) => {
+          counts.callbacks += 1;
+          counts.records += records.length;
+          callback(records, observer);
+        });
+        counts.created += 1;
+      }
+      override disconnect() {
+        counts.disconnected += 1;
+        super.disconnect();
+      }
+    }
+    vi.stubGlobal("MutationObserver", Counting);
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    return counts;
+  }
+
+  /** A range around one paragraph in a new element appended to `parent`. */
+  function plainRange(parent: ParentNode, text: string) {
+    const [start, end] = [boundary("start"), boundary("end")];
+    const box = document.createElement("div");
+    box.append(start, paragraph(text), end);
+    parent.append(box);
+    return { start, end };
+  }
+
+  /** Marks `count` ranges in a new shadow root, then appends 50 unrelated items there in one batch. */
+  async function unrelatedBatch(count: number) {
+    const counts = countObservers();
+    const shadow = shadowRoot();
+    for (let index = 0; index < count; index += 1) {
+      const { start, end } = plainRange(shadow, `Plan ${index}`);
+      onTestFinished(markSlotRange(start, end, `slot-${index}`));
+    }
+    const list = document.createElement("ul");
+    shadow.append(list);
+    await settle();
+    counts.callbacks = 0;
+    counts.records = 0;
+    const setAttribute = vi.spyOn(Element.prototype, "setAttribute");
+    setAttribute.mockClear();
+    onTestFinished(() => setAttribute.mockRestore());
+    for (let index = 0; index < 50; index += 1) list.append(document.createElement("li"));
+    await settle();
+    return { observers: counts.created, callbacks: counts.callbacks, records: counts.records, marks: setAttribute.mock.calls.length };
+  }
+
+  it("delivers an unrelated batch once per tree, whatever the number of ranges, and re-marks no range", async () => {
+    const one = await unrelatedBatch(1);
+    expect(one).toEqual({ observers: 1, callbacks: 1, records: 50, marks: 0 });
+    expect(await unrelatedBatch(12)).toEqual(one);
+  });
+
+  it("shares one observer per tree and disconnects it after the tree's last range is disposed", async () => {
+    const counts = countObservers();
+    const shadow = shadowRoot();
+    const [a, b] = [plainRange(shadow, "A"), plainRange(shadow, "B")];
+    const stopA = markSlotRange(a.start, a.end, "a");
+    const stopB = markSlotRange(b.start, b.end, "b");
+    onTestFinished(() => {
+      stopA();
+      stopB();
+    });
+    expect(counts).toMatchObject({ created: 1, disconnected: 0 });
+
+    stopA();
+    b.start.nextElementSibling?.replaceWith(paragraph("B two"));
+    await settle();
+    expect([roots(shadow, "a"), roots(shadow, "b"), counts.disconnected]).toEqual([[], ["B two"], 0]);
+
+    stopB();
+    expect(counts.disconnected).toBe(1);
+    b.start.nextElementSibling?.replaceWith(paragraph("B three"));
+    await settle();
+    expect(roots(shadow, "b")).toEqual([]);
+
+    onTestFinished(markSlotRange(b.start, b.end, "b"));
+    expect([counts.created, roots(shadow, "b")]).toEqual([2, ["B three"]]);
+
+    // A detached range keeps its document observed until it is disposed.
+    const detached = plainRange(document.createElement("section"), "Detached");
+    const stopDetached = markSlotRange(detached.start, detached.end, "detached");
+    expect(counts.created).toBe(4);
+    stopDetached();
+    expect(counts.disconnected).toBe(3);
+  });
+
   it("marks Variants rendered into a shadow root and follows a version that replaces its own root", async () => {
     const errors = collectErrors();
     function Expanding() {
