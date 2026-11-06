@@ -722,6 +722,31 @@ describe("slot ranges", () => {
     expect(await unrelatedBatch(12)).toEqual(one);
   });
 
+  /** Set additions while 40 sibling ranges in one parent receive one batch of `count` appends to that parent. */
+  async function siblingBatch(count: number) {
+    const parent = shadowRoot().appendChild(document.createElement("div"));
+    for (let index = 0; index < 40; index += 1) {
+      const [start, end] = [boundary("start"), boundary("end")];
+      parent.append(start, paragraph(`Plan ${index}`), end);
+      onTestFinished(markSlotRange(start, end, `slot-${index}`));
+    }
+    const add = vi.spyOn(Set.prototype, "add");
+    add.mockClear();
+    onTestFinished(() => add.mockRestore());
+    for (let index = 0; index < count; index += 1) parent.append(document.createElement("span"));
+    await settle();
+    const visits = add.mock.calls.length;
+    add.mockRestore();
+    return visits;
+  }
+
+  it("visits each range under a changed parent once per batch, however many records target that parent", async () => {
+    const few = await siblingBatch(100);
+    const many = await siblingBatch(300);
+    // 200 more records add 200 targets; visiting 40 ranges per record would add 8,000 more.
+    expect(many - few).toBeLessThan(1000);
+  });
+
   it("shares one observer per tree and disconnects it after the tree's last range is disposed", async () => {
     const counts = countObservers();
     const shadow = shadowRoot();

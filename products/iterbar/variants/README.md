@@ -25,7 +25,8 @@ const stop = registry.subscribe(() => render(registry.activeVersion(definition))
 including into a shadow root. All ranges in one tree (the document, a shadow
 root or a detached fragment) share one observer of that tree, so an unrelated
 change is delivered once per tree and only updates the ranges it reaches; the
-observer stops when the tree's last range is disposed. While the boundaries
+observer stops when the tree's last range is disposed, so call the returned
+function once a range is no longer needed. While the boundaries
 are detached their document is watched too. The one move no observer can
 see is inserting boundaries that were removed on their own into a shadow
 root: call `unmarkRange.refresh()` afterwards. `@iterbar/react` refreshes

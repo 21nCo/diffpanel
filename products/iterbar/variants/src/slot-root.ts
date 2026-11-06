@@ -112,19 +112,22 @@ function release(tree: Tree): void {
 }
 
 /**
- * Updates only the ranges a batch can affect. A batch costs one lookup per record; a range leaves its tree
- * only when it or an ancestor is removed, so only a batch that removes a node with descendants checks the
- * tree's ranges, and only one that adds nodes checks its detached trees, each once per batch.
+ * Updates only the ranges a batch can affect. A batch costs one step per record plus one per range under
+ * each changed parent; a range leaves its tree only when it or an ancestor is removed, so only a batch that
+ * removes a node with descendants checks the tree's ranges, and only one that adds nodes checks its
+ * detached trees, each once per batch.
  */
 function dispatch(tree: Tree, records: readonly MutationRecord[]): void {
-  const affected = new Set<TrackedRange>();
+  const targets = new Set<Node>();
   let removedSubtree = false;
   let added = false;
   for (const record of records) {
-    for (const range of tree.byParent.get(record.target) ?? []) affected.add(range);
+    targets.add(record.target);
     added ||= record.addedNodes.length > 0;
     removedSubtree ||= [...record.removedNodes].some((node) => node.hasChildNodes());
   }
+  const affected = new Set<TrackedRange>();
+  for (const target of targets) for (const range of tree.byParent.get(target) ?? []) affected.add(range);
   if (removedSubtree) for (const range of tree.ranges) if (range.start.getRootNode() !== tree.root) affected.add(range);
   if (added) {
     for (const detached of tree.detached) {
@@ -185,7 +188,8 @@ export interface SlotRange {
  *
  * Ranges may nest: when `start` and `end` carry {@link slotBoundaryAttributes}, an enclosing range skips the
  * nodes between them, so the inner slot keeps its marks whichever range marks or updates first. Calling the
- * returned function stops observing and removes the marks it set.
+ * returned function stops observing and removes the marks it set; call it once the range is no longer
+ * needed, because a live range keeps its tree observed and its nodes reachable.
  */
 export function markSlotRange(start: Node, end: Node, slot: string): SlotRange {
   const marked = new Set<Element>();
