@@ -8,7 +8,7 @@
 //   nodeEnv    value that replaces process.env.NODE_ENV; "" leaves it unreplaced
 //
 // node bundle.mjs render <jobs JSON>
-//   Server-renders each job's `entry` with `props`, as a server whose NODE_ENV is the job's `nodeEnv` does,
+//   Server-renders each job's `entry` with `props` (and `idPrefix`, if any), as a server whose NODE_ENV is the job's `nodeEnv` does,
 //   and prints the bodies as a JSON array in job order.
 //
 // node bundle.mjs vite <entries JSON>
@@ -96,7 +96,7 @@ async function serverRender(jobs) {
       const server = modules.get(moduleKey(job));
       // An unreplaced bundle reads NODE_ENV while rendering, so each job renders alone with its own.
       process.env.NODE_ENV = job.nodeEnv;
-      return server.render(server.default, { props: job.props }).body;
+      return server.render(server.default, { props: job.props, idPrefix: job.idPrefix }).body;
     });
   } finally {
     await rm(directory, { recursive: true, force: true });

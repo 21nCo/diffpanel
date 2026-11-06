@@ -22,16 +22,18 @@
     const [name, names, initial] = JSON.parse(key) as [string, string[], string];
     return validateSlotDefinition({ slot: name, versions: names, defaultVersion: initial });
   });
-  // The server's id while this instance hydrates the server's markup; a new one on a client mount.
+  // Svelte gives an instance that hydrates server markup the server's id (`s1`, or `prefix-s1`) and a new
+  // client instance `c1`, `c2`, ...: unlike a DOM query, this holds for any hydration target and id prefix.
   const instance = $props.id();
+  const hydrating = !/^c\d+$/.test(instance);
   // Whether to render the registry's selection rather than the default. The server runs no effects, so it
   // renders the default and never reaches the registry or `window`. In the browser this is set before the
   // template first renders: a client mount renders the selected version at once, as React's
-  // useSyncExternalStore does; an instance whose server markup is on the page hydrates the default, and the
-  // effect below switches right after hydration.
+  // useSyncExternalStore does; a hydrating instance hydrates the default, and the effect below switches right
+  // after hydration.
   let live = $state(false);
   $effect.pre(() => {
-    live = !document.querySelector(`template[data-iterbar-instance="${instance}"]`);
+    live = !hydrating;
   });
   // Counts registry changes, so `activeVersion` reads the registry's selection again after each one.
   let changes = $state(0);
@@ -73,7 +75,7 @@
   });
 </script>
 
-<template bind:this={start} data-iterbar-slot-boundary="start" data-iterbar-instance={instance}></template>
+<template bind:this={start} data-iterbar-slot-boundary="start"></template>
 {#key activeVersion}
   <Version content={versionContent(versions, activeVersion)} />
 {/key}

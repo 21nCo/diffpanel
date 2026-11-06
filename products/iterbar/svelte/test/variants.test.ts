@@ -72,12 +72,16 @@ async function settle() {
 const PLACES = ["paragraph", "table", "list"] as const;
 const NON_DEVELOPMENT = ["", "test", "staging", "production"];
 
+const OBSERVED = { entry: "test/fixtures/Observed.svelte", nodeEnv: "development", props: { names: ["a", "b"], log: [] } };
+// Svelte's own ids, and ids with a prefix that is not valid in a CSS selector.
+const OBSERVED_PREFIXES = [undefined, 'a"b]'];
+
 /** Every server render the tests hydrate, prepared in one process before they run. */
 const SERVER_RENDERS: ServerRenderJob[] = [
   { entry: "test/fixtures/Pricing.svelte", nodeEnv: "development" },
   ...NON_DEVELOPMENT.map((nodeEnv) => ({ entry: "test/fixtures/Pricing.svelte", nodeEnv })),
   ...PLACES.map((where) => ({ entry: "test/fixtures/Contexts.svelte", nodeEnv: "development", props: { where } })),
-  { entry: "test/fixtures/Observed.svelte", nodeEnv: "development", props: { names: ["a", "b"], log: [] } },
+  ...OBSERVED_PREFIXES.map((idPrefix) => ({ ...OBSERVED, idPrefix })),
 ];
 
 let serverRender: (job: ServerRenderJob) => string;
@@ -159,13 +163,27 @@ describe("in development", () => {
     expect(slots()).toMatchObject([{ slot: "probe", versions: ["a", "c"], activeVersion: "a" }]);
   });
 
-  it("hydrates the server's default, then switches to the selected version", () => {
+  it.each([
+    { target: "an element on the page", idPrefix: undefined, root: "element" },
+    { target: "a detached element", idPrefix: undefined, root: "detached" },
+    { target: "a shadow root", idPrefix: undefined, root: "shadow" },
+    { target: "an element with an id prefix", idPrefix: OBSERVED_PREFIXES[1], root: "element" },
+  ] as const)("hydrates the server's default into $target, then switches to the selected version", ({ idPrefix, root }) => {
     visit("/plans?iterbar=probe:b");
     const errors = collectErrors();
+    const host = document.createElement("div");
+    if (root !== "detached") document.body.append(host);
+    const target = root === "shadow" ? host.attachShadow({ mode: "open" }) : host;
+    target.innerHTML = serverRender({ ...OBSERVED, idPrefix });
     const log: string[] = [];
-    const { container } = hydrateServerHtml("Observed.svelte", Observed, "development", { names: ["a", "b"], log });
+    const instance = hydrate(Observed, { target, props: { names: ["a", "b"], log } });
+    flushSync();
+    onTestFinished(() => {
+      unmount(instance);
+      host.remove();
+    });
     expect(log.filter((entry) => !entry.startsWith("shows"))).toEqual(["mount a", "mount b", "unmount a"]);
-    expect(roots(container, "probe")).toEqual(["b"]);
+    expect(roots(target, "probe")).toEqual(["b"]);
     expect(errors).toEqual([]);
   });
 

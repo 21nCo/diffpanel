@@ -37,8 +37,7 @@ describe("server rendering in development", () => {
     vi.stubEnv("NODE_ENV", "development");
     const { body } = render(Pricing);
     expect(html(body)).toBe(
-      '<template data-iterbar-slot-boundary="start" data-iterbar-instance="s1"></template><p>Plan one</p>'
-      + '<template data-iterbar-slot-boundary="end"></template>',
+      '<template data-iterbar-slot-boundary="start"></template><p>Plan one</p><template data-iterbar-slot-boundary="end"></template>',
     );
     expect(body).not.toContain("data-iterbar-slot=");
     expect(body).not.toContain(VARIANT_STORAGE_KEY);
@@ -48,9 +47,8 @@ describe("server rendering in development", () => {
     vi.stubEnv("NODE_ENV", "development");
     expect(html(render(Snippets).body)).toContain("<p>Plan one</p>");
     expect(html(render(Nested, { props: { form: "snippet" } }).body)).toBe(
-      '<div><template data-iterbar-slot-boundary="start" data-iterbar-instance="s1"></template>'
-      + '<template data-iterbar-slot-boundary="start" data-iterbar-instance="s2"></template><p>Inner A</p>'
-      + '<template data-iterbar-slot-boundary="end"></template>'
+      '<div><template data-iterbar-slot-boundary="start"></template>'
+      + '<template data-iterbar-slot-boundary="start"></template><p>Inner A</p><template data-iterbar-slot-boundary="end"></template>'
       + '<p>Outer one</p><template data-iterbar-slot-boundary="end"></template></div>',
     );
   });

@@ -27,10 +27,12 @@ export interface ServerRenderJob {
   readonly entry: string;
   readonly nodeEnv: string;
   readonly props?: Record<string, unknown>;
+  /** Svelte's `idPrefix` render option. */
+  readonly idPrefix?: string;
 }
 
-function jobKey({ entry, nodeEnv, props = {} }: ServerRenderJob): string {
-  return JSON.stringify([entry, nodeEnv, props]);
+function jobKey({ entry, nodeEnv, props = {}, idPrefix = "" }: ServerRenderJob): string {
+  return JSON.stringify([entry, nodeEnv, props, idPrefix]);
 }
 
 /**

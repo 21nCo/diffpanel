@@ -36,9 +36,7 @@ registry. Hydration hydrates that `default`, and the client switches to the
 selected version right after hydrating, so server and client markup agree. A
 client mount without server markup renders the selected version from its
 first render, as React's `useSyncExternalStore` does, and new `versions`
-without the active one render their default at once. The start `<template>`
-carries `data-iterbar-instance`, the `$props.id()` that tells a hydrating
-instance from a new one.
+without the active one render their default at once.
 
 `Variants` adds no wrapper element. In development it renders an empty
 `<template>` before and after the version, and marks each of the version's
