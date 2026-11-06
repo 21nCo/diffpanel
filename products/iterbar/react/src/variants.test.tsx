@@ -229,6 +229,7 @@ describe("in development", () => {
     );
     const { container, rerender, unmount } = render(page(before, before));
     rerender(page(after, before));
+    expect(slots()).toMatchObject([{ slot: "pricing", versions: ["v1", "v2"], mounts: 2 }]);
     rerender(page(after, after));
     expect(slots()).toMatchObject([{ slot: "pricing", versions: ["v1", "v2", "v3"], mounts: 2 }]);
     select("pricing", "v3");
@@ -497,70 +498,201 @@ describe("slot ranges", () => {
     return element;
   }
 
-  it("follows a range into each parent it moves to, keeps nested ownership and stops on cleanup", async () => {
+  /** Appends `element` to the page until the test finishes, also when an assertion fails. */
+  function attach<T extends Element>(element: T): T {
+    document.body.append(element);
+    onTestFinished(() => element.remove());
+    return element;
+  }
+
+  /** An open shadow root on a new element on the page. */
+  function shadowRoot() {
+    return attach(document.createElement("div")).attachShadow({ mode: "open" });
+  }
+
+  /** Outer and inner boundaries; the inner range sits inside the outer one. */
+  function ranges() {
     const [start, end, innerStart, innerEnd] = [boundary("start"), boundary("end"), boundary("start"), boundary("end")];
-    const fragment = document.createDocumentFragment();
-    fragment.append(start, paragraph("One"), innerStart, paragraph("Inner"), innerEnd, end);
+    return { start, end, innerStart, innerEnd, nodes: [start, paragraph("One"), innerStart, paragraph("Inner"), innerEnd, end] };
+  }
+
+  /** Marks the inner range and then the outer one, and stops both when the test finishes. */
+  function markBoth({ start, end, innerStart, innerEnd }: ReturnType<typeof ranges>) {
     const stopInner = markSlotRange(innerStart, innerEnd, "inner");
     const stop = markSlotRange(start, end, "outer");
-    const host = document.createElement("div");
-    document.body.append(host);
-    const marks = () => ({ inner: roots(document.body, "inner"), outer: roots(document.body, "outer") });
+    onTestFinished(() => {
+      stop();
+      stopInner();
+    });
+    return { stop, stopInner };
+  }
+
+  function marks(...trees: ParentNode[]) {
+    return {
+      inner: trees.flatMap((tree) => roots(tree, "inner")),
+      outer: trees.flatMap((tree) => roots(tree, "outer")),
+    };
+  }
+
+  it("follows a range into each parent it moves to, keeps nested ownership and stops on cleanup", async () => {
+    const range = ranges();
+    const { start, end, innerStart } = range;
+    const fragment = document.createDocumentFragment();
+    fragment.append(...range.nodes);
+    const { stop, stopInner } = markBoth(range);
+    const host = attach(document.createElement("div"));
 
     host.append(fragment);
     await settle();
-    expect(marks()).toEqual({ inner: ["Inner"], outer: ["One"] });
+    expect(marks(document.body)).toEqual({ inner: ["Inner"], outer: ["One"] });
 
     start.nextElementSibling?.replaceWith(paragraph("Two"));
     innerStart.nextElementSibling?.replaceWith(paragraph("Inner two"));
     await settle();
-    expect(marks()).toEqual({ inner: ["Inner two"], outer: ["Two"] });
+    expect(marks(document.body)).toEqual({ inner: ["Inner two"], outer: ["Two"] });
 
-    const other = document.createElement("section");
-    document.body.append(other);
+    const other = attach(document.createElement("section"));
     other.append(...host.childNodes);
     await settle();
     other.insertBefore(paragraph("Three"), end);
     await settle();
-    expect(marks()).toEqual({ inner: ["Inner two"], outer: ["Two", "Three"] });
+    expect(marks(document.body)).toEqual({ inner: ["Inner two"], outer: ["Two", "Three"] });
 
     stop();
     stopInner();
     other.insertBefore(paragraph("Four"), end);
     await settle();
-    expect(marks()).toEqual({ inner: [], outer: [] });
-    host.remove();
-    other.remove();
+    expect(marks(document.body)).toEqual({ inner: [], outer: [] });
   });
 
   it("keeps following a range that is detached, observed while detached, and inserted elsewhere", async () => {
-    const [start, end, innerStart, innerEnd] = [boundary("start"), boundary("end"), boundary("start"), boundary("end")];
-    const first = document.createElement("div");
-    const second = document.createElement("section");
-    document.body.append(first, second);
-    first.append(start, paragraph("One"), innerStart, paragraph("Inner"), innerEnd, end);
-    const stopInner = markSlotRange(innerStart, innerEnd, "inner");
-    const stop = markSlotRange(start, end, "outer");
-    const marks = () => ({ inner: roots(document.body, "inner"), outer: roots(document.body, "outer") });
-    expect(marks()).toEqual({ inner: ["Inner"], outer: ["One"] });
+    const range = ranges();
+    const { start, end } = range;
+    const first = attach(document.createElement("div"));
+    const second = attach(document.createElement("section"));
+    first.append(...range.nodes);
+    const { stop, stopInner } = markBoth(range);
+    expect(marks(document.body)).toEqual({ inner: ["Inner"], outer: ["One"] });
 
     const nodes = [...first.childNodes];
     for (const node of nodes) node.remove();
     await settle();
     second.append(...nodes);
     await settle();
-    expect(marks()).toEqual({ inner: ["Inner"], outer: ["One"] });
+    expect(marks(document.body)).toEqual({ inner: ["Inner"], outer: ["One"] });
 
     start.nextElementSibling?.replaceWith(paragraph("Two"));
     await settle();
-    expect(marks()).toEqual({ inner: ["Inner"], outer: ["Two"] });
+    expect(marks(document.body)).toEqual({ inner: ["Inner"], outer: ["Two"] });
 
     stop();
     stopInner();
     second.insertBefore(paragraph("Three"), end);
     await settle();
-    expect(marks()).toEqual({ inner: [], outer: [] });
-    first.remove();
-    second.remove();
+    expect(marks(document.body)).toEqual({ inner: [], outer: [] });
+  });
+
+  it("follows replacements inside an open shadow root and keeps the innermost slot's marks", async () => {
+    const range = ranges();
+    const { start, end, innerStart } = range;
+    const shadow = shadowRoot();
+    const container = document.createElement("div");
+    shadow.append(container);
+    container.append(...range.nodes);
+    markBoth(range);
+    expect(marks(shadow)).toEqual({ inner: ["Inner"], outer: ["One"] });
+
+    start.nextElementSibling?.replaceWith(paragraph("Two"));
+    innerStart.nextElementSibling?.replaceWith(paragraph("Inner two"));
+    container.insertBefore(paragraph("Three"), end);
+    await settle();
+    expect(marks(shadow)).toEqual({ inner: ["Inner two"], outer: ["Two", "Three"] });
+  });
+
+  it("marks a detached range again on refresh() after it is inserted into a shadow root, then follows it", async () => {
+    const range = ranges();
+    const { end, innerStart } = range;
+    const host = attach(document.createElement("div"));
+    host.append(...range.nodes);
+    const { stop, stopInner } = markBoth(range);
+    const shadow = shadowRoot();
+
+    for (const node of range.nodes) node.remove();
+    await settle();
+    shadow.append(...range.nodes);
+    await settle();
+    stop.refresh();
+    stopInner.refresh();
+    expect(marks(shadow)).toEqual({ inner: ["Inner"], outer: ["One"] });
+
+    shadow.insertBefore(paragraph("Two"), end);
+    innerStart.nextElementSibling?.replaceWith(paragraph("Inner two"));
+    await settle();
+    expect(marks(shadow)).toEqual({ inner: ["Inner two"], outer: ["One", "Two"] });
+  });
+
+  it("follows a range moved between shadow roots and back to the document, and disposes only its own marks", async () => {
+    const range = ranges();
+    const { end } = range;
+    const [first, second] = [shadowRoot(), shadowRoot()];
+    const host = attach(document.createElement("div"));
+    first.append(...range.nodes);
+    const { stop } = markBoth(range);
+
+    second.append(...first.childNodes);
+    await settle();
+    second.insertBefore(paragraph("Two"), end);
+    await settle();
+    expect(marks(first, second)).toEqual({ inner: ["Inner"], outer: ["One", "Two"] });
+
+    // Moving an ancestor of the range changes its tree without touching its parent.
+    const wrapper = document.createElement("div");
+    second.append(wrapper);
+    wrapper.append(...[...second.childNodes].filter((node) => node !== wrapper));
+    await settle();
+    host.append(wrapper);
+    await settle();
+    wrapper.insertBefore(paragraph("Three"), end);
+    await settle();
+    expect(marks(first, second, host)).toEqual({ inner: ["Inner"], outer: ["One", "Two", "Three"] });
+
+    stop();
+    wrapper.insertBefore(paragraph("Four"), end);
+    await settle();
+    expect(marks(first, second, host)).toEqual({ inner: ["Inner"], outer: [] });
+  });
+
+  it("marks Variants rendered into a shadow root and follows a version that replaces its own root", async () => {
+    const errors = collectErrors();
+    function Expanding() {
+      const [open, setOpen] = useState(false);
+      return open ? (
+        <section>Expanded</section>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)}>Expand</button>
+      );
+    }
+    const shadow = shadowRoot();
+    const container = document.createElement("div");
+    shadow.append(container);
+    const { unmount } = render(
+      <StrictMode><Variants slot="pricing" versions={{ v1: Expanding, v2: <p>Plan two</p> }} default="v1" /></StrictMode>,
+      { container },
+    );
+    await settle();
+    expect(roots(shadow, "pricing")).toEqual(["Expand"]);
+
+    act(() => container.querySelector("button")?.click());
+    await settle();
+    expect(roots(shadow, "pricing")).toEqual(["Expanded"]);
+
+    select("pricing", "v2");
+    await settle();
+    expect(roots(shadow, "pricing")).toEqual(["Plan two"]);
+
+    const elements = [...container.querySelectorAll("p")];
+    unmount();
+    expect(elements.filter((element) => element.hasAttribute("data-iterbar-slot"))).toEqual([]);
+    expect(errors).toEqual([]);
   });
 });

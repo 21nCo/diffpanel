@@ -21,6 +21,7 @@ export {
   SLOT_BOUNDARY_ATTRIBUTE,
   slotBoundaryAttributes,
   slotRootAttributes,
+  type SlotRange,
 } from "./slot-root.js";
 export {
   PAGE_API_GLOBAL,

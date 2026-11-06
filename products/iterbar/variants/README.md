@@ -21,6 +21,14 @@ const unmarkRange = markSlotRange(startTemplate, endTemplate, "pricing");
 const stop = registry.subscribe(() => render(registry.activeVersion(definition)));
 ```
 
+`markSlotRange` observes the tree its boundaries are in (the document, a
+shadow root or a detached fragment) and follows the range when it moves to
+another parent or tree, including into a shadow root. While the boundaries
+are detached it also watches their document. The one move no observer can
+see is inserting boundaries that were removed on their own into a shadow
+root: call `unmarkRange.refresh()` afterwards. `@iterbar/react` refreshes
+its ranges after every commit.
+
 ## Choosing a version
 
 When a slot's first instance registers, its version comes from:

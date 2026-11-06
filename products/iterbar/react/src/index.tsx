@@ -5,6 +5,7 @@ import {
   markSlotRange,
   SLOT_BOUNDARY_ATTRIBUTE,
   validateSlotDefinition,
+  type SlotRange,
   type VariantsRegistry,
 } from "@iterbar/variants";
 import {
@@ -118,6 +119,7 @@ function DevelopmentVariants<Versions extends Readonly<Record<string, VersionCon
   const activeVersion = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const start = useRef<HTMLTemplateElement>(null);
   const end = useRef<HTMLTemplateElement>(null);
+  const range = useRef<SlotRange | null>(null);
 
   useEffect(() => registry().register(definition), [registry, definition]);
 
@@ -125,8 +127,18 @@ function DevelopmentVariants<Versions extends Readonly<Record<string, VersionCon
   // switches, the range observer follows elements the version itself adds or replaces.
   useEffect(() => {
     if (!start.current || !end.current) return undefined;
-    return markSlotRange(start.current, end.current, definition.slot);
+    const handle = markSlotRange(start.current, end.current, definition.slot);
+    range.current = handle;
+    return () => {
+      handle();
+      if (range.current === handle) range.current = null;
+    };
   }, [definition.slot, activeVersion]);
+
+  // After every commit, mark the range again where it lives now, which covers a move no observer can see.
+  useEffect(() => {
+    range.current?.refresh();
+  });
 
   return (
     <>

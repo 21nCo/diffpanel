@@ -46,36 +46,71 @@ function rangeElements(start: Node, end: Node): Set<Element> {
   return owned;
 }
 
+const DOCUMENT_NODE = 9;
+const DOCUMENT_FRAGMENT_NODE = 11;
+
+/** A document or shadow root: every later move of a range inside it is a mutation in its own tree. */
+function isTreeRoot(node: Node): boolean {
+  return node.nodeType === DOCUMENT_NODE || (node.nodeType === DOCUMENT_FRAGMENT_NODE && "host" in node);
+}
+
+/** Stops marking a slot range and removes the marks it set. */
+export interface SlotRange {
+  (): void;
+  /**
+   * Finds where the range lives now, observes that tree and marks the range again. Needed only after a
+   * range whose boundaries were removed on their own is inserted into a shadow tree, which no observer sees.
+   */
+  refresh(): void;
+}
+
 /**
  * Marks every element between the sibling nodes `start` and `end` (exclusive) as a root of `slot`, and keeps
- * the marks current while elements in that range are added, removed or replaced, also after the range moves
- * to another parent. `<template>` elements are
- * skipped, so the boundaries themselves can be templates, which HTML and React allow inside `<p>`, `<ul>`,
- * `<table>`, `<tbody>` and `<tr>`. Text nodes cannot carry the attribute and are left unmarked.
+ * the marks current while elements in that range are added, removed or replaced. It observes the range's
+ * root node (its document, a shadow root or a detached fragment) and follows the range into each tree it
+ * moves to. While detached it also observes its document, so inserting it there is noticed; inserting a
+ * range whose boundaries were removed on their own into a shadow root is not visible to any observer, so call
+ * the returned function's `refresh()` afterwards. `<template>` elements are skipped, so the boundaries
+ * themselves can be templates, which HTML and React allow inside `<p>`, `<ul>`, `<table>`, `<tbody>` and
+ * `<tr>`. Text nodes cannot carry the attribute and are left unmarked.
  *
  * Ranges may nest: when `start` and `end` carry {@link slotBoundaryAttributes}, an enclosing range skips the
- * nodes between them, so the inner slot keeps its marks whichever range marks or updates first. Returns a
- * function that stops observing and removes the marks it set.
+ * nodes between them, so the inner slot keeps its marks whichever range marks or updates first. Calling the
+ * returned function stops observing and removes the marks it set.
  */
-export function markSlotRange(start: Node, end: Node, slot: string): () => void {
+export function markSlotRange(start: Node, end: Node, slot: string): SlotRange {
   const marked = new Set<Element>();
   const unmark = (element: Element) => {
     if (element.getAttribute(SLOT_ATTRIBUTE) === slot) element.removeAttribute(SLOT_ATTRIBUTE);
     marked.delete(element);
   };
+  let root: Node | null = null;
+  let parent: ParentNode | null = null;
+  let live = true;
   const Observer = (globalThis as { MutationObserver?: typeof MutationObserver }).MutationObserver;
-  const observer = typeof Observer === "function" ? new Observer(() => update()) : null;
-  let observed: Node | null = null;
-  const update = () => {
-    // Follow the range to each parent it moves to, such as when its DocumentFragment is inserted. While it
-    // is detached, watch its document so that inserting it again anywhere there is noticed.
-    const parent = start.parentNode;
-    const target = parent ?? start.ownerDocument;
-    if (observer && target && target !== observed) {
+  const observer =
+    typeof Observer === "function"
+      ? new Observer((records) => {
+          // Each callback costs one root lookup and a scan of its records; the range is re-marked only when
+          // it moved to another tree or parent, or its parent's children changed.
+          if (bind() || start.parentNode !== parent || records.some((record) => record.target === parent)) mark();
+        })
+      : null;
+  /** Observes the tree the range is in now; returns whether that tree changed. */
+  const bind = () => {
+    const current = start.getRootNode();
+    if (current === root) return false;
+    root = current;
+    if (observer) {
       observer.disconnect();
-      observer.observe(target, { childList: true, subtree: !parent });
-      observed = target;
+      observer.observe(current, { childList: true, subtree: true });
+      const document = start.ownerDocument;
+      if (!isTreeRoot(current) && document) observer.observe(document, { childList: true, subtree: true });
     }
+    return true;
+  };
+  const mark = () => {
+    parent = start.parentNode;
     const current = rangeElements(start, end);
     for (const element of marked) if (!current.has(element)) unmark(element);
     for (const element of current) {
@@ -83,9 +118,18 @@ export function markSlotRange(start: Node, end: Node, slot: string): () => void 
       marked.add(element);
     }
   };
-  update();
-  return () => {
+  bind();
+  mark();
+  const dispose = () => {
+    live = false;
     observer?.disconnect();
     for (const element of marked) unmark(element);
   };
+  return Object.assign(dispose, {
+    refresh() {
+      if (!live) return;
+      bind();
+      mark();
+    },
+  });
 }
