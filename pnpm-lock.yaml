@@ -235,6 +235,37 @@ importers:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.1)(jsdom@27.4.0(supports-color@7.2.0))(supports-color@7.2.0)(tsx@4.23.11)
 
+  products/iterbar/bar:
+    dependencies:
+      '@iterbar/variants':
+        specifier: workspace:*
+        version: link:../variants
+      iterbar:
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@iterbar/cli':
+        specifier: workspace:*
+        version: link:../cli
+      '@playwright/test':
+        specifier: 1.58.2
+        version: 1.58.2
+      '@types/node':
+        specifier: ^22.15.30
+        version: 22.20.1
+      esbuild:
+        specifier: ^0.27.0
+        version: 0.27.7
+      tsup:
+        specifier: ^8.5.0
+        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(tsx@4.23.11)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.12(@types/node@22.20.1)(jsdom@27.4.0(supports-color@7.2.0))(vite@7.3.6(@types/node@22.20.1)(tsx@4.23.11))
+
   products/iterbar/cli:
     dependencies:
       '@modelcontextprotocol/sdk':
