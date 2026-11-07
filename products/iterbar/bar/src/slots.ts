@@ -47,18 +47,23 @@ function isVariantPair(pair: string): boolean {
 
 /**
  * The URL a page's slot report is filed under: without the fragment or the `iterbar` parameter, which switching
- * changes. Every other query pair keeps its exact text, since the daemon files reports by the exact URL.
+ * changes. The rest of the query keeps its exact text, empty segments included, since the daemon files reports by
+ * the exact URL.
  */
 export function reportPageUrl(href: string): string | null {
+  let url: URL;
   try {
-    const url = new URL(href);
-    url.hash = "";
-    const pairs = url.search.slice(1).split("&").filter((pair) => pair !== "" && !isVariantPair(pair));
-    url.search = pairs.join("&");
-    return url.href;
+    url = new URL(href);
   } catch {
     return null;
   }
+  url.hash = "";
+  // The serialized URL has only one "?" before its query, since the path cannot contain one unescaped.
+  const serialized = url.href;
+  const start = serialized.indexOf("?");
+  if (start === -1) return serialized;
+  const kept = serialized.slice(start + 1).split("&").filter((pair) => !isVariantPair(pair));
+  return kept.length === 0 ? serialized.slice(0, start) : `${serialized.slice(0, start)}?${kept.join("&")}`;
 }
 
 function writeSelectionToUrl(slot: string, version: string): void {
