@@ -62,8 +62,9 @@ export function reportPageUrl(href: string): string | null {
   const serialized = url.href;
   const start = serialized.indexOf("?");
   if (start === -1) return serialized;
-  const kept = serialized.slice(start + 1).split("&").filter((pair) => !isVariantPair(pair));
-  return kept.length === 0 ? serialized.slice(0, start) : `${serialized.slice(0, start)}?${kept.join("&")}`;
+  // A query left empty (a bare "?", or only the iterbar parameter) is dropped, so switching never changes the URL.
+  const query = serialized.slice(start + 1).split("&").filter((pair) => !isVariantPair(pair)).join("&");
+  return query ? `${serialized.slice(0, start)}?${query}` : serialized.slice(0, start);
 }
 
 function writeSelectionToUrl(slot: string, version: string): void {

@@ -15,7 +15,7 @@ import {
 
 /** Where the daemon listens and the token that authorizes this page; see {@link parseDaemonConfig}. */
 export interface DaemonConfig {
-  /** `http://127.0.0.1:<port>` (with no port for 80), with no path, query or fragment. */
+  /** `http://127.0.0.1:<port>`, with no path, query or fragment. */
   readonly url: string;
   readonly token: string;
 }
@@ -43,8 +43,9 @@ export function parseDaemonConfig(
   } catch {
     parsed = null;
   }
-  // An empty port is the default one (80): `URL` drops an explicit `:80`.
-  const valid = parsed !== null && parsed.protocol === "http:" && parsed.hostname === DAEMON_HOST
+  // The port must be explicit and not 80: `URL` drops `:80`, browsers then omit it from `Host`, and the daemon only
+  // answers requests whose `Host` names its port.
+  const valid = parsed !== null && parsed.protocol === "http:" && parsed.hostname === DAEMON_HOST && parsed.port !== ""
     && !parsed.username && !parsed.password && parsed.pathname === "/" && !parsed.search && !parsed.hash;
   if (!valid || parsed === null) {
     return { ok: false, status: { kind: "invalid", message: `The daemon URL must be http://${DAEMON_HOST}:<port>.` } };

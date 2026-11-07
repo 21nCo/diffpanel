@@ -10,9 +10,9 @@ describe("parseDaemonConfig", () => {
     expect(parseDaemonConfig("http://127.0.0.1:4555/", token)).toEqual({ ok: true, config: { url: "http://127.0.0.1:4555", token } });
   });
 
-  it("accepts the default HTTP port, which URL normalizes away", () => {
+  it("refuses the default HTTP port, which browsers leave out of the Host header the daemon checks", () => {
     for (const url of ["http://127.0.0.1:80", "http://127.0.0.1"]) {
-      expect(parseDaemonConfig(url, token)).toEqual({ ok: true, config: { url: "http://127.0.0.1", token } });
+      expect(parseDaemonConfig(url, token)).toMatchObject({ ok: false, status: { kind: "invalid" } });
     }
   });
 
@@ -23,7 +23,7 @@ describe("parseDaemonConfig", () => {
 
   it("never sends the token anywhere but 127.0.0.1", () => {
     for (const url of [
-      "http://localhost:4555", "https://127.0.0.1:4555", "https://127.0.0.1:80", "http://127.0.0.1:4555/events",
+      "http://localhost:4555", "https://127.0.0.1:4555", "http://127.0.0.1", "http://127.0.0.1:4555/events",
       "http://127.0.0.1:4555/?x=1", "http://user:pw@127.0.0.1:4555", "http://evil.example:4555", "nonsense",
     ]) {
       expect(parseDaemonConfig(url, token)).toMatchObject({ ok: false, status: { kind: "invalid" } });

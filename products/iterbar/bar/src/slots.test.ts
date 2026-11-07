@@ -25,8 +25,12 @@ it("files slot reports without the fragment or the iterbar parameter", () => {
     .toBe("http://localhost:5173/a?q=a%20b&flag&x=1&x=2&q=c+d");
   expect(reportPageUrl("http://localhost:5173/a?%69terbar=hero:b&iterbar&flag=")).toBe("http://localhost:5173/a?flag=");
   expect(reportPageUrl("http://localhost:5173/a?iterbar=pricing:v2#top")).toBe("http://localhost:5173/a");
-  for (const unchanged of ["/a?x=1&&y=2", "/a?&x=1&", "/a?", "/a??tenant=acme", "/a?q=%3F"]) {
+  for (const unchanged of ["/a?x=1&&y=2", "/a?&x=1&", "/a??tenant=acme", "/a?q=%3F"]) {
     expect(reportPageUrl(`http://localhost:5173${unchanged}#frag`)).toBe(`http://localhost:5173${unchanged}`);
   }
   expect(reportPageUrl("http://localhost:5173/a?iterbar=x:y&?tenant=acme")).toBe("http://localhost:5173/a??tenant=acme");
+  // A bare "?" files like no query, as the URL after switching a version there and removing iterbar does.
+  for (const same of ["/a?", "/a?iterbar=pricing:v2", "/a?iterbar=pricing:v2&"]) {
+    expect(reportPageUrl(`http://localhost:5173${same}`)).toBe("http://localhost:5173/a");
+  }
 });
