@@ -1,0 +1,51 @@
+{
+  "name": "@iterbar/bar",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The Iterbar dev bar: a framework-free <iterbar-bar> custom element that switches slot versions and shows feedback threads.",
+  "type": "module",
+  "license": "MIT",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/21nCo/devroll.git",
+    "directory": "products/iterbar/bar"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --sourcemap --clean",
+    "clean": "rm -rf dist coverage test-results playwright-report",
+    "lint": "eslint src test playwright.config.ts vitest.config.ts",
+    "test": "vitest run",
+    "test:browser": "pnpm --filter @iterbar/bar... build && playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@iterbar/variants": "workspace:*",
+    "iterbar": "workspace:*"
+  },
+  "devDependencies": {
+    "@iterbar/cli": "workspace:*",
+    "@playwright/test": "1.64.1",
+    "@types/node": "^22.15.30",
+    "esbuild": "^0.27.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.11"
+  }
+}
