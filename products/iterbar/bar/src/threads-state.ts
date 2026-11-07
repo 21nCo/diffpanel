@@ -17,9 +17,15 @@ export function mergeFeedback(current: Map<string, Feedback>, incoming: readonly
   return changed;
 }
 
+/** Whether an event's copy of an item is older than the one held, which it must never replace. */
+export function isStale(current: ReadonlyMap<string, Feedback>, item: Feedback): boolean {
+  const held = current.get(item.id);
+  return held !== undefined && Date.parse(held.updatedAt) > Date.parse(item.updatedAt);
+}
+
 /**
  * Applies a complete listing from the daemon. The listing is the daemon's whole state, so an item it does not include
- * is dropped, unless an accepted event delivered it while the listing was in flight (`touched`). The listing may
+ * is dropped, unless an event that was not stale delivered it while the listing was in flight (`touched`). The listing may
  * predate such an event even with an equal `updatedAt`, so for a touched item the held copy also wins a tie; a
  * strictly newer listed copy still wins. Returns whether anything changed.
  */

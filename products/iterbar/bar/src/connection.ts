@@ -76,11 +76,14 @@ const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 15_000, 30_000];
 
 export interface ConnectionCallbacks {
   onStatus(status: ConnectionStatus): void;
-  /** A feedback item from an event, to be merged into what the bar shows. Returns whether the bar accepted it. */
+  /**
+   * A feedback item from an event, to be merged into what the bar shows. Returns whether the event's copy is current
+   * (not older than the one shown), so that it may take precedence over a listing in flight.
+   */
   onFeedback(item: Feedback): boolean;
   /**
    * The daemon's complete feedback listing, which replaces what the bar shows. `touched` holds the ids of items that
-   * accepted events delivered while the listing was in flight; those events may be newer than the listing.
+   * current events delivered while the listing was in flight; those events may be newer than the listing.
    */
   onListing(items: readonly Feedback[], touched: ReadonlySet<string>): void;
 }
@@ -108,7 +111,7 @@ export class DaemonConnection {
   #pendingReport: { pageUrl: string; slots: readonly SlotState[]; generation: number } | null = null;
   /** Counts {@link reportSlots} calls, so a failed report that something newer superseded is never retried. */
   #reportGeneration = 0;
-  /** Ids of accepted events since the in-flight listing was requested; `null` when no listing is in flight. */
+  /** Ids of current events since the in-flight listing was requested; `null` when no listing is in flight. */
   #touched: Set<string> | null = null;
 
   constructor(config: DaemonConfig, callbacks: ConnectionCallbacks) {

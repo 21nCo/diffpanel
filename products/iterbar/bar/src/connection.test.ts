@@ -1,7 +1,7 @@
 import { SCHEMA_VERSION, type Feedback, type SlotReport, type SlotState } from "iterbar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DaemonConnection, parseDaemonConfig, REQUEST_TIMEOUT_MS } from "./connection.js";
-import { applyListing, mergeFeedback } from "./threads-state.js";
+import { applyListing, isStale, mergeFeedback } from "./threads-state.js";
 
 const token = "a".repeat(64);
 
@@ -106,7 +106,12 @@ describe("DaemonConnection", () => {
   function connect(): DaemonConnection {
     const connection = new DaemonConnection({ url: "http://127.0.0.1:4555", token }, {
       onStatus: (status) => statuses.push(status.kind),
-      onFeedback: (item) => mergeFeedback(threads, [item]),
+      // As ThreadsPanel.merge does.
+      onFeedback: (item) => {
+        const current = !isStale(threads, item);
+        mergeFeedback(threads, [item]);
+        return current;
+      },
       onListing: (items, touched) => applyListing(threads, items, touched),
     });
     connection.start();
@@ -135,19 +140,32 @@ describe("DaemonConnection", () => {
     expect(threads.get("a")?.status).toBe("done");
   });
 
-  it("gives no precedence to a rejected stale or unchanged event over a newer or omitting listing", async () => {
+  /** Lists `first`, reconnects, delivers `events` while the second listing is in flight, then answers it with `second`. */
+  async function relist(first: Feedback[], events: Feedback[], second: Feedback[]) {
     connect();
     socket().open();
-    pending("/feedback")[0]!.respond(200, list([feedback("a", "done", "2026-01-01T00:02:00.000Z"), feedback("b", "open")]));
+    pending("/feedback")[0]!.respond(200, list(first));
     await settle();
     socket().close();
     await vi.advanceTimersByTimeAsync(1000);
     socket().open();
-    socket().receive({ schemaVersion: SCHEMA_VERSION, type: "feedback.updated", feedback: feedback("a", "open") });
-    socket().receive({ schemaVersion: SCHEMA_VERSION, type: "feedback.updated", feedback: feedback("b", "open") });
-    pending("/feedback")[1]!.respond(200, list([feedback("a", "working", "2026-01-01T00:03:00.000Z")]));
+    for (const item of events) socket().receive({ schemaVersion: SCHEMA_VERSION, type: "feedback.updated", feedback: item });
+    pending("/feedback")[1]!.respond(200, list(second));
     await settle();
-    expect([...threads.values()].map((item) => [item.id, item.status])).toEqual([["a", "working"]]);
+    return [...threads.values()].map((item) => [item.id, item.status]);
+  }
+
+  it("gives no precedence to a stale event over a newer or omitting listing", async () => {
+    const at = (minute: number) => `2026-01-01T00:0${minute}:00.000Z`;
+    expect(await relist(
+      [feedback("a", "done", at(2)), feedback("b", "open", at(1))],
+      [feedback("a", "open", at(0)), feedback("b", "open", at(0))],
+      [feedback("a", "working", at(3))],
+    )).toEqual([["a", "working"]]);
+  });
+
+  it("lets an event identical to the held copy keep it against an equal-timestamp listing in flight", async () => {
+    expect(await relist([feedback("a", "done")], [feedback("a", "done")], [feedback("a", "working")])).toEqual([["a", "done"]]);
   });
 
   it("fails a stalled listing, diagnosis or slot report after the deadline, with the socket open", async () => {

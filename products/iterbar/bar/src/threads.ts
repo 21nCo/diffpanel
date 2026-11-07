@@ -1,6 +1,6 @@
 import type { Feedback, FeedbackStatus } from "iterbar";
 import { h } from "./dom.js";
-import { applyListing, mergeFeedback, threadOrder } from "./threads-state.js";
+import { applyListing, isStale, mergeFeedback, threadOrder } from "./threads-state.js";
 
 /** Most threads listed at once; older ones are counted but not shown. */
 export const MAX_SHOWN_THREADS = 100;
@@ -86,11 +86,14 @@ export class ThreadsPanel {
     this.element = h("section", { class: "section", "data-section": "threads" }, this.#heading, this.#empty, this.#list, this.#more);
   }
 
-  /** Merges an item from an event and returns whether it was accepted; see {@link mergeFeedback}. */
+  /**
+   * Merges an item from an event; see {@link mergeFeedback}. Returns whether the event's copy is current (applied, or
+   * the same as the one held) rather than stale, so it may take precedence over a listing in flight.
+   */
   merge(item: Feedback): boolean {
-    const accepted = mergeFeedback(this.#items, [item]);
-    if (accepted) this.#render();
-    return accepted;
+    const current = !isStale(this.#items, item);
+    if (mergeFeedback(this.#items, [item])) this.#render();
+    return current;
   }
 
   /** Replaces the threads with a complete listing; see {@link applyListing}. */
